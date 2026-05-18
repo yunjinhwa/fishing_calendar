@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'presentation/calendar/calendar_page.dart';
+
+import 'core/theme/app_theme.dart';
+//import 'presentation/calendar/calendar_page.dart';
+import 'presentation/shell/app_shell.dart';
 
 class FishingBuildApp extends StatelessWidget {
   const FishingBuildApp({super.key});
@@ -9,11 +12,8 @@ class FishingBuildApp extends StatelessWidget {
     return MaterialApp(
       title: 'Fishing Build',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: const Color(0xFF2563EB),
-      ),
-      home: const CalendarPage(),
+      theme: AppTheme.lightTheme,
+      home: const AppShell(),
     );
   }
 }
