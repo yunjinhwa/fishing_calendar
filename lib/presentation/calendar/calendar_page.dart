@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'daily_record_list_page.dart';
+
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
 
@@ -46,14 +48,20 @@ class _CalendarPageState extends State<CalendarPage> {
           Expanded(
             child: _CalendarGrid(focusedMonth: focusedMonth, records: records),
           ),
+          _TodaySummaryCard(
+            onTap: () {
+              final today = DateTime.now();
+
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => DailyRecordListPage(
+                    selectedDate: DateTime(today.year, today.month, today.day),
+                  ),
+                ),
+              );
+            },
+          ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // 다음 단계에서 기록 작성 화면으로 이동
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('기록 작성'),
       ),
     );
   }
@@ -76,6 +84,12 @@ class _CalendarPageState extends State<CalendarPage> {
       endAt: DateTime(DateTime.now().year, DateTime.now().month, 21, 12, 0),
       genreName: '찌낚시',
       speciesName: null,
+    ),
+    DummyFishingRecord(
+      startAt: DateTime(DateTime.now().year, DateTime.now().month, 28, 22, 0),
+      endAt: DateTime(DateTime.now().year, DateTime.now().month, 29, 2, 30),
+      genreName: '야간루어',
+      speciesName: '전갱이',
     ),
   ];
 }
@@ -173,7 +187,7 @@ class _CalendarGrid extends StatelessWidget {
       itemCount: cellCount,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 7,
-        childAspectRatio: 0.75,
+        childAspectRatio: 0.62,
       ),
       itemBuilder: (context, index) {
         final dayNumber = index - leadingEmptyCount + 1;
@@ -189,10 +203,11 @@ class _CalendarGrid extends StatelessWidget {
             date.month == now.month &&
             date.day == now.day;
 
+        final dayStart = DateTime(date.year, date.month, date.day);
+        final dayEnd = dayStart.add(const Duration(days: 1));
+
         final dayRecords = records.where((record) {
-          return record.startAt.year == date.year &&
-              record.startAt.month == date.month &&
-              record.startAt.day == date.day;
+          return record.startAt.isBefore(dayEnd) && record.endAt.isAfter(dayStart);
         }).toList();
 
         return Card(
@@ -200,22 +215,28 @@ class _CalendarGrid extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
             onTap: () {
-              // 다음 단계에서 날짜별 기록 목록으로 이동
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => DailyRecordListPage(
+                    selectedDate: date,
+                  ),
+                ),
+              );
             },
             child: Padding(
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   CircleAvatar(
-                    radius: 12,
+                    radius: 10,
                     backgroundColor: isToday
                         ? Theme.of(context).colorScheme.primary
                         : Colors.transparent,
                     child: Text(
                       '$dayNumber',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 11,
                         color: isToday
                             ? Theme.of(context).colorScheme.onPrimary
                             : Theme.of(context).colorScheme.onSurface,
@@ -232,8 +253,8 @@ class _CalendarGrid extends StatelessWidget {
                       width: double.infinity,
                       margin: const EdgeInsets.only(top: 2),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 2,
+                        horizontal: 3,
+                        vertical: 1,
                       ),
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.primaryContainer,
@@ -244,9 +265,9 @@ class _CalendarGrid extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onPrimaryContainer,
+                          fontSize: 10,
+                          height: 1.0,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -266,6 +287,62 @@ class _CalendarGrid extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _TodaySummaryCard extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _TodaySummaryCard({
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+        child: Card(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.waves_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '오늘의 요약',
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '출조 기록 · 날씨/물때 정보는 이후 외부 데이터 연동에서 표시합니다.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
