@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/theme/app_theme.dart';
-//import 'presentation/calendar/calendar_page.dart';
-import 'presentation/shell/app_shell.dart';
+import 'presentation/auth/login_choice_page.dart';
 
 class FishingBuildApp extends StatelessWidget {
   const FishingBuildApp({super.key});
@@ -13,7 +12,7 @@ class FishingBuildApp extends StatelessWidget {
       title: 'Fishing Build',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const AppShell(),
+      home: const LoginChoicePage(),
     );
   }
 }
