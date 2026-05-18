@@ -43,7 +43,9 @@ class _CalendarPageState extends State<CalendarPage> {
             onNext: goToNextMonth,
           ),
           const _WeekHeader(),
-          Expanded(child: _CalendarGrid(focusedMonth: focusedMonth)),
+          Expanded(
+            child: _CalendarGrid(focusedMonth: focusedMonth, records: records),
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -85,6 +87,27 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
     );
   }
+
+  late final List<DummyFishingRecord> records = [
+    DummyFishingRecord(
+      startAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 5, 30),
+      endAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 9, 20),
+      genreName: '루어',
+      speciesName: '광어',
+    ),
+    DummyFishingRecord(
+      startAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 19, 0),
+      endAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 23, 40),
+      genreName: '선상',
+      speciesName: '우럭',
+    ),
+    DummyFishingRecord(
+      startAt: DateTime(DateTime.now().year, DateTime.now().month, 21, 8, 0),
+      endAt: DateTime(DateTime.now().year, DateTime.now().month, 21, 12, 0),
+      genreName: '찌낚시',
+      speciesName: null,
+    ),
+  ];
 }
 
 class _MonthHeader extends StatelessWidget {
@@ -156,8 +179,9 @@ class _WeekHeader extends StatelessWidget {
 
 class _CalendarGrid extends StatelessWidget {
   final DateTime focusedMonth;
+  final List<DummyFishingRecord> records;
 
-  const _CalendarGrid({required this.focusedMonth});
+  const _CalendarGrid({required this.focusedMonth, required this.records});
 
   @override
   Widget build(BuildContext context) {
@@ -195,6 +219,12 @@ class _CalendarGrid extends StatelessWidget {
             date.month == now.month &&
             date.day == now.day;
 
+        final dayRecords = records.where((record) {
+          return record.startAt.year == date.year &&
+              record.startAt.month == date.month &&
+              record.startAt.day == date.day;
+        }).toList();
+
         return Card(
           margin: const EdgeInsets.all(3),
           child: InkWell(
@@ -222,6 +252,44 @@ class _CalendarGrid extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 4),
+                  ...dayRecords.take(2).map((record) {
+                    final summary = record.speciesName == null
+                        ? record.genreName
+                        : '${record.genreName}·${record.speciesName}';
+
+                    return Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  }),
+                  if (dayRecords.length > 2)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '+${dayRecords.length - 2}',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -230,4 +298,18 @@ class _CalendarGrid extends StatelessWidget {
       },
     );
   }
+}
+
+class DummyFishingRecord {
+  final DateTime startAt;
+  final DateTime endAt;
+  final String genreName;
+  final String? speciesName;
+
+  const DummyFishingRecord({
+    required this.startAt,
+    required this.endAt,
+    required this.genreName,
+    this.speciesName,
+  });
 }
