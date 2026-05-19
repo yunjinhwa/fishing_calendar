@@ -1,12 +1,41 @@
 import 'package:flutter/material.dart';
 
 import '../record/record_form_page.dart';
+import '../sync/outbox_page.dart';
+import '../../data/repositories/outbox_memory_repository.dart';
+import '../../data/models/outbox_item.dart';
 
-class OfflinePaidPage extends StatelessWidget {
+class OfflinePaidPage extends StatefulWidget {
   const OfflinePaidPage({super.key});
 
   @override
+  State<OfflinePaidPage> createState() => _OfflinePaidPageState();
+}
+
+class _OfflinePaidPageState extends State<OfflinePaidPage> {
+  @override
+  void initState() {
+    super.initState();
+    OutboxMemoryRepository.instance.seedMockItemsIfEmpty();
+  }
+
+  void addCreateOutboxItem() {
+    final now = DateTime.now();
+
+    OutboxMemoryRepository.instance.addItem(
+      OutboxItem(
+        id: 'outbox-${now.microsecondsSinceEpoch}',
+        recordId: 'offline-record-${now.microsecondsSinceEpoch}',
+        operationType: OutboxOperationType.create,
+        status: OutboxStatus.pending,
+        createdAt: now,
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final pendingCount = OutboxMemoryRepository.instance.pendingCount;
     return Scaffold(
       appBar: AppBar(
         title: const Text('오프라인 모드'),
@@ -43,8 +72,8 @@ class OfflinePaidPage extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.pending_actions_outlined),
                 title: const Text('업로드 대기'),
-                subtitle: const Text('현재 mock 상태에서는 대기열 0건으로 표시합니다.'),
-                trailing: const Text('0건'),
+                subtitle: const Text('서버 반영 대기 또는 실패 항목 수입니다.'),
+                trailing: Text('$pendingCount건'),
               ),
             ),
             const SizedBox(height: 12),
@@ -60,25 +89,43 @@ class OfflinePaidPage extends StatelessWidget {
             const SizedBox(height: 16),
 
             FilledButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const RecordFormPage(),
-                  ),
-                );
-              },
+              onPressed: () async {
+              final saved = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                  builder: (_) => const RecordFormPage(),
+                ),
+              );
+
+              if (saved != true || !context.mounted) {
+                return;
+              }
+
+              addCreateOutboxItem();
+
+              setState(() {});
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('오프라인 저장 요청이 업로드 대기열에 추가되었습니다.'),
+                ),
+              );
+            },
               icon: const Icon(Icons.edit_note),
               label: const Text('기록 작성'),
             ),
             const SizedBox(height: 12),
 
             OutlinedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('대기열 보기 기능은 outbox 단계에서 구현합니다.'),
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const OutboxPage(),
                   ),
                 );
+
+                if (mounted) {
+                  setState(() {});
+                }
               },
               icon: const Icon(Icons.queue_outlined),
               label: const Text('대기열 보기'),
