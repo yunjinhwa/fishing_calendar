@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'daily_record_list_page.dart';
+import '../../data/models/fishing_record.dart';
+import '../../data/repositories/fishing_record_memory_repository.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -26,11 +28,18 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
+    final records = FishingRecordMemoryRepository.instance.getAllRecords();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('낚시 캘린더'),
         actions: [
-          IconButton(onPressed: () {}, icon: const Icon(Icons.refresh)),
+          IconButton(
+            onPressed: () {
+              setState(() {});
+            },
+            icon: const Icon(Icons.refresh),
+          ),
           IconButton(
             onPressed: () {},
             icon: const Icon(Icons.settings_outlined),
@@ -46,7 +55,13 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
           const _WeekHeader(),
           Expanded(
-            child: _CalendarGrid(focusedMonth: focusedMonth, records: records),
+            child: _CalendarGrid(
+              focusedMonth: focusedMonth,
+              records: records,
+              onChanged: () {
+                setState(() {});
+              },
+            ),
           ),
           _TodaySummaryCard(
             onTap: () {
@@ -65,33 +80,6 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
     );
   }
-
-  late final List<DummyFishingRecord> records = [
-    DummyFishingRecord(
-      startAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 5, 30),
-      endAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 9, 20),
-      genreName: '루어',
-      speciesName: '광어',
-    ),
-    DummyFishingRecord(
-      startAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 19, 0),
-      endAt: DateTime(DateTime.now().year, DateTime.now().month, 14, 23, 40),
-      genreName: '선상',
-      speciesName: '우럭',
-    ),
-    DummyFishingRecord(
-      startAt: DateTime(DateTime.now().year, DateTime.now().month, 21, 8, 0),
-      endAt: DateTime(DateTime.now().year, DateTime.now().month, 21, 12, 0),
-      genreName: '찌낚시',
-      speciesName: null,
-    ),
-    DummyFishingRecord(
-      startAt: DateTime(DateTime.now().year, DateTime.now().month, 28, 22, 0),
-      endAt: DateTime(DateTime.now().year, DateTime.now().month, 29, 2, 30),
-      genreName: '야간루어',
-      speciesName: '전갱이',
-    ),
-  ];
 }
 
 class _MonthHeader extends StatelessWidget {
@@ -163,9 +151,14 @@ class _WeekHeader extends StatelessWidget {
 
 class _CalendarGrid extends StatelessWidget {
   final DateTime focusedMonth;
-  final List<DummyFishingRecord> records;
+  final List<FishingRecord> records;
+  final VoidCallback onChanged;
 
-  const _CalendarGrid({required this.focusedMonth, required this.records});
+  const _CalendarGrid({
+    required this.focusedMonth,
+    required this.records,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -203,25 +196,24 @@ class _CalendarGrid extends StatelessWidget {
             date.month == now.month &&
             date.day == now.day;
 
-        final dayStart = DateTime(date.year, date.month, date.day);
-        final dayEnd = dayStart.add(const Duration(days: 1));
-
         final dayRecords = records.where((record) {
-          return record.startAt.isBefore(dayEnd) && record.endAt.isAfter(dayStart);
+          return record.overlapsDate(date);
         }).toList();
 
         return Card(
           margin: const EdgeInsets.all(3),
           child: InkWell(
             borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              Navigator.of(context).push(
+            onTap: () async {
+              final changed = await Navigator.of(context).push<bool>(
                 MaterialPageRoute(
-                  builder: (_) => DailyRecordListPage(
-                    selectedDate: date,
-                  ),
+                  builder: (_) => DailyRecordListPage(selectedDate: date),
                 ),
               );
+
+              if (changed == true) {
+                onChanged();
+              }
             },
             child: Padding(
               padding: const EdgeInsets.all(4),
@@ -245,9 +237,7 @@ class _CalendarGrid extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   ...dayRecords.take(2).map((record) {
-                    final summary = record.speciesName == null
-                        ? record.genreName
-                        : '${record.genreName}·${record.speciesName}';
+                    final summary = record.summaryTitle;
 
                     return Container(
                       width: double.infinity,
@@ -267,7 +257,9 @@ class _CalendarGrid extends StatelessWidget {
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           fontSize: 10,
                           height: 1.0,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -294,9 +286,7 @@ class _CalendarGrid extends StatelessWidget {
 class _TodaySummaryCard extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _TodaySummaryCard({
-    required this.onTap,
-  });
+  const _TodaySummaryCard({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -323,10 +313,8 @@ class _TodaySummaryCard extends StatelessWidget {
                       children: [
                         Text(
                           '오늘의 요약',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -345,18 +333,4 @@ class _TodaySummaryCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class DummyFishingRecord {
-  final DateTime startAt;
-  final DateTime endAt;
-  final String genreName;
-  final String? speciesName;
-
-  const DummyFishingRecord({
-    required this.startAt,
-    required this.endAt,
-    required this.genreName,
-    this.speciesName,
-  });
 }

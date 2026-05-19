@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../data/models/fishing_record.dart';
+import '../../data/repositories/fishing_record_memory_repository.dart';
+
 class RecordFormPage extends StatefulWidget {
   const RecordFormPage({super.key});
 
@@ -116,13 +119,51 @@ class _RecordFormPageState extends State<RecordFormPage> {
       }
     }
     
+    final catches = catchItems
+        .map((item) {
+          final species = item.speciesController.text.trim();
+          final length = item.lengthController.text.trim();
+          final weight = item.weightController.text.trim();
+
+          if (species.isEmpty) {
+            return null;
+          }
+
+          return CatchRecord(
+            speciesName: species,
+            lengthCm: length.isEmpty ? null : double.parse(length),
+            weightG: weight.isEmpty ? null : int.parse(weight),
+          );
+        })
+        .whereType<CatchRecord>()
+        .toList();
+
+    final record = FishingRecord(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      location: location,
+      startAt: startAt,
+      endAt: endAt,
+      genreName: selectedGenre!,
+      tide: tideController.text.trim().isEmpty ? null : tideController.text.trim(),
+      weather: weatherController.text.trim().isEmpty
+          ? null
+          : weatherController.text.trim(),
+      airTemperature: airTemperature.isEmpty ? null : double.parse(airTemperature),
+      waterTemperature:
+          waterTemperature.isEmpty ? null : double.parse(waterTemperature),
+      catches: catches,
+      memo: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
+    );
+
+    FishingRecordMemoryRepository.instance.addRecord(record);
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('기록 저장 UI 검증이 완료되었습니다. 실제 저장은 local-storage 단계에서 구현합니다.'),
+        content: Text('출조 기록이 저장되었습니다.'),
       ),
     );
 
-    Navigator.of(context).pop();
+    Navigator.of(context).pop(true);
   }
 
   void showMessage(String message) {
