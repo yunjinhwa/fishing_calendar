@@ -4,7 +4,20 @@ import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
 
 class RecordFormPage extends StatefulWidget {
-  const RecordFormPage({super.key});
+  final String? initialLocation;
+  final String? initialTide;
+  final String? initialWeather;
+  final double? initialAirTemperature;
+  final double? initialWaterTemperature;
+
+  const RecordFormPage({
+    super.key,
+    this.initialLocation,
+    this.initialTide,
+    this.initialWeather,
+    this.initialAirTemperature,
+    this.initialWaterTemperature,
+  });
 
   @override
   State<RecordFormPage> createState() => _RecordFormPageState();
@@ -18,22 +31,27 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final waterTemperatureController = TextEditingController();
   final memoController = TextEditingController();
 
-  final catchItems = <_CatchItemInput>[
-    _CatchItemInput(),
-  ];
+  final catchItems = <_CatchItemInput>[_CatchItemInput()];
 
   DateTime startAt = DateTime.now();
   DateTime endAt = DateTime.now().add(const Duration(hours: 2));
 
   String? selectedGenre;
 
-  final genres = const [
-    '루어',
-    '찌낚시',
-    '선상',
-    '원투',
-    '기타',
-  ];
+  final genres = const ['루어', '찌낚시', '선상', '원투', '기타'];
+
+  @override
+  void initState() {
+    super.initState();
+
+    locationController.text = widget.initialLocation ?? '';
+    tideController.text = widget.initialTide ?? '';
+    weatherController.text = widget.initialWeather ?? '';
+    airTemperatureController.text =
+        widget.initialAirTemperature?.toString() ?? '';
+    waterTemperatureController.text =
+        widget.initialWaterTemperature?.toString() ?? '';
+  }
 
   @override
   void dispose() {
@@ -118,7 +136,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
         }
       }
     }
-    
+
     final catches = catchItems
         .map((item) {
           final species = item.speciesController.text.trim();
@@ -144,32 +162,37 @@ class _RecordFormPageState extends State<RecordFormPage> {
       startAt: startAt,
       endAt: endAt,
       genreName: selectedGenre!,
-      tide: tideController.text.trim().isEmpty ? null : tideController.text.trim(),
+      tide: tideController.text.trim().isEmpty
+          ? null
+          : tideController.text.trim(),
       weather: weatherController.text.trim().isEmpty
           ? null
           : weatherController.text.trim(),
-      airTemperature: airTemperature.isEmpty ? null : double.parse(airTemperature),
-      waterTemperature:
-          waterTemperature.isEmpty ? null : double.parse(waterTemperature),
+      airTemperature: airTemperature.isEmpty
+          ? null
+          : double.parse(airTemperature),
+      waterTemperature: waterTemperature.isEmpty
+          ? null
+          : double.parse(waterTemperature),
       catches: catches,
-      memo: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
+      memo: memoController.text.trim().isEmpty
+          ? null
+          : memoController.text.trim(),
     );
 
     FishingRecordMemoryRepository.instance.addRecord(record);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('출조 기록이 저장되었습니다.'),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('출조 기록이 저장되었습니다.')));
 
     Navigator.of(context).pop(true);
   }
 
   void showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void addCatchItem() {
@@ -256,13 +279,30 @@ class _RecordFormPageState extends State<RecordFormPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('출조 기록 작성'),
-      ),
+      appBar: AppBar(title: const Text('출조 기록 작성')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (widget.initialLocation != null) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(child: Text('지도에서 가져온 정보를 자동 입력했습니다.')),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             _SectionTitle(title: '필수 정보'),
             const SizedBox(height: 12),
 
@@ -290,10 +330,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
             ),
             const SizedBox(height: 16),
 
-            Text(
-              '낚시 장르 *',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
+            Text('낚시 장르 *', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
 
             Wrap(
@@ -363,11 +400,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
             ),
             const SizedBox(height: 24),
 
-
-            Text(
-              '조과',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
+            Text('조과', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
 
             ...catchItems.asMap().entries.map((entry) {
@@ -383,15 +416,14 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
             const SizedBox(height: 8),
 
-            Text(
-              '사진',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
+            Text('사진', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
 
             OutlinedButton.icon(
               onPressed: () {
-                showMessage('사진 선택 기능은 feature/photo 또는 local-storage 단계에서 구현합니다.');
+                showMessage(
+                  '사진 선택 기능은 feature/photo 또는 local-storage 단계에서 구현합니다.',
+                );
               },
               icon: const Icon(Icons.add_photo_alternate_outlined),
               label: const Text('사진 추가'),
@@ -400,9 +432,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
             Text(
               '아직 선택된 사진이 없습니다.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
             ),
             const SizedBox(height: 16),
 
@@ -418,10 +450,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
             ),
             const SizedBox(height: 24),
 
-            FilledButton(
-              onPressed: saveRecord,
-              child: const Text('저장'),
-            ),
+            FilledButton(onPressed: saveRecord, child: const Text('저장')),
           ],
         ),
       ),
@@ -432,17 +461,15 @@ class _RecordFormPageState extends State<RecordFormPage> {
 class _SectionTitle extends StatelessWidget {
   final String title;
 
-  const _SectionTitle({
-    required this.title,
-  });
+  const _SectionTitle({required this.title});
 
   @override
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+      style: Theme.of(
+        context,
+      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
     );
   }
 }
@@ -474,8 +501,6 @@ class _DateTimeField extends StatelessWidget {
     );
   }
 }
-
-
 
 class _CatchItemInput {
   final speciesController = TextEditingController();
@@ -515,8 +540,8 @@ class _CatchItemCard extends StatelessWidget {
                   child: Text(
                     '조과 ${index + 1}',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 IconButton(
