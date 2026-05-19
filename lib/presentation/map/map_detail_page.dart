@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 
 import 'map_history_page.dart';
 import '../record/record_form_page.dart';
+import '../../data/models/external_data.dart';
 
 class MapDetailPage extends StatelessWidget {
   final String selectedLocation;
+  final ExternalData? externalData;
 
-  const MapDetailPage({super.key, required this.selectedLocation});
+  const MapDetailPage({
+    super.key,
+    required this.selectedLocation,
+    this.externalData,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -24,18 +30,28 @@ class MapDetailPage extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '기준 관측점: 인근 관측소',
+              '기준 관측점: ${externalData?.observationPointName ?? '조회 정보 없음'}',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 24),
 
             _SectionTitle(title: '현재 외부 데이터'),
             const SizedBox(height: 8),
-            const _InfoCard(
+            _InfoCard(
               children: [
-                _InfoRow(label: '날씨', value: '흐림 / 18℃'),
-                _InfoRow(label: '물때', value: '7물'),
-                _InfoRow(label: '수온', value: '16.2℃'),
+                _InfoRow(
+                  label: '날씨',
+                  value: externalData == null
+                      ? '-'
+                      : '${externalData!.weather} / ${externalData!.airTemperature}℃',
+                ),
+                _InfoRow(label: '물때', value: externalData?.tide ?? '-'),
+                _InfoRow(
+                  label: '수온',
+                  value: externalData == null
+                      ? '-'
+                      : '${externalData!.waterTemperature}℃',
+                ),
               ],
             ),
             const SizedBox(height: 24),
@@ -67,14 +83,22 @@ class MapDetailPage extends StatelessWidget {
 
             FilledButton.icon(
               onPressed: () {
+                if (externalData == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('외부 데이터가 없어 위치만 입력한 상태로 기록을 작성합니다.'),
+                    ),
+                  );
+                }
+
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => RecordFormPage(
                       initialLocation: selectedLocation,
-                      initialTide: '7물',
-                      initialWeather: '흐림',
-                      initialAirTemperature: 18,
-                      initialWaterTemperature: 16.2,
+                      initialTide: externalData?.tide,
+                      initialWeather: externalData?.weather,
+                      initialAirTemperature: externalData?.airTemperature,
+                      initialWaterTemperature: externalData?.waterTemperature,
                     ),
                   ),
                 );

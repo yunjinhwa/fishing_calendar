@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'map_fallback_page.dart';
 import 'map_detail_page.dart';
 import '../record/record_form_page.dart';
+import '../../data/models/external_data.dart';
+import '../../data/services/mock_external_data_service.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -13,13 +15,51 @@ class MapPage extends StatefulWidget {
 
 class _MapPageState extends State<MapPage> {
   final searchController = TextEditingController();
+  final externalDataService = MockExternalDataService();
 
   String selectedLocation = '부산 영도구 동삼동';
+  ExternalData? externalData;
+  bool isLoadingExternalData = false;
+  String? externalDataErrorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchExternalData();
+  }
 
   @override
   void dispose() {
     searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> fetchExternalData() async {
+    setState(() {
+      isLoadingExternalData = true;
+      externalDataErrorMessage = null;
+    });
+
+    try {
+      final data = await externalDataService.fetchCurrentData(
+        locationName: selectedLocation,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        externalData = data;
+        isLoadingExternalData = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        externalData = null;
+        isLoadingExternalData = false;
+        externalDataErrorMessage = '외부 데이터를 가져오지 못했습니다.';
+      });
+    }
   }
 
   void searchLocation() {
@@ -35,6 +75,7 @@ class _MapPageState extends State<MapPage> {
     });
 
     showMessage('$keyword 위치를 선택했습니다.');
+    fetchExternalData();
   }
 
   Future<void> openFallbackPage() async {
@@ -50,6 +91,8 @@ class _MapPageState extends State<MapPage> {
       selectedLocation = result;
       searchController.text = result;
     });
+
+    fetchExternalData();
   }
 
   void showMessage(String message) {
@@ -93,7 +136,13 @@ class _MapPageState extends State<MapPage> {
             _MapPlaceholder(selectedLocation: selectedLocation),
             const SizedBox(height: 16),
 
-            _ExternalDataCard(selectedLocation: selectedLocation),
+            _ExternalDataCard(
+              selectedLocation: selectedLocation,
+              externalData: externalData,
+              isLoading: isLoadingExternalData,
+              errorMessage: externalDataErrorMessage,
+              onRetry: fetchExternalData,
+            ),
             const SizedBox(height: 16),
 
             Row(
@@ -103,8 +152,10 @@ class _MapPageState extends State<MapPage> {
                     onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) =>
-                              MapDetailPage(selectedLocation: selectedLocation),
+                          builder: (_) => MapDetailPage(
+                            selectedLocation: selectedLocation,
+                            externalData: externalData,
+                          ),
                         ),
                       );
                     },
@@ -116,14 +167,18 @@ class _MapPageState extends State<MapPage> {
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: () {
+                      if (externalDataErrorMessage != null) {
+                        showMessage('외부 데이터 조회에 실패했습니다. 위치만 입력한 상태로 기록을 작성합니다.');
+                      }
+
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => RecordFormPage(
                             initialLocation: selectedLocation,
-                            initialTide: '7물',
-                            initialWeather: '흐림',
-                            initialAirTemperature: 18,
-                            initialWaterTemperature: 16.2,
+                            initialTide: externalData?.tide,
+                            initialWeather: externalData?.weather,
+                            initialAirTemperature: externalData?.airTemperature,
+                            initialWaterTemperature: externalData?.waterTemperature,
                           ),
                         ),
                       );
@@ -178,11 +233,68 @@ class _MapPlaceholder extends StatelessWidget {
 
 class _ExternalDataCard extends StatelessWidget {
   final String selectedLocation;
+  final ExternalData? externalData;
+  final bool isLoading;
+  final String? errorMessage;
+  final VoidCallback onRetry;
 
-  const _ExternalDataCard({required this.selectedLocation});
+  const _ExternalDataCard({
+    required this.selectedLocation,
+    required this.externalData,
+    required this.isLoading,
+    required this.errorMessage,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    if (errorMessage != null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '외부 데이터 조회 실패',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(errorMessage!),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh),
+                label: const Text('다시 조회'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final data = externalData;
+
+    if (data == null) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('조회된 외부 데이터가 없습니다.'),
+        ),
+      );
+    }
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -197,31 +309,35 @@ class _ExternalDataCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              selectedLocation,
+              data.locationName,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '기준 관측점: ${data.observationPointName}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 16),
-
-            const Row(
+            Row(
               children: [
                 Expanded(
                   child: _ExternalDataItem(
                     label: '날씨',
-                    value: '흐림',
+                    value: '${data.weather} / ${data.airTemperature}℃',
                     icon: Icons.cloud_outlined,
                   ),
                 ),
                 Expanded(
                   child: _ExternalDataItem(
                     label: '물때',
-                    value: '7물',
+                    value: data.tide,
                     icon: Icons.waves_outlined,
                   ),
                 ),
                 Expanded(
                   child: _ExternalDataItem(
                     label: '수온',
-                    value: '16.2℃',
+                    value: '${data.waterTemperature}℃',
                     icon: Icons.thermostat_outlined,
                   ),
                 ),
