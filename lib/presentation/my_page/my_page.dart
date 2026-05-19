@@ -1,16 +1,144 @@
 import 'package:flutter/material.dart';
 
-import '../common/placeholder_screen.dart';
+import '../offline/offline_free_page.dart';
+import '../offline/offline_guest_page.dart';
+import '../offline/offline_paid_page.dart';
 
 class MyPage extends StatelessWidget {
   const MyPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const PlaceholderScreen(
-      title: '내정보',
-      icon: Icons.person_outline,
-      description: '내정보 화면은 다음 단계에서 만듭니다.',
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('내정보'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            CircleAvatar(
+              radius: 36,
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              child: Icon(
+                Icons.person_outline,
+                size: 40,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            Text(
+              '사용자',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+
+            Text(
+              '현재는 mock 사용자 상태입니다.',
+              style: Theme.of(context).textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.workspace_premium_outlined),
+                title: const Text('플랜 정보'),
+                subtitle: const Text('무료 회원 / 유료 회원 상태는 추후 실제 계정과 연동합니다.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('플랜 정보 화면은 다음 단계에서 구현합니다.'),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.sync_outlined),
+                title: const Text('동기화/충돌 관리'),
+                subtitle: const Text('동기화 기능은 outbox-sync 단계에서 구현합니다.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('동기화/충돌 관리는 추후 구현합니다.'),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            Text(
+              '오프라인 화면 테스트',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const OfflineGuestPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.person_off_outlined),
+              label: const Text('오프라인 + 비회원'),
+            ),
+            const SizedBox(height: 8),
+
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const OfflineFreePage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.phone_android_outlined),
+              label: const Text('오프라인 + 무료 회원'),
+            ),
+            const SizedBox(height: 8),
+
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const OfflinePaidPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.cloud_queue_outlined),
+              label: const Text('오프라인 + 유료 회원'),
+            ),
+            const SizedBox(height: 24),
+
+            OutlinedButton.icon(
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('로그아웃 기능은 인증 연동 단계에서 구현합니다.'),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.logout),
+              label: const Text('로그아웃'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
