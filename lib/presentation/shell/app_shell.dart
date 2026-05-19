@@ -16,21 +16,20 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int selectedIndex = 0;
 
-  final List<Widget> pages = const [
-    CalendarPage(),
-    MapPage(),
-    RecordPage(),
-    FishDictionaryPage(),
-    MyPage(),
-  ];
+  List<Widget> get pages {
+    return [
+      CalendarPage(key: ValueKey('calendar-$selectedIndex')),
+      const MapPage(),
+      const RecordPage(),
+      const FishDictionaryPage(),
+      const MyPage(),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: selectedIndex,
-        children: pages,
-      ),
+      body: IndexedStack(index: selectedIndex, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) {
