@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/personal_best_record.dart';
+import '../../data/repositories/fishing_record_memory_repository.dart';
 import '../../data/repositories/personal_best_repository.dart';
 import 'personal_best_detail_page.dart';
 
@@ -13,6 +14,27 @@ class PersonalBestPage extends StatefulWidget {
 
 class _PersonalBestPageState extends State<PersonalBestPage> {
   PersonalBestSortType sortType = PersonalBestSortType.length;
+  final _recordRepository = FishingRecordMemoryRepository.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _recordRepository.addListener(_refreshRecords);
+  }
+
+  @override
+  void dispose() {
+    _recordRepository.removeListener(_refreshRecords);
+    super.dispose();
+  }
+
+  void _refreshRecords() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,9 +43,7 @@ class _PersonalBestPageState extends State<PersonalBestPage> {
     );
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('내 기록어'),
-      ),
+      appBar: AppBar(title: const Text('내 기록어')),
       body: SafeArea(
         child: Column(
           children: [
@@ -70,9 +90,8 @@ class _PersonalBestPageState extends State<PersonalBestPage> {
                           onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(
-                                builder: (_) => PersonalBestDetailPage(
-                                  record: record,
-                                ),
+                                builder: (_) =>
+                                    PersonalBestDetailPage(record: record),
                               ),
                             );
                           },
@@ -91,10 +110,7 @@ class _PersonalBestCard extends StatelessWidget {
   final PersonalBestRecord record;
   final VoidCallback onTap;
 
-  const _PersonalBestCard({
-    required this.record,
-    required this.onTap,
-  });
+  const _PersonalBestCard({required this.record, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -106,9 +122,7 @@ class _PersonalBestCard extends StatelessWidget {
         ),
         title: Text(
           record.speciesName,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Text(
           '${record.lengthText} · ${record.weightText}\n'
@@ -147,9 +161,9 @@ class _EmptyPersonalBestView extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               '아직 기록어가 없습니다.',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(

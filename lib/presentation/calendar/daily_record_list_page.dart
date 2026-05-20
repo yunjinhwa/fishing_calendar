@@ -14,12 +14,33 @@ class DailyRecordListPage extends StatefulWidget {
 
 class _DailyRecordListPageState extends State<DailyRecordListPage> {
   bool hasChanged = false;
+  final _recordRepository = FishingRecordMemoryRepository.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _recordRepository.addListener(_refreshRecords);
+  }
+
+  @override
+  void dispose() {
+    _recordRepository.removeListener(_refreshRecords);
+    super.dispose();
+  }
+
+  void _refreshRecords() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      hasChanged = true;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final records = FishingRecordMemoryRepository.instance.getRecordsByDate(
-      widget.selectedDate,
-    );
+    final records = _recordRepository.getRecordsByDate(widget.selectedDate);
 
     return PopScope(
       canPop: false,
