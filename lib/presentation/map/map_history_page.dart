@@ -90,7 +90,7 @@ class _MapHistoryPageState extends State<MapHistoryPage> {
             _InfoCard(
               children: [
                 Text(
-                  '현재는 mock 데이터입니다. 실제 과거 날씨/물때/수온 조회는 외부 데이터 연동 단계에서 구현합니다.',
+                  '현재는 mock 데이터입니다. 실제 과거 날씨/물때/수온 조회는 추후 외부 API와 연동됩니다.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],

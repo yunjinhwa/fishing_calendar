@@ -103,14 +103,14 @@ class PersonalBestDetailPage extends StatelessWidget {
             _InfoCard(
               children: [
                 const Text(
-                  '기록어 공유 이미지는 추후 공유 기능 단계에서 생성합니다.',
+                  '기록어 공유 이미지는 현재 준비 중입니다.',
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('공유 이미지 생성은 다음 단계에서 구현합니다.'),
+                        content: Text('공유 이미지 생성 기능은 현재 준비 중입니다.'),
                       ),
                     );
                   },

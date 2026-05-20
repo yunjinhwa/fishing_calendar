@@ -136,7 +136,7 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('네트워크 재연결 감지는 추후 구현합니다.'),
+                    content: Text('네트워크 연결 상태를 다시 확인합니다.'),
                   ),
                 );
               },

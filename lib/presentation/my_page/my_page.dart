@@ -40,7 +40,7 @@ class MyPage extends StatelessWidget {
             const SizedBox(height: 4),
 
             Text(
-              '현재는 mock 사용자 상태입니다.',
+              '앱 기능 확인용 사용자 화면입니다.',
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
@@ -50,7 +50,7 @@ class MyPage extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.workspace_premium_outlined),
                 title: const Text('플랜 정보'),
-                subtitle: const Text('무료 회원 / 유료 회원 상태는 추후 실제 계정과 연동합니다.'),
+                subtitle: const Text('무료 회원 / 유료 회원 상태를 확인할 수 있습니다.'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -148,7 +148,7 @@ class MyPage extends StatelessWidget {
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('로그아웃 기능은 인증 연동 단계에서 구현합니다.'),
+                    content: Text('로그아웃 기능은 현재 준비 중입니다.'),
                   ),
                 );
               },

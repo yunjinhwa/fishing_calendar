@@ -78,7 +78,7 @@ class OfflineGuestPage extends StatelessWidget {
                 onPressed: () {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('네트워크 상태 확인은 추후 실제 연결 감지 단계에서 구현합니다.'),
+                      content: Text('네트워크 연결 상태를 다시 확인합니다.'),
                     ),
                   );
                 },

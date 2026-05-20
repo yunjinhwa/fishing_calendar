@@ -432,7 +432,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
               );
             }),
 
-            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: addCatchItem,
+              icon: const Icon(Icons.add),
+              label: const Text('조과 추가'),
+            ),
+
+            const SizedBox(height: 16),
 
             Text('사진', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),
@@ -440,7 +446,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
             OutlinedButton.icon(
               onPressed: () {
                 showMessage(
-                  '사진 선택 기능은 feature/photo 또는 local-storage 단계에서 구현합니다.',
+                  '사진 첨부 기능은 현재 준비 중입니다.',
                 );
               },
               icon: const Icon(Icons.add_photo_alternate_outlined),
@@ -449,7 +455,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
             const SizedBox(height: 8),
 
             Text(
-              '아직 선택된 사진이 없습니다.',
+              '첨부된 사진이 없습니다.',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
