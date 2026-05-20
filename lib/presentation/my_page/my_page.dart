@@ -4,6 +4,7 @@ import '../offline/offline_free_page.dart';
 import '../offline/offline_guest_page.dart';
 import '../offline/offline_paid_page.dart';
 import '../sync/sync_conflict_page.dart';
+import '../personal_best/personal_best_page.dart';
 
 class MyPage extends StatelessWidget {
   const MyPage({super.key});
@@ -55,6 +56,23 @@ class MyPage extends StatelessWidget {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('플랜 정보 화면은 다음 단계에서 구현합니다.'),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.emoji_events_outlined),
+                title: const Text('내 기록어'),
+                subtitle: const Text('어종별 최고 크기와 최고 무게 기록을 확인합니다.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PersonalBestPage(),
                     ),
                   );
                 },
