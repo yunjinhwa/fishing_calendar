@@ -75,7 +75,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     super.dispose();
   }
 
-  void saveRecord() {
+  Future<void> saveRecord() async {
     final location = locationController.text.trim();
     final airTemperature = airTemperatureController.text.trim();
     final waterTemperature = waterTemperatureController.text.trim();
@@ -202,7 +202,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
           : memoController.text.trim(),
     );
 
-    FishingRecordMemoryRepository.instance.addRecord(record);
+    await FishingRecordMemoryRepository.instance.addRecord(record);
+
+    if (!mounted) {
+      return;
+    }
 
     ScaffoldMessenger.of(
       context,

@@ -37,7 +37,7 @@ class RecordDetailPage extends StatelessWidget {
       return;
     }
 
-    FishingRecordMemoryRepository.instance.deleteRecord(record.id);
+    await FishingRecordMemoryRepository.instance.deleteRecord(record.id);
 
     if (!context.mounted) {
       return;

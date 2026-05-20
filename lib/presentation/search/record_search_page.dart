@@ -5,10 +5,7 @@ import '../../data/repositories/fishing_record_memory_repository.dart';
 import '../record/record_detail_page.dart';
 import '../record/record_form_page.dart';
 
-enum RecordSortType {
-  newest,
-  oldest,
-}
+enum RecordSortType { newest, oldest }
 
 class RecordSearchPage extends StatefulWidget {
   final bool showAppBar;
@@ -26,30 +23,39 @@ class RecordSearchPage extends StatefulWidget {
 
 class _RecordSearchPageState extends State<RecordSearchPage> {
   final searchController = TextEditingController();
+  final _recordRepository = FishingRecordMemoryRepository.instance;
 
   String? selectedGenre;
   DateTime? startDate;
   DateTime? endDate;
   RecordSortType sortType = RecordSortType.newest;
 
-  final genres = const [
-    '전체',
-    '루어',
-    '찌낚시',
-    '선상',
-    '원투',
-    '기타',
-  ];
+  final genres = const ['전체', '루어', '찌낚시', '선상', '원투', '기타'];
+
+  @override
+  void initState() {
+    super.initState();
+    _recordRepository.addListener(_refreshRecords);
+  }
 
   @override
   void dispose() {
+    _recordRepository.removeListener(_refreshRecords);
     searchController.dispose();
     super.dispose();
   }
 
+  void _refreshRecords() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  }
+
   List<FishingRecord> get filteredRecords {
     final keyword = searchController.text.trim();
-    final records = FishingRecordMemoryRepository.instance.getAllRecords();
+    final records = _recordRepository.getAllRecords();
 
     final filtered = records.where((record) {
       final matchesKeyword =
@@ -75,8 +81,11 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
       final matchesEndDate =
           endDate == null ||
           record.startAt.isBefore(
-            DateTime(endDate!.year, endDate!.month, endDate!.day)
-                .add(const Duration(days: 1)),
+            DateTime(
+              endDate!.year,
+              endDate!.month,
+              endDate!.day,
+            ).add(const Duration(days: 1)),
           );
 
       return matchesKeyword &&
@@ -147,32 +156,30 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
 
     return Scaffold(
       appBar: widget.showAppBar
-    ? AppBar(
-        title: Text(widget.appBarTitle),
-        actions: [
-          TextButton.icon(
-            onPressed: () async {
-              final saved = await Navigator.of(context).push<bool>(
-                MaterialPageRoute(
-                  builder: (_) => const RecordFormPage(),
-                ),
-              );
+          ? AppBar(
+              title: Text(widget.appBarTitle),
+              actions: [
+                TextButton.icon(
+                  onPressed: () async {
+                    final saved = await Navigator.of(context).push<bool>(
+                      MaterialPageRoute(builder: (_) => const RecordFormPage()),
+                    );
 
-              if (saved == true && context.mounted) {
-                setState(() {});
-              }
-            },
-            icon: const Icon(Icons.edit_note),
-            label: const Text('기록 작성'),
-          ),
-          IconButton(
-            onPressed: resetFilters,
-            icon: const Icon(Icons.refresh),
-            tooltip: '필터 초기화',
-          ),
-        ],
-      )
-    : null,
+                    if (saved == true && context.mounted) {
+                      setState(() {});
+                    }
+                  },
+                  icon: const Icon(Icons.edit_note),
+                  label: const Text('기록 작성'),
+                ),
+                IconButton(
+                  onPressed: resetFilters,
+                  icon: const Icon(Icons.refresh),
+                  tooltip: '필터 초기화',
+                ),
+              ],
+            )
+          : null,
       body: SafeArea(
         child: Column(
           children: [
@@ -216,8 +223,8 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
                   Text(
                     '검색 결과 ${records.length}건',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const Spacer(),
                   if (records.isNotEmpty)
@@ -242,13 +249,13 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
                         return _RecordSearchResultCard(
                           record: record,
                           onTap: () async {
-                            final changed = await Navigator.of(context).push<bool>(
-                              MaterialPageRoute(
-                                builder: (_) => RecordDetailPage(
-                                  record: record,
-                                ),
-                              ),
-                            );
+                            final changed = await Navigator.of(context)
+                                .push<bool>(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        RecordDetailPage(record: record),
+                                  ),
+                                );
 
                             if (changed == true && context.mounted) {
                               setState(() {});
@@ -325,10 +332,8 @@ class _SearchFilterArea extends StatelessWidget {
               ),
               items: genres
                   .map(
-                    (genre) => DropdownMenuItem(
-                      value: genre,
-                      child: Text(genre),
-                    ),
+                    (genre) =>
+                        DropdownMenuItem(value: genre, child: Text(genre)),
                   )
                   .toList(),
               onChanged: onGenreChanged,
@@ -393,7 +398,7 @@ class _DateFilterButton extends StatelessWidget {
     required this.onClear,
   });
 
-    @override
+  @override
   Widget build(BuildContext context) {
     if (date == null) {
       return OutlinedButton.icon(
@@ -432,10 +437,7 @@ class _RecordSearchResultCard extends StatelessWidget {
   final FishingRecord record;
   final VoidCallback onTap;
 
-  const _RecordSearchResultCard({
-    required this.record,
-    required this.onTap,
-  });
+  const _RecordSearchResultCard({required this.record, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -444,9 +446,7 @@ class _RecordSearchResultCard extends StatelessWidget {
         contentPadding: const EdgeInsets.all(16),
         title: Text(
           record.summaryTitle,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Text(
           '${_formatDateTime(record.startAt)}\n'
@@ -486,9 +486,9 @@ class _EmptySearchResultView extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               '검색 결과가 없습니다.',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
