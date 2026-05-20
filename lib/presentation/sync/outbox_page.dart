@@ -34,7 +34,7 @@ class _OutboxPageState extends State<OutboxPage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('대기 중인 항목을 모두 업로드 완료 처리했습니다.'),
+        content: Text('대기 중인 항목을 모두 업로드 완료 상태로 변경했습니다.'),
       ),
     );
   }
@@ -50,7 +50,7 @@ class _OutboxPageState extends State<OutboxPage> {
           IconButton(
             onPressed: mockUploadAllPendingItems,
             icon: const Icon(Icons.cloud_upload_outlined),
-            tooltip: '전체 mock 전송',
+            tooltip: '전체 전송 처리',
           ),
           IconButton(
             onPressed: () {

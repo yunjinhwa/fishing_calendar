@@ -61,7 +61,7 @@ class MapDetailPage extends StatelessWidget {
             const _InfoCard(
               children: [
                 Text(
-                  '표시되는 날씨, 물때, 수온 정보는 선택 위치와 가장 가까운 관측 지점 기준의 예시 데이터입니다. 실제 API 연동 후 제공사 데이터 기준으로 표시됩니다.',
+                  '표시되는 날씨, 물때, 수온 정보는 현재 mock 데이터 기준입니다. 실제 API 연동 시 제공사 데이터 기준으로 표시됩니다.',
                 ),
               ],
             ),

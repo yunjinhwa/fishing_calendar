@@ -221,7 +221,7 @@ class _MapPlaceholder extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.place_outlined),
                 title: Text(selectedLocation),
-                subtitle: const Text('실제 지도 연동은 다음 단계에서 구현합니다.'),
+                subtitle: const Text('지도 API 연동 전 임시 지도 화면입니다.'),
               ),
             ),
           ),
