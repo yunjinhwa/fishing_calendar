@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../offline/offline_free_page.dart';
 import '../offline/offline_guest_page.dart';
 import '../offline/offline_paid_page.dart';
+import '../sync/sync_conflict_page.dart';
 
 class MyPage extends StatelessWidget {
   const MyPage({super.key});
@@ -65,12 +66,12 @@ class MyPage extends StatelessWidget {
               child: ListTile(
                 leading: const Icon(Icons.sync_outlined),
                 title: const Text('동기화/충돌 관리'),
-                subtitle: const Text('동기화 기능은 outbox-sync 단계에서 구현합니다.'),
+                subtitle: const Text('충돌 알림과 동기화 상태를 확인합니다.'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('동기화/충돌 관리는 추후 구현합니다.'),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SyncConflictPage(),
                     ),
                   );
                 },
