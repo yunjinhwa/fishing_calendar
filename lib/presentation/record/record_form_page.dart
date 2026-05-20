@@ -9,6 +9,7 @@ class RecordFormPage extends StatefulWidget {
   final String? initialWeather;
   final double? initialAirTemperature;
   final double? initialWaterTemperature;
+  final String? initialFishName;
 
   const RecordFormPage({
     super.key,
@@ -17,6 +18,7 @@ class RecordFormPage extends StatefulWidget {
     this.initialWeather,
     this.initialAirTemperature,
     this.initialWaterTemperature,
+    this.initialFishName,
   });
 
   @override
@@ -51,6 +53,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
         widget.initialAirTemperature?.toString() ?? '';
     waterTemperatureController.text =
         widget.initialWaterTemperature?.toString() ?? '';
+
+        if (widget.initialFishName != null && catchItems.isNotEmpty) {
+          catchItems.first.speciesController.text = widget.initialFishName!;
+        }
   }
 
   @override
@@ -290,7 +296,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (widget.initialLocation != null) ...[
+            if (widget.initialLocation != null || widget.initialFishName != null) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -301,7 +307,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
                         color: Theme.of(context).colorScheme.primary,
                       ),
                       const SizedBox(width: 8),
-                      const Expanded(child: Text('지도에서 가져온 정보를 자동 입력했습니다.')),
+                      Expanded(
+                        child: Text(
+                          widget.initialFishName != null
+                              ? '도감에서 선택한 어종을 자동 입력했습니다.'
+                              : '지도에서 가져온 정보를 자동 입력했습니다.',
+                        ),
+                      ),
                     ],
                   ),
                 ),
