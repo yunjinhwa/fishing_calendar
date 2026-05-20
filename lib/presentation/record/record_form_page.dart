@@ -32,6 +32,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final airTemperatureController = TextEditingController();
   final waterTemperatureController = TextEditingController();
   final memoController = TextEditingController();
+  final customGenreController = TextEditingController();
 
   final catchItems = <_CatchItemInput>[_CatchItemInput()];
 
@@ -70,6 +71,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     for (final item in catchItems) {
       item.dispose();
     }
+    customGenreController.dispose();
     super.dispose();
   }
 
@@ -78,6 +80,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     final airTemperature = airTemperatureController.text.trim();
     final waterTemperature = waterTemperatureController.text.trim();
     final genre = selectedGenre;
+    final customGenre = customGenreController.text.trim();
 
     if (location.isEmpty) {
       showMessage('위치를 입력하세요.');
@@ -93,6 +96,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
       showMessage('낚시 장르를 선택하세요.');
       return;
     }
+
+    if (genre == '기타' && customGenre.isEmpty) {
+      showMessage('기타 낚시 장르를 입력하세요.');
+      return;
+    }
+
+    final genreName = genre == '기타' ? customGenre : genre;
 
     if (airTemperature.isNotEmpty) {
       final airTemperatureValue = double.tryParse(airTemperature);
@@ -173,7 +183,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       location: location,
       startAt: startAt,
       endAt: endAt,
-      genreName: genre,
+      genreName: genreName,
       tide: tideController.text.trim().isEmpty
           ? null
           : tideController.text.trim(),
@@ -361,11 +371,28 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   onSelected: (_) {
                     setState(() {
                       selectedGenre = genre;
+
+                      if (genre != '기타') {
+                        customGenreController.clear();
+                      }
                     });
                   },
                 );
               }).toList(),
             ),
+
+            if (selectedGenre == '기타') ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: customGenreController,
+                decoration: const InputDecoration(
+                  labelText: '기타 낚시 장르 *',
+                  hintText: '예: 에깅, 플라이낚시, 문어낚시',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+
             const SizedBox(height: 24),
 
             _SectionTitle(title: '선택 정보'),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../record/record_form_page.dart';
+import '../calendar/calendar_page.dart';
 
 class OfflineFreePage extends StatelessWidget {
   const OfflineFreePage({super.key});
@@ -64,14 +65,14 @@ class OfflineFreePage extends StatelessWidget {
 
             OutlinedButton.icon(
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('로컬 기록 목록은 캘린더 화면에서 확인할 수 있습니다.'),
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const CalendarPage(),
                   ),
                 );
               },
-              icon: const Icon(Icons.list_alt),
-              label: const Text('로컬 기록 보기'),
+              icon: const Icon(Icons.calendar_month_outlined),
+              label: const Text('캘린더 보기'),
             ),
             const SizedBox(height: 12),
 

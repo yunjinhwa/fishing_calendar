@@ -76,15 +76,6 @@ class _DailyRecordListPageState extends State<DailyRecordListPage> {
                   );
                 },
               ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('기록 작성은 기록 탭에서 진행해주세요.')),
-            );
-          },
-          icon: const Icon(Icons.add),
-          label: const Text('기록 작성'),
-        ),
       ),
     );
   }

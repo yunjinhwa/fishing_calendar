@@ -15,10 +15,17 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int selectedIndex = 0;
+  int calendarRefreshKey = 0;
+  final calendarNavigatorKey = GlobalKey<NavigatorState>();
 
   List<Widget> get pages {
     return [
-      CalendarPage(key: ValueKey('calendar-$selectedIndex')),
+      _TabNavigator(
+        navigatorKey: calendarNavigatorKey,
+        child: CalendarPage(
+          key: ValueKey('calendar-$calendarRefreshKey'),
+        ),
+      ),
       const MapPage(),
       const RecordPage(),
       const FishDictionaryPage(),
@@ -33,8 +40,18 @@ class _AppShellState extends State<AppShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) {
+          if (index == 0) {
+            calendarNavigatorKey.currentState?.popUntil(
+              (route) => route.isFirst,
+            );
+          }
+
           setState(() {
             selectedIndex = index;
+
+            if (index == 0) {
+              calendarRefreshKey++;
+            }
           });
         },
         destinations: const [
@@ -65,6 +82,28 @@ class _AppShellState extends State<AppShell> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TabNavigator extends StatelessWidget {
+  final GlobalKey<NavigatorState> navigatorKey;
+  final Widget child;
+
+  const _TabNavigator({
+    required this.navigatorKey,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Navigator(
+      key: navigatorKey,
+      onGenerateRoute: (settings) {
+        return MaterialPageRoute(
+          builder: (_) => child,
+        );
+      },
     );
   }
 }

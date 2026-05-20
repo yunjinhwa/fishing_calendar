@@ -20,7 +20,7 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
 
   @override
   Widget build(BuildContext context) {
-    final conflicts = ConflictMemoryRepository.instance.getAllItems();
+    final conflicts = ConflictMemoryRepository.instance.getUnresolvedItems();
     final unresolvedCount = ConflictMemoryRepository.instance.unresolvedCount;
 
     return Scaffold(
