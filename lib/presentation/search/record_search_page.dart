@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
 import '../record/record_detail_page.dart';
+import '../record/record_form_page.dart';
 
 enum RecordSortType {
   newest,
@@ -10,7 +11,14 @@ enum RecordSortType {
 }
 
 class RecordSearchPage extends StatefulWidget {
-  const RecordSearchPage({super.key});
+  final bool showAppBar;
+  final String appBarTitle;
+
+  const RecordSearchPage({
+    super.key,
+    this.showAppBar = true,
+    this.appBarTitle = '기록 검색',
+  });
 
   @override
   State<RecordSearchPage> createState() => _RecordSearchPageState();
@@ -138,16 +146,33 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
     final records = filteredRecords;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('기록 검색'),
+      appBar: widget.showAppBar
+    ? AppBar(
+        title: Text(widget.appBarTitle),
         actions: [
+          TextButton.icon(
+            onPressed: () async {
+              final saved = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                  builder: (_) => const RecordFormPage(),
+                ),
+              );
+
+              if (saved == true && context.mounted) {
+                setState(() {});
+              }
+            },
+            icon: const Icon(Icons.edit_note),
+            label: const Text('기록 작성'),
+          ),
           IconButton(
             onPressed: resetFilters,
             icon: const Icon(Icons.refresh),
             tooltip: '필터 초기화',
           ),
         ],
-      ),
+      )
+    : null,
       body: SafeArea(
         child: Column(
           children: [
@@ -216,14 +241,18 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
 
                         return _RecordSearchResultCard(
                           record: record,
-                          onTap: () {
-                            Navigator.of(context).push(
+                          onTap: () async {
+                            final changed = await Navigator.of(context).push<bool>(
                               MaterialPageRoute(
                                 builder: (_) => RecordDetailPage(
                                   record: record,
                                 ),
                               ),
                             );
+
+                            if (changed == true && context.mounted) {
+                              setState(() {});
+                            }
                           },
                         );
                       },

@@ -4,6 +4,7 @@ import '../record/record_form_page.dart';
 import '../sync/outbox_page.dart';
 import '../../data/repositories/outbox_memory_repository.dart';
 import '../../data/models/outbox_item.dart';
+import '../calendar/calendar_page.dart';
 
 class OfflinePaidPage extends StatefulWidget {
   const OfflinePaidPage({super.key});
@@ -112,6 +113,19 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
             },
               icon: const Icon(Icons.edit_note),
               label: const Text('기록 작성'),
+            ),
+            const SizedBox(height: 12),
+
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const CalendarPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.calendar_month_outlined),
+              label: const Text('캘린더 보기'),
             ),
             const SizedBox(height: 12),
 

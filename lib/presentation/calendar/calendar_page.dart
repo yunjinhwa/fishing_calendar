@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'daily_record_list_page.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
+//import 'calendar_settings_page.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key});
@@ -13,6 +14,27 @@ class CalendarPage extends StatefulWidget {
 
 class _CalendarPageState extends State<CalendarPage> {
   DateTime focusedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  final _recordRepository = FishingRecordMemoryRepository.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _recordRepository.addListener(_refreshRecords);
+  }
+
+  @override
+  void dispose() {
+    _recordRepository.removeListener(_refreshRecords);
+    super.dispose();
+  }
+
+  void _refreshRecords() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {});
+  }
 
   void goToPreviousMonth() {
     setState(() {
@@ -28,7 +50,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
-    final records = FishingRecordMemoryRepository.instance.getAllRecords();
+    final records = _recordRepository.getAllRecords();
 
     return Scaffold(
       appBar: AppBar(
@@ -40,10 +62,17 @@ class _CalendarPageState extends State<CalendarPage> {
             },
             icon: const Icon(Icons.refresh),
           ),
-          IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.settings_outlined),
-          ),
+          // IconButton(
+          //   onPressed: () {
+          //     Navigator.of(context).push(
+          //       MaterialPageRoute(
+          //         builder: (_) => const CalendarSettingsPage(),
+          //       ),
+          //     );
+          //   },
+          //   icon: const Icon(Icons.settings_outlined),
+          //   tooltip: '캘린더 설정',
+          // ),
         ],
       ),
       body: Column(
