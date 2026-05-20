@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'record_form_page.dart';
+import '../search/record_search_page.dart';
 
 class RecordPage extends StatelessWidget {
   const RecordPage({super.key});
@@ -51,9 +52,9 @@ class RecordPage extends StatelessWidget {
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('기록 검색은 feature/search에서 구현합니다.'),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const RecordSearchPage(),
                     ),
                   );
                 },
