@@ -71,6 +71,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     final location = locationController.text.trim();
     final airTemperature = airTemperatureController.text.trim();
     final waterTemperature = waterTemperatureController.text.trim();
+    final genre = selectedGenre;
 
     if (location.isEmpty) {
       showMessage('위치를 입력하세요.');
@@ -79,6 +80,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     if (!startAt.isBefore(endAt)) {
       showMessage('종료 시간은 시작 시간보다 늦어야 합니다.');
+      return;
+    }
+
+    if (genre == null || genre.trim().isEmpty) {
+      showMessage('낚시 장르를 선택하세요.');
       return;
     }
 
@@ -161,7 +167,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       location: location,
       startAt: startAt,
       endAt: endAt,
-      genreName: selectedGenre!,
+      genreName: genre,
       tide: tideController.text.trim().isEmpty
           ? null
           : tideController.text.trim(),
