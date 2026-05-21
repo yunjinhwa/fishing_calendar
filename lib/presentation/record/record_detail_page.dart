@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
@@ -145,7 +148,27 @@ class RecordDetailPage extends StatelessWidget {
 
             _SectionTitle(title: '사진'),
             const SizedBox(height: 8),
-            const _EmptyInfoCard(message: '첨부된 사진이 없습니다.'),
+
+            if (record.photoPaths.isEmpty)
+              const _EmptyInfoCard(message: '첨부된 사진이 없습니다.')
+            else
+              SizedBox(
+                height: 120,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: record.photoPaths.length,
+                  separatorBuilder: (context, index) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final photoPath = record.photoPaths[index];
+
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: _RecordPhotoPreview(photoPath: photoPath),
+                    );
+                  },
+                ),
+              ),
+
             const SizedBox(height: 24),
 
             _SectionTitle(title: '메모'),
@@ -265,6 +288,51 @@ class _EmptyInfoCard extends StatelessWidget {
           ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
         ),
       ],
+    );
+  }
+}
+
+class _RecordPhotoPreview extends StatelessWidget {
+  final String photoPath;
+
+  const _RecordPhotoPreview({
+    required this.photoPath,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (kIsWeb) {
+      return Container(
+        width: 120,
+        height: 120,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Icon(Icons.image_outlined),
+        ),
+      );
+    }
+
+    return Image.file(
+      File(photoPath),
+      width: 120,
+      height: 120,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) {
+        return Container(
+          width: 120,
+          height: 120,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Center(
+            child: Icon(Icons.broken_image_outlined),
+          ),
+        );
+      },
     );
   }
 }
