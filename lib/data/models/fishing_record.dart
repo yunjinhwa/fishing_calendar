@@ -11,6 +11,7 @@ class FishingRecord {
   final double? waterTemperature;
 
   final List<CatchRecord> catches;
+  final List<String> photoPaths;
   final String? memo;
 
   const FishingRecord({
@@ -24,6 +25,7 @@ class FishingRecord {
     this.airTemperature,
     this.waterTemperature,
     this.catches = const [],
+    this.photoPaths = const [],
     this.memo,
   });
 
@@ -45,6 +47,9 @@ class FishingRecord {
             ),
           )
           .toList(),
+      photoPaths: ((json['photoPaths'] as List?) ?? [])
+        .map((item) => item as String)
+        .toList(),
       memo: json['memo'] as String?,
     );
   }
@@ -61,6 +66,7 @@ class FishingRecord {
       'airTemperature': airTemperature,
       'waterTemperature': waterTemperature,
       'catches': catches.map((catchRecord) => catchRecord.toJson()).toList(),
+      'photoPaths': photoPaths,
       'memo': memo,
     };
   }

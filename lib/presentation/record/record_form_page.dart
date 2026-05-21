@@ -1,4 +1,8 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
@@ -34,6 +38,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final memoController = TextEditingController();
   final customGenreController = TextEditingController();
 
+  final imagePicker = ImagePicker();
+  final photos = <_SelectedPhoto>[];
   final catchItems = <_CatchItemInput>[_CatchItemInput()];
 
   DateTime startAt = DateTime.now();
@@ -197,6 +203,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
           ? null
           : double.parse(waterTemperature),
       catches: catches,
+      photoPaths: List.unmodifiable(
+        photos.map((photo) => photo.path),
+      ),
       memo: memoController.text.trim().isEmpty
           ? null
           : memoController.text.trim(),
@@ -219,6 +228,34 @@ class _RecordFormPageState extends State<RecordFormPage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> pickPhoto() async {
+    final pickedImage = await imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+
+    if (pickedImage == null) {
+      return;
+    }
+
+    final bytes = kIsWeb ? await pickedImage.readAsBytes() : null;
+
+    setState(() {
+      photos.add(
+        _SelectedPhoto(
+          path: pickedImage.path,
+          bytes: bytes,
+        ),
+      );
+    });
+  }
+
+  void removePhoto(int index) {
+    setState(() {
+      photos.removeAt(index);
+    });
   }
 
   void addCatchItem() {
@@ -475,22 +512,61 @@ class _RecordFormPageState extends State<RecordFormPage> {
             const SizedBox(height: 8),
 
             OutlinedButton.icon(
-              onPressed: () {
-                showMessage(
-                  '사진 첨부 기능은 현재 준비 중입니다.',
-                );
-              },
+              onPressed: pickPhoto,
               icon: const Icon(Icons.add_photo_alternate_outlined),
               label: const Text('사진 추가'),
             ),
             const SizedBox(height: 8),
 
-            Text(
-              '첨부된 사진이 없습니다.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-            ),
+            if (photos.isEmpty)
+              Text(
+                '첨부된 사진이 없습니다.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+              )
+            else
+              SizedBox(
+                height: 96,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: photos.length,
+                  separatorBuilder: (context, index) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final photo = photos[index];
+
+                    return Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: _PhotoPreview(photo: photo),
+                        ),
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: InkWell(
+                            onTap: () => removePhoto(index),
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.6),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+
             const SizedBox(height: 16),
 
             TextField(
@@ -640,6 +716,43 @@ class _CatchItemCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SelectedPhoto {
+  final String path;
+  final Uint8List? bytes;
+
+  const _SelectedPhoto({
+    required this.path,
+    this.bytes,
+  });
+}
+
+class _PhotoPreview extends StatelessWidget {
+  final _SelectedPhoto photo;
+
+  const _PhotoPreview({
+    required this.photo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (kIsWeb && photo.bytes != null) {
+      return Image.memory(
+        photo.bytes!,
+        width: 96,
+        height: 96,
+        fit: BoxFit.cover,
+      );
+    }
+
+    return Image.file(
+      File(photo.path),
+      width: 96,
+      height: 96,
+      fit: BoxFit.cover,
     );
   }
 }
