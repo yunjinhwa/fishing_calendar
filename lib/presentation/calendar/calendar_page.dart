@@ -48,6 +48,14 @@ class _CalendarPageState extends State<CalendarPage> {
     });
   }
 
+  void goToCurrentMonth() {
+    final today = DateTime.now();
+
+    setState(() {
+      focusedMonth = DateTime(today.year, today.month);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final records = _recordRepository.getAllRecords();
@@ -57,10 +65,9 @@ class _CalendarPageState extends State<CalendarPage> {
         title: const Text('낚시 캘린더'),
         actions: [
           IconButton(
-            onPressed: () {
-              setState(() {});
-            },
-            icon: const Icon(Icons.refresh),
+            onPressed: goToCurrentMonth,
+            icon: const Icon(Icons.today_outlined),
+            tooltip: '이번 달로 이동',
           ),
           // IconButton(
           //   onPressed: () {

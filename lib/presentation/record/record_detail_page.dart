@@ -5,13 +5,49 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
+import 'record_form_page.dart';
 
-class RecordDetailPage extends StatelessWidget {
+class RecordDetailPage extends StatefulWidget {
   final FishingRecord record;
 
   const RecordDetailPage({super.key, required this.record});
 
-  Future<void> deleteRecord(BuildContext context) async {
+  @override
+  State<RecordDetailPage> createState() => _RecordDetailPageState();
+}
+
+class _RecordDetailPageState extends State<RecordDetailPage> {
+  final _recordRepository = FishingRecordMemoryRepository.instance;
+
+  late FishingRecord record;
+
+  @override
+  void initState() {
+    super.initState();
+    record = widget.record;
+  }
+
+  Future<void> editRecord() async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => RecordFormPage(editingRecord: record)),
+    );
+
+    if (saved != true || !mounted) {
+      return;
+    }
+
+    final updatedRecord = _recordRepository.getRecordById(record.id);
+
+    if (updatedRecord == null) {
+      return;
+    }
+
+    setState(() {
+      record = updatedRecord;
+    });
+  }
+
+  Future<void> deleteRecord() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -40,9 +76,9 @@ class RecordDetailPage extends StatelessWidget {
       return;
     }
 
-    await FishingRecordMemoryRepository.instance.deleteRecord(record.id);
+    await _recordRepository.deleteRecord(record.id);
 
-    if (!context.mounted) {
+    if (!mounted) {
       return;
     }
 
@@ -60,9 +96,12 @@ class RecordDetailPage extends StatelessWidget {
         title: const Text('출조 기록'),
         actions: [
           IconButton(
-            onPressed: () {
-              deleteRecord(context);
-            },
+            onPressed: editRecord,
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: '수정',
+          ),
+          IconButton(
+            onPressed: deleteRecord,
             icon: const Icon(Icons.delete_outline),
             tooltip: '삭제',
           ),
@@ -157,7 +196,8 @@ class RecordDetailPage extends StatelessWidget {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: record.photoPaths.length,
-                  separatorBuilder: (context, index) => const SizedBox(width: 8),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 8),
                   itemBuilder: (context, index) {
                     final photoPath = record.photoPaths[index];
 
@@ -295,9 +335,7 @@ class _EmptyInfoCard extends StatelessWidget {
 class _RecordPhotoPreview extends StatelessWidget {
   final String photoPath;
 
-  const _RecordPhotoPreview({
-    required this.photoPath,
-  });
+  const _RecordPhotoPreview({required this.photoPath});
 
   @override
   Widget build(BuildContext context) {
@@ -309,9 +347,7 @@ class _RecordPhotoPreview extends StatelessWidget {
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Center(
-          child: Icon(Icons.image_outlined),
-        ),
+        child: const Center(child: Icon(Icons.image_outlined)),
       );
     }
 
@@ -328,9 +364,7 @@ class _RecordPhotoPreview extends StatelessWidget {
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: const Center(
-            child: Icon(Icons.broken_image_outlined),
-          ),
+          child: const Center(child: Icon(Icons.broken_image_outlined)),
         );
       },
     );

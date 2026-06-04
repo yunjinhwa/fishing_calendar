@@ -55,12 +55,36 @@ class FishingRecordMemoryRepository extends ChangeNotifier {
     return List.unmodifiable(_records);
   }
 
+  FishingRecord? getRecordById(String recordId) {
+    for (final record in _records) {
+      if (record.id == recordId) {
+        return record;
+      }
+    }
+
+    return null;
+  }
+
   List<FishingRecord> getRecordsByDate(DateTime date) {
     return _records.where((record) => record.overlapsDate(date)).toList();
   }
 
   Future<void> addRecord(FishingRecord record) async {
     _records.add(record);
+    await _saveRecords();
+    notifyListeners();
+  }
+
+  Future<void> updateRecord(FishingRecord record) async {
+    final index = _records.indexWhere(
+      (savedRecord) => savedRecord.id == record.id,
+    );
+
+    if (index == -1) {
+      throw StateError('Record not found: ${record.id}');
+    }
+
+    _records[index] = record;
     await _saveRecords();
     notifyListeners();
   }

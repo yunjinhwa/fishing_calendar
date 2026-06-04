@@ -8,6 +8,8 @@ import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
 
 class RecordFormPage extends StatefulWidget {
+  final FishingRecord? editingRecord;
+
   final String? initialLocation;
   final String? initialTide;
   final String? initialWeather;
@@ -17,6 +19,7 @@ class RecordFormPage extends StatefulWidget {
 
   const RecordFormPage({
     super.key,
+    this.editingRecord,
     this.initialLocation,
     this.initialTide,
     this.initialWeather,
@@ -30,6 +33,8 @@ class RecordFormPage extends StatefulWidget {
 }
 
 class _RecordFormPageState extends State<RecordFormPage> {
+  bool get isEditMode => widget.editingRecord != null;
+
   final locationController = TextEditingController();
   final tideController = TextEditingController();
   final weatherController = TextEditingController();
@@ -61,9 +66,54 @@ class _RecordFormPageState extends State<RecordFormPage> {
     waterTemperatureController.text =
         widget.initialWaterTemperature?.toString() ?? '';
 
-        if (widget.initialFishName != null && catchItems.isNotEmpty) {
-          catchItems.first.speciesController.text = widget.initialFishName!;
-        }
+    if (widget.initialFishName != null && catchItems.isNotEmpty) {
+      catchItems.first.speciesController.text = widget.initialFishName!;
+    }
+
+    final editingRecord = widget.editingRecord;
+
+    if (editingRecord != null) {
+      _initializeEditingRecord(editingRecord);
+    }
+  }
+
+  void _initializeEditingRecord(FishingRecord record) {
+    locationController.text = record.location;
+    tideController.text = record.tide ?? '';
+    weatherController.text = record.weather ?? '';
+    airTemperatureController.text = record.airTemperature?.toString() ?? '';
+    waterTemperatureController.text = record.waterTemperature?.toString() ?? '';
+    memoController.text = record.memo ?? '';
+
+    startAt = record.startAt;
+    endAt = record.endAt;
+
+    if (genres.contains(record.genreName)) {
+      selectedGenre = record.genreName;
+    } else {
+      selectedGenre = '기타';
+      customGenreController.text = record.genreName;
+    }
+
+    for (final item in catchItems) {
+      item.dispose();
+    }
+
+    catchItems
+      ..clear()
+      ..addAll(
+        record.catches.map(
+          (catchRecord) => _CatchItemInput(catchRecord: catchRecord),
+        ),
+      );
+
+    if (catchItems.isEmpty) {
+      catchItems.add(_CatchItemInput());
+    }
+
+    photos.addAll(
+      record.photoPaths.map((photoPath) => _SelectedPhoto(path: photoPath)),
+    );
   }
 
   @override
@@ -185,7 +235,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
         .toList();
 
     final record = FishingRecord(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      id:
+          widget.editingRecord?.id ??
+          DateTime.now().microsecondsSinceEpoch.toString(),
       location: location,
       startAt: startAt,
       endAt: endAt,
@@ -203,23 +255,27 @@ class _RecordFormPageState extends State<RecordFormPage> {
           ? null
           : double.parse(waterTemperature),
       catches: catches,
-      photoPaths: List.unmodifiable(
-        photos.map((photo) => photo.path),
-      ),
+      photoPaths: List.unmodifiable(photos.map((photo) => photo.path)),
       memo: memoController.text.trim().isEmpty
           ? null
           : memoController.text.trim(),
     );
 
-    await FishingRecordMemoryRepository.instance.addRecord(record);
+    if (isEditMode) {
+      await FishingRecordMemoryRepository.instance.updateRecord(record);
+    } else {
+      await FishingRecordMemoryRepository.instance.addRecord(record);
+    }
 
     if (!mounted) {
       return;
     }
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('출조 기록이 저장되었습니다.')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isEditMode ? '출조 기록이 수정되었습니다.' : '출조 기록이 저장되었습니다.'),
+      ),
+    );
 
     Navigator.of(context).pop(true);
   }
@@ -243,12 +299,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     final bytes = kIsWeb ? await pickedImage.readAsBytes() : null;
 
     setState(() {
-      photos.add(
-        _SelectedPhoto(
-          path: pickedImage.path,
-          bytes: bytes,
-        ),
-      );
+      photos.add(_SelectedPhoto(path: pickedImage.path, bytes: bytes));
     });
   }
 
@@ -342,12 +393,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('출조 기록 작성')),
+      appBar: AppBar(title: Text(isEditMode ? '출조 기록 수정' : '출조 기록 작성')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (widget.initialLocation != null || widget.initialFishName != null) ...[
+            if (widget.initialLocation != null ||
+                widget.initialFishName != null) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -531,7 +583,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: photos.length,
-                  separatorBuilder: (context, index) => const SizedBox(width: 8),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 8),
                   itemBuilder: (context, index) {
                     final photo = photos[index];
 
@@ -638,6 +691,16 @@ class _CatchItemInput {
   final lengthController = TextEditingController();
   final weightController = TextEditingController();
 
+  _CatchItemInput({CatchRecord? catchRecord}) {
+    if (catchRecord == null) {
+      return;
+    }
+
+    speciesController.text = catchRecord.speciesName;
+    lengthController.text = catchRecord.lengthCm?.toString() ?? '';
+    weightController.text = catchRecord.weightG?.toString() ?? '';
+  }
+
   void dispose() {
     speciesController.dispose();
     lengthController.dispose();
@@ -724,27 +787,31 @@ class _SelectedPhoto {
   final String path;
   final Uint8List? bytes;
 
-  const _SelectedPhoto({
-    required this.path,
-    this.bytes,
-  });
+  const _SelectedPhoto({required this.path, this.bytes});
 }
 
 class _PhotoPreview extends StatelessWidget {
   final _SelectedPhoto photo;
 
-  const _PhotoPreview({
-    required this.photo,
-  });
+  const _PhotoPreview({required this.photo});
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb && photo.bytes != null) {
-      return Image.memory(
-        photo.bytes!,
+    if (kIsWeb) {
+      if (photo.bytes != null) {
+        return Image.memory(
+          photo.bytes!,
+          width: 96,
+          height: 96,
+          fit: BoxFit.cover,
+        );
+      }
+
+      return Container(
         width: 96,
         height: 96,
-        fit: BoxFit.cover,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: const Icon(Icons.image_outlined),
       );
     }
 

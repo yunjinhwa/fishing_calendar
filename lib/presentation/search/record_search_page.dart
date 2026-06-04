@@ -181,90 +181,96 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
             )
           : null,
       body: SafeArea(
-        child: Column(
-          children: [
-            _SearchFilterArea(
-              searchController: searchController,
-              genres: genres,
-              selectedGenre: selectedGenre,
-              startDate: startDate,
-              endDate: endDate,
-              sortType: sortType,
-              onSearchChanged: () {
-                setState(() {});
-              },
-              onGenreChanged: (genre) {
-                setState(() {
-                  selectedGenre = genre;
-                });
-              },
-              onStartDateTap: pickStartDate,
-              onEndDateTap: pickEndDate,
-              onSortChanged: (value) {
-                setState(() {
-                  sortType = value;
-                });
-              },
-              onStartDateClear: () {
-                setState(() {
-                  startDate = null;
-                });
-              },
-              onEndDateClear: () {
-                setState(() {
-                  endDate = null;
-                });
-              },
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Row(
-                children: [
-                  Text(
-                    '검색 결과 ${records.length}건',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (records.isNotEmpty)
-                    Text(
-                      sortType == RecordSortType.newest ? '최신순' : '오래된순',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                ],
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: _SearchFilterArea(
+                searchController: searchController,
+                genres: genres,
+                selectedGenre: selectedGenre,
+                startDate: startDate,
+                endDate: endDate,
+                sortType: sortType,
+                onSearchChanged: () {
+                  setState(() {});
+                },
+                onGenreChanged: (genre) {
+                  setState(() {
+                    selectedGenre = genre;
+                  });
+                },
+                onStartDateTap: pickStartDate,
+                onEndDateTap: pickEndDate,
+                onSortChanged: (value) {
+                  setState(() {
+                    sortType = value;
+                  });
+                },
+                onStartDateClear: () {
+                  setState(() {
+                    startDate = null;
+                  });
+                },
+                onEndDateClear: () {
+                  setState(() {
+                    endDate = null;
+                  });
+                },
               ),
             ),
-            Expanded(
-              child: records.isEmpty
-                  ? const _EmptySearchResultView()
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: records.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final record = records[index];
-
-                        return _RecordSearchResultCard(
-                          record: record,
-                          onTap: () async {
-                            final changed = await Navigator.of(context)
-                                .push<bool>(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        RecordDetailPage(record: record),
-                                  ),
-                                );
-
-                            if (changed == true && context.mounted) {
-                              setState(() {});
-                            }
-                          },
-                        );
-                      },
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Row(
+                  children: [
+                    Text(
+                      '검색 결과 ${records.length}건',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
+                    const Spacer(),
+                    if (records.isNotEmpty)
+                      Text(
+                        sortType == RecordSortType.newest ? '최신순' : '오래된순',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+              ),
             ),
+            if (records.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: _EmptySearchResultView(),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.all(16),
+                sliver: SliverList.separated(
+                  itemCount: records.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final record = records[index];
+
+                    return _RecordSearchResultCard(
+                      record: record,
+                      onTap: () async {
+                        final changed = await Navigator.of(context).push<bool>(
+                          MaterialPageRoute(
+                            builder: (_) => RecordDetailPage(record: record),
+                          ),
+                        );
+
+                        if (changed == true && context.mounted) {
+                          setState(() {});
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
           ],
         ),
       ),
