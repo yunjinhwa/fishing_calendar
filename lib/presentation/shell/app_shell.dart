@@ -22,9 +22,7 @@ class _AppShellState extends State<AppShell> {
     return [
       _TabNavigator(
         navigatorKey: calendarNavigatorKey,
-        child: CalendarPage(
-          key: ValueKey('calendar-$calendarRefreshKey'),
-        ),
+        child: CalendarPage(key: ValueKey('calendar-$calendarRefreshKey')),
       ),
       const MapPage(),
       const RecordPage(),
@@ -35,53 +33,69 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    final isKeyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final tabPages = pages;
+
     return Scaffold(
-      body: IndexedStack(index: selectedIndex, children: pages),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedIndex,
-        onDestinationSelected: (index) {
-          if (index == 0) {
-            calendarNavigatorKey.currentState?.popUntil(
-              (route) => route.isFirst,
-            );
-          }
-
-          setState(() {
-            selectedIndex = index;
-
-            if (index == 0) {
-              calendarRefreshKey++;
-            }
-          });
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(Icons.calendar_month),
-            label: '캘린더',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: '지도',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.add_circle_outline),
-            selectedIcon: Icon(Icons.add_circle),
-            label: '기록',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.menu_book_outlined),
-            selectedIcon: Icon(Icons.menu_book),
-            label: '도감',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: '내정보',
-          ),
+      resizeToAvoidBottomInset: false,
+      body: IndexedStack(
+        index: selectedIndex,
+        children: [
+          for (var index = 0; index < tabPages.length; index++)
+            MediaQuery.removeViewInsets(
+              context: context,
+              removeBottom: index != selectedIndex,
+              child: tabPages[index],
+            ),
         ],
       ),
+      bottomNavigationBar: isKeyboardVisible
+          ? null
+          : NavigationBar(
+              selectedIndex: selectedIndex,
+              onDestinationSelected: (index) {
+                if (index == 0) {
+                  calendarNavigatorKey.currentState?.popUntil(
+                    (route) => route.isFirst,
+                  );
+                }
+
+                setState(() {
+                  selectedIndex = index;
+
+                  if (index == 0) {
+                    calendarRefreshKey++;
+                  }
+                });
+              },
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.calendar_month_outlined),
+                  selectedIcon: Icon(Icons.calendar_month),
+                  label: '캘린더',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.map_outlined),
+                  selectedIcon: Icon(Icons.map),
+                  label: '지도',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.add_circle_outline),
+                  selectedIcon: Icon(Icons.add_circle),
+                  label: '기록',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.menu_book_outlined),
+                  selectedIcon: Icon(Icons.menu_book),
+                  label: '도감',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.person_outline),
+                  selectedIcon: Icon(Icons.person),
+                  label: '내정보',
+                ),
+              ],
+            ),
     );
   }
 }
@@ -90,19 +104,14 @@ class _TabNavigator extends StatelessWidget {
   final GlobalKey<NavigatorState> navigatorKey;
   final Widget child;
 
-  const _TabNavigator({
-    required this.navigatorKey,
-    required this.child,
-  });
+  const _TabNavigator({required this.navigatorKey, required this.child});
 
   @override
   Widget build(BuildContext context) {
     return Navigator(
       key: navigatorKey,
       onGenerateRoute: (settings) {
-        return MaterialPageRoute(
-          builder: (_) => child,
-        );
+        return MaterialPageRoute(builder: (_) => child);
       },
     );
   }
