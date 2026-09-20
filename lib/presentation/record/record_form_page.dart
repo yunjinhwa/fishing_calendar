@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../auth/auth_access_guard.dart';
 
 class RecordFormPage extends StatefulWidget {
   final FishingRecord? editingRecord;
@@ -132,7 +133,18 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> saveRecord() async {
+    final allowed = await requireMemberAccess(
+      context,
+      message: '출조 기록 저장은 로그인 후 사용할 수 있습니다.',
+    );
+
+    if (!allowed || !mounted) {
+      return;
+    }
+
     final location = locationController.text.trim();
+    final tide = tideController.text.trim();
+    final weather = weatherController.text.trim();
     final airTemperature = airTemperatureController.text.trim();
     final waterTemperature = waterTemperatureController.text.trim();
     final genre = selectedGenre;
@@ -160,22 +172,38 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     final genreName = genre == '기타' ? customGenre : genre;
 
-    if (airTemperature.isNotEmpty) {
-      final airTemperatureValue = double.tryParse(airTemperature);
-
-      if (airTemperatureValue == null) {
-        showMessage('기온은 숫자로 입력하세요.');
-        return;
-      }
+    if (tide.isEmpty) {
+      showMessage('물때를 입력하세요.');
+      return;
     }
 
-    if (waterTemperature.isNotEmpty) {
-      final waterTemperatureValue = double.tryParse(waterTemperature);
+    if (weather.isEmpty) {
+      showMessage('날씨를 입력하세요.');
+      return;
+    }
 
-      if (waterTemperatureValue == null) {
-        showMessage('수온은 숫자로 입력하세요.');
-        return;
-      }
+    if (airTemperature.isEmpty) {
+      showMessage('기온을 입력하세요.');
+      return;
+    }
+
+    final airTemperatureValue = double.tryParse(airTemperature);
+
+    if (airTemperatureValue == null) {
+      showMessage('기온은 숫자로 입력하세요.');
+      return;
+    }
+
+    if (waterTemperature.isEmpty) {
+      showMessage('수온을 입력하세요.');
+      return;
+    }
+
+    final waterTemperatureValue = double.tryParse(waterTemperature);
+
+    if (waterTemperatureValue == null) {
+      showMessage('수온은 숫자로 입력하세요.');
+      return;
     }
 
     for (var i = 0; i < catchItems.length; i++) {
@@ -242,18 +270,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
       startAt: startAt,
       endAt: endAt,
       genreName: genreName,
-      tide: tideController.text.trim().isEmpty
-          ? null
-          : tideController.text.trim(),
-      weather: weatherController.text.trim().isEmpty
-          ? null
-          : weatherController.text.trim(),
-      airTemperature: airTemperature.isEmpty
-          ? null
-          : double.parse(airTemperature),
-      waterTemperature: waterTemperature.isEmpty
-          ? null
-          : double.parse(waterTemperature),
+      tide: tide,
+      weather: weather,
+      airTemperature: airTemperatureValue,
+      waterTemperature: waterTemperatureValue,
       catches: catches,
       photoPaths: List.unmodifiable(photos.map((photo) => photo.path)),
       memo: memoController.text.trim().isEmpty
@@ -488,16 +508,20 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
             const SizedBox(height: 24),
 
-            _SectionTitle(title: '선택 정보'),
-            const SizedBox(height: 12),
-
             _SectionTitle(title: '외부 데이터'),
+            const SizedBox(height: 4),
+            Text(
+              '조회에 실패한 값은 직접 입력하세요.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+            ),
             const SizedBox(height: 12),
 
             TextField(
               controller: tideController,
               decoration: const InputDecoration(
-                labelText: '물때',
+                labelText: '물때 *',
                 hintText: '예: 7물',
                 border: OutlineInputBorder(),
               ),
@@ -507,7 +531,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
             TextField(
               controller: weatherController,
               decoration: const InputDecoration(
-                labelText: '날씨',
+                labelText: '날씨 *',
                 hintText: '예: 흐림',
                 border: OutlineInputBorder(),
               ),
@@ -518,7 +542,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
               controller: airTemperatureController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: '기온',
+                labelText: '기온 *',
                 hintText: '예: 18',
                 suffixText: '℃',
                 border: OutlineInputBorder(),
@@ -530,13 +554,16 @@ class _RecordFormPageState extends State<RecordFormPage> {
               controller: waterTemperatureController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: '수온',
+                labelText: '수온 *',
                 hintText: '예: 16.2',
                 suffixText: '℃',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 24),
+
+            _SectionTitle(title: '선택 정보'),
+            const SizedBox(height: 12),
 
             Text('조과', style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 8),

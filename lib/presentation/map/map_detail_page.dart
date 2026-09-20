@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'map_history_page.dart';
+import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import '../../data/models/external_data.dart';
 
@@ -82,11 +83,20 @@ class MapDetailPage extends StatelessWidget {
             const SizedBox(height: 12),
 
             FilledButton.icon(
-              onPressed: () {
+              onPressed: () async {
+                final allowed = await requireMemberAccess(
+                  context,
+                  message: '지도 정보를 출조 기록으로 저장하려면 로그인이 필요합니다.',
+                );
+
+                if (!allowed || !context.mounted) {
+                  return;
+                }
+
                 if (externalData == null) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('외부 데이터가 없어 위치만 입력한 상태로 기록을 작성합니다.'),
+                      content: Text('외부 데이터가 없어 기록 화면에서 값을 직접 입력해야 합니다.'),
                     ),
                   );
                 }

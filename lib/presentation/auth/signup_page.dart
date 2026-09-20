@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/repositories/auth_session_repository.dart';
 import '../shell/app_shell.dart';
 import 'login_page.dart';
 
@@ -39,29 +40,23 @@ class _SignupPageState extends State<SignupPage> {
         password.isEmpty ||
         passwordConfirm.isEmpty ||
         nickname.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('필수 정보를 모두 입력하세요.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('필수 정보를 모두 입력하세요.')));
       return;
     }
 
     if (password != passwordConfirm) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('비밀번호가 일치하지 않습니다.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('비밀번호가 일치하지 않습니다.')));
       return;
     }
 
     if (!agreeTerms || !agreePrivacy) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('필수 약관에 동의해야 합니다.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('필수 약관에 동의해야 합니다.')));
       return;
     }
 
@@ -73,10 +68,15 @@ class _SignupPageState extends State<SignupPage> {
 
     if (!mounted) return;
 
+    await AuthSessionRepository.instance.signInAsFree(
+      email: email,
+      nickname: nickname,
+    );
+
+    if (!mounted) return;
+
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => const AppShell(),
-      ),
+      MaterialPageRoute(builder: (_) => const AppShell()),
       (route) => false,
     );
   }
@@ -84,9 +84,7 @@ class _SignupPageState extends State<SignupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('회원가입'),
-      ),
+      appBar: AppBar(title: const Text('회원가입')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
@@ -95,17 +93,17 @@ class _SignupPageState extends State<SignupPage> {
 
             Text(
               '계정을 만들어 출조 기록을 관리하세요',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
             Text(
               '가입 후 무료 회원으로 시작합니다.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey.shade600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
             ),
             const SizedBox(height: 32),
 
@@ -193,9 +191,7 @@ class _SignupPageState extends State<SignupPage> {
                 TextButton(
                   onPressed: () {
                     Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (_) => const LoginPage(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const LoginPage()),
                     );
                   },
                   child: const Text('로그인'),

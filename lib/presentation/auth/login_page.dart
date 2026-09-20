@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/repositories/auth_session_repository.dart';
 import '../shell/app_shell.dart';
 import 'signup_page.dart';
 
@@ -29,11 +30,9 @@ class _LoginPageState extends State<LoginPage> {
     final password = passwordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('이메일과 비밀번호를 입력하세요.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이메일과 비밀번호를 입력하세요.')));
       return;
     }
 
@@ -45,10 +44,12 @@ class _LoginPageState extends State<LoginPage> {
 
     if (!mounted) return;
 
+    await AuthSessionRepository.instance.signInAsFree(email: email);
+
+    if (!mounted) return;
+
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => const AppShell(),
-      ),
+      MaterialPageRoute(builder: (_) => const AppShell()),
       (route) => false,
     );
   }
@@ -56,9 +57,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('로그인'),
-      ),
+      appBar: AppBar(title: const Text('로그인')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
@@ -67,17 +66,17 @@ class _LoginPageState extends State<LoginPage> {
 
             Text(
               '다시 오신 것을 환영합니다',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
             Text(
               '출조 기록을 안전하게 관리하려면 로그인하세요.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey.shade600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
             ),
             const SizedBox(height: 32),
 
@@ -125,16 +124,10 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 16),
 
-            OutlinedButton(
-              onPressed: () {},
-              child: const Text('Google로 계속하기'),
-            ),
+            OutlinedButton(onPressed: () {}, child: const Text('Google로 계속하기')),
             const SizedBox(height: 8),
 
-            OutlinedButton(
-              onPressed: () {},
-              child: const Text('Apple로 계속하기'),
-            ),
+            OutlinedButton(onPressed: () {}, child: const Text('Apple로 계속하기')),
             const SizedBox(height: 24),
 
             Row(
@@ -144,9 +137,7 @@ class _LoginPageState extends State<LoginPage> {
                 TextButton(
                   onPressed: () {
                     Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (_) => const SignupPage(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const SignupPage()),
                     );
                   },
                   child: const Text('회원가입'),

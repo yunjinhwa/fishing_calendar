@@ -1,22 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/fish_species.dart';
+import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 
 class FishSpeciesDetailPage extends StatelessWidget {
   final FishSpecies fish;
 
-  const FishSpeciesDetailPage({
-    super.key,
-    required this.fish,
-  });
+  const FishSpeciesDetailPage({super.key, required this.fish});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(fish.name),
-      ),
+      appBar: AppBar(title: Text(fish.name)),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -52,9 +48,9 @@ class FishSpeciesDetailPage extends StatelessWidget {
 
             Text(
               fish.name,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
@@ -62,8 +58,7 @@ class FishSpeciesDetailPage extends StatelessWidget {
               children: [
                 Chip(label: Text(fish.categoryLabel)),
                 const SizedBox(width: 8),
-                if (fish.hasClosedSeason)
-                  const Chip(label: Text('금어기 정보 있음')),
+                if (fish.hasClosedSeason) const Chip(label: Text('금어기 정보 있음')),
               ],
             ),
             const SizedBox(height: 24),
@@ -93,12 +88,19 @@ class FishSpeciesDetailPage extends StatelessWidget {
             const SizedBox(height: 24),
 
             FilledButton.icon(
-              onPressed: () {
+              onPressed: () async {
+                final allowed = await requireMemberAccess(
+                  context,
+                  message: '도감의 어종을 출조 기록으로 저장하려면 로그인이 필요합니다.',
+                );
+
+                if (!allowed || !context.mounted) {
+                  return;
+                }
+
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => RecordFormPage(
-                      initialFishName: fish.name,
-                    ),
+                    builder: (_) => RecordFormPage(initialFishName: fish.name),
                   ),
                 );
               },
@@ -115,17 +117,15 @@ class FishSpeciesDetailPage extends StatelessWidget {
 class _SectionTitle extends StatelessWidget {
   final String title;
 
-  const _SectionTitle({
-    required this.title,
-  });
+  const _SectionTitle({required this.title});
 
   @override
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+      style: Theme.of(
+        context,
+      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
     );
   }
 }
@@ -133,9 +133,7 @@ class _SectionTitle extends StatelessWidget {
 class _InfoCard extends StatelessWidget {
   final List<Widget> children;
 
-  const _InfoCard({
-    required this.children,
-  });
+  const _InfoCard({required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -155,10 +153,7 @@ class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _InfoRow({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -169,19 +164,12 @@ class _InfoRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 64,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-              ),
-            ),
+            child: Text(label, style: TextStyle(color: Colors.grey.shade600)),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
         ],

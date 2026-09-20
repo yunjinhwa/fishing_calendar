@@ -1,21 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/personal_best_record.dart';
+import '../auth/auth_access_guard.dart';
 
 class PersonalBestDetailPage extends StatelessWidget {
   final PersonalBestRecord record;
 
-  const PersonalBestDetailPage({
-    super.key,
-    required this.record,
-  });
+  const PersonalBestDetailPage({super.key, required this.record});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('기록어 상세'),
-      ),
+      appBar: AppBar(title: const Text('기록어 상세')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -38,9 +34,9 @@ class PersonalBestDetailPage extends StatelessWidget {
 
             Text(
               record.speciesName,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
@@ -57,14 +53,8 @@ class PersonalBestDetailPage extends StatelessWidget {
               children: [
                 _InfoRow(label: '최고 크기', value: record.lengthText),
                 _InfoRow(label: '최고 무게', value: record.weightText),
-                _InfoRow(
-                  label: '출조 위치',
-                  value: record.sourceRecord.location,
-                ),
-                _InfoRow(
-                  label: '낚시 장르',
-                  value: record.sourceRecord.genreName,
-                ),
+                _InfoRow(label: '출조 위치', value: record.sourceRecord.location),
+                _InfoRow(label: '낚시 장르', value: record.sourceRecord.genreName),
               ],
             ),
             const SizedBox(height: 24),
@@ -81,10 +71,7 @@ class PersonalBestDetailPage extends StatelessWidget {
                     record.sourceRecord.endAt,
                   ),
                 ),
-                _InfoRow(
-                  label: '물때',
-                  value: record.sourceRecord.tide ?? '-',
-                ),
+                _InfoRow(label: '물때', value: record.sourceRecord.tide ?? '-'),
                 _InfoRow(
                   label: '날씨',
                   value: record.sourceRecord.weather ?? '-',
@@ -102,12 +89,19 @@ class PersonalBestDetailPage extends StatelessWidget {
 
             _InfoCard(
               children: [
-                const Text(
-                  '기록어 공유 이미지는 현재 준비 중입니다.',
-                ),
+                const Text('기록어 공유 이미지는 현재 준비 중입니다.'),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: () {
+                  onPressed: () async {
+                    final allowed = await requireMemberAccess(
+                      context,
+                      message: '기록어 공유는 로그인 후 사용할 수 있습니다.',
+                    );
+
+                    if (!allowed || !context.mounted) {
+                      return;
+                    }
+
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text('공유 이미지 생성 기능은 현재 준비 중입니다.'),
@@ -149,17 +143,15 @@ class PersonalBestDetailPage extends StatelessWidget {
 class _SectionTitle extends StatelessWidget {
   final String title;
 
-  const _SectionTitle({
-    required this.title,
-  });
+  const _SectionTitle({required this.title});
 
   @override
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+      style: Theme.of(
+        context,
+      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
     );
   }
 }
@@ -167,9 +159,7 @@ class _SectionTitle extends StatelessWidget {
 class _InfoCard extends StatelessWidget {
   final List<Widget> children;
 
-  const _InfoCard({
-    required this.children,
-  });
+  const _InfoCard({required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -189,10 +179,7 @@ class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
+  const _InfoRow({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -203,19 +190,12 @@ class _InfoRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 72,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-              ),
-            ),
+            child: Text(label, style: TextStyle(color: Colors.grey.shade600)),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
         ],

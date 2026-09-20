@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import '../calendar/calendar_page.dart';
 
@@ -9,9 +10,7 @@ class OfflineFreePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('오프라인 모드'),
-      ),
+      appBar: AppBar(title: const Text('오프라인 모드')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
@@ -25,9 +24,9 @@ class OfflineFreePage extends StatelessWidget {
 
             Text(
               '오프라인 상태입니다',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
@@ -51,11 +50,18 @@ class OfflineFreePage extends StatelessWidget {
             const SizedBox(height: 16),
 
             FilledButton.icon(
-              onPressed: () {
+              onPressed: () async {
+                final allowed = await requireMemberAccess(
+                  context,
+                  message: '오프라인 기록 작성은 로그인 후 사용할 수 있습니다.',
+                );
+
+                if (!allowed || !context.mounted) {
+                  return;
+                }
+
                 Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const RecordFormPage(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const RecordFormPage()),
                 );
               },
               icon: const Icon(Icons.edit_note),
@@ -65,11 +71,9 @@ class OfflineFreePage extends StatelessWidget {
 
             OutlinedButton.icon(
               onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const CalendarPage(),
-                  ),
-                );
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const CalendarPage()));
               },
               icon: const Icon(Icons.calendar_month_outlined),
               label: const Text('캘린더 보기'),
@@ -79,9 +83,7 @@ class OfflineFreePage extends StatelessWidget {
             TextButton.icon(
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('네트워크 연결 상태를 다시 확인합니다.'),
-                  ),
+                  const SnackBar(content: Text('네트워크 연결 상태를 다시 확인합니다.')),
                 );
               },
               icon: const Icon(Icons.refresh),
