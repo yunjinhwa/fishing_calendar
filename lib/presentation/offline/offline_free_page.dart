@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/repositories/auth_session_repository.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import '../calendar/calendar_page.dart';
@@ -51,6 +52,15 @@ class OfflineFreePage extends StatelessWidget {
 
             FilledButton.icon(
               onPressed: () async {
+                if (AuthSessionRepository.instance.isPaid) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('유료 회원의 오프라인 변경은 업로드 대기열에 저장해야 합니다.'),
+                    ),
+                  );
+                  return;
+                }
+
                 final allowed = await requireMemberAccess(
                   context,
                   message: '오프라인 기록 작성은 로그인 후 사용할 수 있습니다.',

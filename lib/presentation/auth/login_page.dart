@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 
+import '../../core/validation/auth_input_validator.dart';
 import '../../data/repositories/auth_session_repository.dart';
+import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/outbox_memory_repository.dart';
+import '../../data/services/plan_policy_service.dart';
+import '../../data/services/record_mutation_service.dart';
 import '../shell/app_shell.dart';
 import 'signup_page.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  final bool returnToPrevious;
+
+  const LoginPage({super.key, this.returnToPrevious = false});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -27,12 +34,19 @@ class _LoginPageState extends State<LoginPage> {
 
   void login() async {
     final email = emailController.text.trim();
-    final password = passwordController.text.trim();
+    final password = passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('이메일과 비밀번호를 입력하세요.')));
+      return;
+    }
+
+    if (!AuthInputValidator.isValidEmail(email)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이메일 형식이 올바르지 않습니다.')));
       return;
     }
 
@@ -44,9 +58,42 @@ class _LoginPageState extends State<LoginPage> {
 
     if (!mounted) return;
 
-    await AuthSessionRepository.instance.signInAsFree(email: email);
+    final result = await AuthSessionRepository.instance.signIn(
+      email: email,
+      password: password,
+      rememberSession: rememberLogin,
+    );
+
+    if (result != AuthSignInResult.success) {
+      if (!mounted) return;
+
+      setState(() {
+        isSubmitting = false;
+      });
+      final message = switch (result) {
+        AuthSignInResult.accountNotFound => '가입된 계정을 찾을 수 없습니다.',
+        AuthSignInResult.invalidCredentials => '이메일 또는 비밀번호가 일치하지 않습니다.',
+        AuthSignInResult.credentialSetupRequired =>
+          '이전 버전 계정입니다. 기존 로그인 상태에서 비밀번호를 먼저 설정해 주세요.',
+        AuthSignInResult.success => '',
+      };
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
+
+    await FishingRecordMemoryRepository.instance.loadRecords();
+    await OutboxMemoryRepository.instance.loadItems();
+    await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
+    await PlanPolicyService.instance.resumePendingMigration();
 
     if (!mounted) return;
+
+    if (widget.returnToPrevious) {
+      Navigator.of(context).pop(true);
+      return;
+    }
 
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AppShell()),
@@ -135,10 +182,24 @@ class _LoginPageState extends State<LoginPage> {
               children: [
                 const Text('계정이 없으신가요?'),
                 TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => const SignupPage()),
+                  onPressed: () async {
+                    if (!widget.returnToPrevious) {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(builder: (_) => const SignupPage()),
+                      );
+                      return;
+                    }
+
+                    final signedUp = await Navigator.of(context).push<bool>(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            const SignupPage(returnToPrevious: true),
+                      ),
                     );
+
+                    if (signedUp == true && context.mounted) {
+                      Navigator.of(context).pop(true);
+                    }
                   },
                   child: const Text('회원가입'),
                 ),

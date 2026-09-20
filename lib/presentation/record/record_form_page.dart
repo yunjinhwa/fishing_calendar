@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../data/models/fishing_record.dart';
-import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/services/record_mutation_service.dart';
 import '../auth/auth_access_guard.dart';
 
 class RecordFormPage extends StatefulWidget {
@@ -282,9 +282,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
     );
 
     if (isEditMode) {
-      await FishingRecordMemoryRepository.instance.updateRecord(record);
+      await RecordMutationService.instance.updateRecord(record);
     } else {
-      await FishingRecordMemoryRepository.instance.addRecord(record);
+      await RecordMutationService.instance.addRecord(record);
     }
 
     if (!mounted) {
