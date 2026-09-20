@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import '../sync/outbox_page.dart';
 import '../../data/repositories/outbox_memory_repository.dart';
@@ -38,9 +39,7 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
   Widget build(BuildContext context) {
     final pendingCount = OutboxMemoryRepository.instance.pendingCount;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('오프라인 모드'),
-      ),
+      appBar: AppBar(title: const Text('오프라인 모드')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
@@ -54,9 +53,9 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
             Text(
               '오프라인 상태입니다',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
@@ -91,26 +90,33 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
             FilledButton.icon(
               onPressed: () async {
-              final saved = await Navigator.of(context).push<bool>(
-                MaterialPageRoute(
-                  builder: (_) => const RecordFormPage(),
-                ),
-              );
+                final allowed = await requireMemberAccess(
+                  context,
+                  message: '오프라인 기록 작성은 로그인 후 사용할 수 있습니다.',
+                );
 
-              if (saved != true || !context.mounted) {
-                return;
-              }
+                if (!allowed || !context.mounted) {
+                  return;
+                }
 
-              addCreateOutboxItem();
+                final saved = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(builder: (_) => const RecordFormPage()),
+                );
 
-              setState(() {});
+                if (saved != true || !context.mounted) {
+                  return;
+                }
 
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('오프라인 저장 요청이 업로드 대기열에 추가되었습니다.'),
-                ),
-              );
-            },
+                addCreateOutboxItem();
+
+                setState(() {});
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('오프라인 저장 요청이 업로드 대기열에 추가되었습니다.'),
+                  ),
+                );
+              },
               icon: const Icon(Icons.edit_note),
               label: const Text('기록 작성'),
             ),
@@ -118,11 +124,9 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
             OutlinedButton.icon(
               onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const CalendarPage(),
-                  ),
-                );
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const CalendarPage()));
               },
               icon: const Icon(Icons.calendar_month_outlined),
               label: const Text('캘린더 보기'),
@@ -131,11 +135,9 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
             OutlinedButton.icon(
               onPressed: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const OutboxPage(),
-                  ),
-                );
+                await Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const OutboxPage()));
 
                 if (mounted) {
                   setState(() {});
@@ -149,9 +151,7 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
             TextButton.icon(
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('네트워크 연결 상태를 다시 확인합니다.'),
-                  ),
+                  const SnackBar(content: Text('네트워크 연결 상태를 다시 확인합니다.')),
                 );
               },
               icon: const Icon(Icons.refresh),

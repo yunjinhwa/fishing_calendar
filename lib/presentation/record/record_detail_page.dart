@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../auth/auth_access_guard.dart';
 import 'record_form_page.dart';
 
 class RecordDetailPage extends StatefulWidget {
@@ -28,6 +29,15 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
   }
 
   Future<void> editRecord() async {
+    final allowed = await requireMemberAccess(
+      context,
+      message: '출조 기록 수정은 로그인 후 사용할 수 있습니다.',
+    );
+
+    if (!allowed || !mounted) {
+      return;
+    }
+
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => RecordFormPage(editingRecord: record)),
     );
@@ -48,6 +58,15 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
   }
 
   Future<void> deleteRecord() async {
+    final allowed = await requireMemberAccess(
+      context,
+      message: '출조 기록 삭제는 로그인 후 사용할 수 있습니다.',
+    );
+
+    if (!allowed || !mounted) {
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/repositories/auth_session_repository.dart';
 import '../shell/app_shell.dart';
 import 'login_page.dart';
 import 'signup_page.dart';
@@ -27,16 +28,16 @@ class LoginChoicePage extends StatelessWidget {
               Text(
                 '낚시 캘린더',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 8),
 
               Text(
                 '바다와 함께하는 나의 출조 기록',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.grey.shade600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
               ),
 
               const Spacer(),
@@ -44,10 +45,16 @@ class LoginChoicePage extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    await AuthSessionRepository.instance.continueAsGuest();
+
+                    if (!context.mounted) {
+                      return;
+                    }
+
                     Navigator.of(context).pushReplacement(
                       MaterialPageRoute(
-                        builder: (_) => const AppShell(),
+                        builder: (_) => const AppShell(initialIndex: 1),
                       ),
                     );
                   },
@@ -61,9 +68,7 @@ class LoginChoicePage extends StatelessWidget {
                 child: FilledButton(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const LoginPage(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const LoginPage()),
                     );
                   },
                   child: const Text('로그인'),
@@ -76,9 +81,7 @@ class LoginChoicePage extends StatelessWidget {
                 child: TextButton(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const SignupPage(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const SignupPage()),
                     );
                   },
                   child: const Text('회원가입'),

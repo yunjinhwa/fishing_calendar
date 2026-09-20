@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'map_fallback_page.dart';
 import 'map_detail_page.dart';
+import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import '../../data/models/external_data.dart';
 import '../../data/services/mock_external_data_service.dart';
@@ -166,9 +167,18 @@ class _MapPageState extends State<MapPage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: () {
+                    onPressed: () async {
+                      final allowed = await requireMemberAccess(
+                        context,
+                        message: '지도 정보를 출조 기록으로 저장하려면 로그인이 필요합니다.',
+                      );
+
+                      if (!allowed || !context.mounted) {
+                        return;
+                      }
+
                       if (externalDataErrorMessage != null) {
-                        showMessage('외부 데이터 조회에 실패했습니다. 위치만 입력한 상태로 기록을 작성합니다.');
+                        showMessage('외부 데이터 조회에 실패했습니다. 기록 화면에서 값을 직접 입력하세요.');
                       }
 
                       Navigator.of(context).push(
@@ -178,7 +188,8 @@ class _MapPageState extends State<MapPage> {
                             initialTide: externalData?.tide,
                             initialWeather: externalData?.weather,
                             initialAirTemperature: externalData?.airTemperature,
-                            initialWaterTemperature: externalData?.waterTemperature,
+                            initialWaterTemperature:
+                                externalData?.waterTemperature,
                           ),
                         ),
                       );

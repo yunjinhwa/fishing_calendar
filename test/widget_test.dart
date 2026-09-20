@@ -1,8 +1,11 @@
 import 'package:fishing_build/app.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
+import 'package:fishing_build/data/models/user_plan.dart';
+import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_memory_repository.dart';
 import 'package:fishing_build/presentation/calendar/calendar_page.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
+import 'package:fishing_build/presentation/record/record_form_page.dart';
 import 'package:fishing_build/presentation/shell/app_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    AuthSessionRepository.instance.clearMemoryOnlyForTesting();
     FishingRecordMemoryRepository.instance.clearMemoryOnlyForTesting();
   });
 
@@ -41,7 +45,7 @@ void main() {
     final now = DateTime.now();
     final startAt = DateTime(now.year, now.month, 1, 12);
     await repository.addRecord(
-      FishingRecord(
+      _createRecord(
         id: 'calendar-refresh-test',
         location: 'Test Port',
         startAt: startAt,
@@ -84,7 +88,7 @@ void main() {
     final startAt = DateTime(2026, 5, 21, 12);
 
     await repository.addRecord(
-      FishingRecord(
+      _createRecord(
         id: 'persisted-record-test',
         location: 'Test Port',
         startAt: startAt,
@@ -109,7 +113,7 @@ void main() {
     final startAt = DateTime(2026, 5, 21, 12);
 
     await repository.addRecord(
-      FishingRecord(
+      _createRecord(
         id: 'updated-record-test',
         location: 'Old Port',
         startAt: startAt,
@@ -119,7 +123,7 @@ void main() {
     );
 
     await repository.updateRecord(
-      FishingRecord(
+      _createRecord(
         id: 'updated-record-test',
         location: 'New Port',
         startAt: startAt,
@@ -137,9 +141,14 @@ void main() {
   testWidgets('record detail edit button updates the saved record', (
     WidgetTester tester,
   ) async {
+    await AuthSessionRepository.instance.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'tester@example.com',
+    );
+
     final repository = FishingRecordMemoryRepository.instance;
     final startAt = DateTime(2026, 5, 21, 12);
-    final record = FishingRecord(
+    final record = _createRecord(
       id: 'detail-edit-test',
       location: 'Old Port',
       startAt: startAt,
@@ -180,9 +189,57 @@ void main() {
     expect(find.text('New Port'), findsOneWidget);
   });
 
+  testWidgets('guest is prompted to log in when opening member tabs', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const FishingBuildApp());
+    await tester.tap(find.text('비회원으로 시작하기'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('지도'), findsWidgets);
+
+    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.pumpAndSettle();
+
+    expect(find.text('로그인이 필요합니다'), findsOneWidget);
+    expect(find.text('출조 기록과 내 정보 관리는 로그인 후 사용할 수 있습니다.'), findsOneWidget);
+  });
+
+  testWidgets('record form requires external data before saving', (
+    WidgetTester tester,
+  ) async {
+    await AuthSessionRepository.instance.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'tester@example.com',
+    );
+
+    await tester.pumpWidget(const MaterialApp(home: RecordFormPage()));
+
+    await tester.enterText(find.byType(TextField).first, 'Test Port');
+    await tester.tap(find.text('루어'));
+    await tester.pump();
+
+    final saveButton = find.widgetWithText(FilledButton, '저장');
+    await tester.scrollUntilVisible(
+      saveButton,
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(saveButton);
+    await tester.pump();
+
+    expect(find.text('물때를 입력하세요.'), findsOneWidget);
+    expect(FishingRecordMemoryRepository.instance.getAllRecords(), isEmpty);
+  });
+
   testWidgets('record search stays scrollable while the keyboard is visible', (
     WidgetTester tester,
   ) async {
+    await AuthSessionRepository.instance.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'tester@example.com',
+    );
+
     addTearDown(tester.view.reset);
     tester.view.physicalSize = const Size(390, 640);
     tester.view.devicePixelRatio = 1;
@@ -198,4 +255,24 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     expect(tester.takeException(), isNull);
   });
+}
+
+FishingRecord _createRecord({
+  required String id,
+  required String location,
+  required DateTime startAt,
+  required DateTime endAt,
+  required String genreName,
+}) {
+  return FishingRecord(
+    id: id,
+    location: location,
+    startAt: startAt,
+    endAt: endAt,
+    genreName: genreName,
+    tide: '7물',
+    weather: '맑음',
+    airTemperature: 18,
+    waterTemperature: 16.2,
+  );
 }

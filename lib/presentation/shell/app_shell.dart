@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../data/repositories/auth_session_repository.dart';
+import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
 import '../fish_dictionary/fish_dictionary_page.dart';
 import '../map/map_page.dart';
@@ -7,16 +9,24 @@ import '../my_page/my_page.dart';
 import '../record/record_page.dart';
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  final int initialIndex;
+
+  const AppShell({super.key, this.initialIndex = 0});
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
 class _AppShellState extends State<AppShell> {
-  int selectedIndex = 0;
+  late int selectedIndex;
   int calendarRefreshKey = 0;
   final calendarNavigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    selectedIndex = _normalizeTabIndex(widget.initialIndex);
+  }
 
   List<Widget> get pages {
     return [
@@ -53,7 +63,19 @@ class _AppShellState extends State<AppShell> {
           ? null
           : NavigationBar(
               selectedIndex: selectedIndex,
-              onDestinationSelected: (index) {
+              onDestinationSelected: (index) async {
+                if (_isMemberOnlyTab(index) &&
+                    !AuthSessionRepository.instance.canManageRecords) {
+                  final allowed = await requireMemberAccess(
+                    context,
+                    message: '출조 기록과 내 정보 관리는 로그인 후 사용할 수 있습니다.',
+                  );
+
+                  if (!allowed || !mounted) {
+                    return;
+                  }
+                }
+
                 if (index == 0) {
                   calendarNavigatorKey.currentState?.popUntil(
                     (route) => route.isFirst,
@@ -97,6 +119,22 @@ class _AppShellState extends State<AppShell> {
               ],
             ),
     );
+  }
+
+  bool _isMemberOnlyTab(int index) {
+    return index == 0 || index == 2 || index == 4;
+  }
+
+  int _normalizeTabIndex(int index) {
+    if (index < 0) {
+      return 0;
+    }
+
+    if (index > 4) {
+      return 4;
+    }
+
+    return index;
   }
 }
 
