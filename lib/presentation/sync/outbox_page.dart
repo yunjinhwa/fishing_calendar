@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/outbox_item.dart';
+import '../../data/models/user_plan_policy.dart';
+import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/outbox_memory_repository.dart';
+import '../../data/services/plan_policy_service.dart';
+import '../auth/auth_access_guard.dart';
 
 class OutboxPage extends StatefulWidget {
   const OutboxPage({super.key});
@@ -14,28 +18,46 @@ class _OutboxPageState extends State<OutboxPage> {
   @override
   void initState() {
     super.initState();
-    OutboxMemoryRepository.instance.seedMockItemsIfEmpty();
+    AuthSessionRepository.instance.addListener(_handlePlanChange);
   }
 
-  void mockUploadAllPendingItems() {
+  @override
+  void dispose() {
+    AuthSessionRepository.instance.removeListener(_handlePlanChange);
+    super.dispose();
+  }
+
+  void _handlePlanChange() {
+    if (!mounted || !AuthSessionRepository.instance.canUseOutbox) {
+      return;
+    }
+
+    setState(() {});
+  }
+
+  Future<void> mockUploadAllPendingItems() async {
     final items = OutboxMemoryRepository.instance.getAllItems();
 
     for (final item in items) {
       if (item.status == OutboxStatus.pending ||
           item.status == OutboxStatus.failed) {
-        OutboxMemoryRepository.instance.updateItemStatus(
+        await OutboxMemoryRepository.instance.updateItemStatus(
           itemId: item.id,
           status: OutboxStatus.succeeded,
         );
       }
     }
 
+    await PlanPolicyService.instance.completeMigrationIfPossible();
+
+    if (!mounted) {
+      return;
+    }
+
     setState(() {});
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('대기 중인 항목을 모두 업로드 완료 상태로 변경했습니다.'),
-      ),
+      const SnackBar(content: Text('대기 중인 항목을 모두 업로드 완료 상태로 변경했습니다.')),
     );
   }
 
@@ -43,68 +65,100 @@ class _OutboxPageState extends State<OutboxPage> {
   Widget build(BuildContext context) {
     final items = OutboxMemoryRepository.instance.getAllItems();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('업로드 대기열'),
-        actions: [
-          IconButton(
-            onPressed: mockUploadAllPendingItems,
-            icon: const Icon(Icons.cloud_upload_outlined),
-            tooltip: '전체 전송 처리',
-          ),
-          IconButton(
-            onPressed: () {
-              setState(() {
-                OutboxMemoryRepository.instance.clearSucceeded();
-              });
-            },
-            icon: const Icon(Icons.cleaning_services_outlined),
-            tooltip: '완료 항목 정리',
-          ),
-        ],
-      ),
-      body: items.isEmpty
-          ? const _EmptyOutboxView()
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: items.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final item = items[index];
+    return PaidFeatureGate(
+      title: '업로드 대기열',
+      message: '업로드 대기열은 유료 플랜에서 사용할 수 있습니다.',
+      capability: UserCapability.outbox,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('업로드 대기열'),
+          actions: [
+            IconButton(
+              onPressed:
+                  items.any((item) => item.status != OutboxStatus.succeeded)
+                  ? mockUploadAllPendingItems
+                  : null,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              tooltip: '전체 전송 처리',
+            ),
+            IconButton(
+              onPressed:
+                  items.any(
+                    (item) =>
+                        item.status == OutboxStatus.succeeded &&
+                        (!AuthSessionRepository
+                                .instance
+                                .isPlanMigrationPending ||
+                            !item.isMigration),
+                  )
+                  ? () async {
+                      await OutboxMemoryRepository.instance.clearSucceeded(
+                        includeMigration: !AuthSessionRepository
+                            .instance
+                            .isPlanMigrationPending,
+                      );
+                      if (mounted) {
+                        setState(() {});
+                      }
+                    }
+                  : null,
+              icon: const Icon(Icons.cleaning_services_outlined),
+              tooltip: '완료 항목 정리',
+            ),
+          ],
+        ),
+        body: items.isEmpty
+            ? const _EmptyOutboxView()
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: items.length,
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  final item = items[index];
 
-                return _OutboxItemCard(
-                  item: item,
-                  onRetry: () {
-                    setState(() {
-                      OutboxMemoryRepository.instance.retryItem(item.id);
-                    });
+                  return _OutboxItemCard(
+                    item: item,
+                    onRetry: () async {
+                      await OutboxMemoryRepository.instance.retryItem(item.id);
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('재시도 대기 상태로 변경했습니다.'),
-                      ),
-                    );
-                  },
-                  onMockSuccess: () {
-                    setState(() {
-                      OutboxMemoryRepository.instance.updateItemStatus(
+                      if (!context.mounted) {
+                        return;
+                      }
+
+                      setState(() {});
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('재시도 대기 상태로 변경했습니다.')),
+                      );
+                    },
+                    onMockSuccess: () async {
+                      await OutboxMemoryRepository.instance.updateItemStatus(
                         itemId: item.id,
                         status: OutboxStatus.succeeded,
                       );
-                    });
-                  },
-                  onMockFail: () {
-                    setState(() {
-                      OutboxMemoryRepository.instance.updateItemStatus(
+                      await PlanPolicyService.instance
+                          .completeMigrationIfPossible();
+
+                      if (context.mounted) {
+                        setState(() {});
+                      }
+                    },
+                    onMockFail: () async {
+                      await OutboxMemoryRepository.instance.updateItemStatus(
                         itemId: item.id,
                         status: OutboxStatus.failed,
                         errorMessage: 'mock 업로드 실패',
                       );
-                    });
-                  },
-                );
-              },
-            ),
+
+                      if (context.mounted) {
+                        setState(() {});
+                      }
+                    },
+                  );
+                },
+              ),
+      ),
     );
   }
 }
@@ -139,10 +193,11 @@ class _OutboxItemCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
+                    '${item.isMigration ? '기존 기록 이전 · ' : ''}'
                     '${item.operationLabel} 요청 · ${item.statusLabel}',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -157,13 +212,16 @@ class _OutboxItemCard extends StatelessWidget {
               Text('마지막 시도: ${_formatDateTime(item.lastTriedAt!)}'),
             ],
 
+            if (item.retryCount > 0) ...[
+              const SizedBox(height: 4),
+              Text('재시도 횟수: ${item.retryCount}회'),
+            ],
+
             if (item.errorMessage != null) ...[
               const SizedBox(height: 8),
               Text(
                 '실패 사유: ${item.errorMessage}',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                ),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ],
 
@@ -237,9 +295,9 @@ class _EmptyOutboxView extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               '업로드 대기열이 비어 있습니다.',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(

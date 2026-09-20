@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/conflict_item.dart';
+import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/conflict_memory_repository.dart';
+import '../auth/auth_access_guard.dart';
 import 'conflict_detail_page.dart';
+import 'outbox_page.dart';
 
 class SyncConflictPage extends StatefulWidget {
   const SyncConflictPage({super.key});
@@ -15,7 +18,21 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
   @override
   void initState() {
     super.initState();
-    ConflictMemoryRepository.instance.seedMockItemsIfEmpty();
+    AuthSessionRepository.instance.addListener(_handlePlanChange);
+  }
+
+  @override
+  void dispose() {
+    AuthSessionRepository.instance.removeListener(_handlePlanChange);
+    super.dispose();
+  }
+
+  void _handlePlanChange() {
+    if (!mounted || !AuthSessionRepository.instance.canUseCloudSync) {
+      return;
+    }
+
+    setState(() {});
   }
 
   @override
@@ -23,77 +40,78 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
     final conflicts = ConflictMemoryRepository.instance.getUnresolvedItems();
     final unresolvedCount = ConflictMemoryRepository.instance.unresolvedCount;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('동기화/충돌 관리'),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Icon(
-                      unresolvedCount == 0
-                          ? Icons.cloud_done_outlined
-                          : Icons.sync_problem_outlined,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      unresolvedCount == 0
-                          ? '모든 데이터가 최신 상태입니다.'
-                          : '해결이 필요한 충돌이 있습니다.',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '미해결 충돌 $unresolvedCount건',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            Text(
-              '충돌 알림',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 8),
-
-            if (conflicts.isEmpty)
-              const _EmptyConflictView()
-            else
-              ...conflicts.map(
-                (conflict) => _ConflictCard(
-                  conflict: conflict,
-                  onTap: () async {
-                    final changed = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(
-                        builder: (_) => ConflictDetailPage(
-                          conflict: conflict,
-                        ),
+    return PaidFeatureGate(
+      title: '동기화/충돌 관리',
+      message: '동기화와 충돌 관리는 유료 플랜에서 사용할 수 있습니다.',
+      migrationDestinationBuilder: (_) => const OutboxPage(),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('동기화/충돌 관리')),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Icon(
+                        unresolvedCount == 0
+                            ? Icons.cloud_done_outlined
+                            : Icons.sync_problem_outlined,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.primary,
                       ),
-                    );
-
-                    if (changed == true && context.mounted) {
-                      setState(() {});
-                    }
-                  },
+                      const SizedBox(height: 12),
+                      Text(
+                        unresolvedCount == 0
+                            ? '모든 데이터가 최신 상태입니다.'
+                            : '해결이 필요한 충돌이 있습니다.',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '미해결 충돌 $unresolvedCount건',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-          ],
+              const SizedBox(height: 16),
+
+              Text(
+                '충돌 알림',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+
+              if (conflicts.isEmpty)
+                const _EmptyConflictView()
+              else
+                ...conflicts.map(
+                  (conflict) => _ConflictCard(
+                    conflict: conflict,
+                    onTap: () async {
+                      final changed = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ConflictDetailPage(conflict: conflict),
+                        ),
+                      );
+
+                      if (changed == true && context.mounted) {
+                        setState(() {});
+                      }
+                    },
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -104,10 +122,7 @@ class _ConflictCard extends StatelessWidget {
   final ConflictItem conflict;
   final VoidCallback onTap;
 
-  const _ConflictCard({
-    required this.conflict,
-    required this.onTap,
-  });
+  const _ConflictCard({required this.conflict, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -161,9 +176,9 @@ class _EmptyConflictView extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               '충돌 알림이 없습니다.',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(

@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../../core/validation/auth_input_validator.dart';
 import '../../data/repositories/auth_session_repository.dart';
+import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/outbox_memory_repository.dart';
+import '../../data/services/record_mutation_service.dart';
 import '../shell/app_shell.dart';
 import 'login_page.dart';
 
 class SignupPage extends StatefulWidget {
-  const SignupPage({super.key});
+  final bool returnToPrevious;
+
+  const SignupPage({super.key, this.returnToPrevious = false});
 
   @override
   State<SignupPage> createState() => _SignupPageState();
@@ -32,8 +38,8 @@ class _SignupPageState extends State<SignupPage> {
 
   void signup() async {
     final email = emailController.text.trim();
-    final password = passwordController.text.trim();
-    final passwordConfirm = passwordConfirmController.text.trim();
+    final password = passwordController.text;
+    final passwordConfirm = passwordConfirmController.text;
     final nickname = nicknameController.text.trim();
 
     if (email.isEmpty ||
@@ -46,10 +52,31 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
+    if (!AuthInputValidator.isValidEmail(email)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이메일 형식이 올바르지 않습니다.')));
+      return;
+    }
+
+    if (!AuthInputValidator.isValidPassword(password)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('비밀번호는 8자 이상이며 영문과 숫자를 포함해야 합니다.')),
+      );
+      return;
+    }
+
     if (password != passwordConfirm) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('비밀번호가 일치하지 않습니다.')));
+      return;
+    }
+
+    if (!AuthInputValidator.isValidNickname(nickname)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('닉네임은 2자 이상 20자 이하로 입력하세요.')),
+      );
       return;
     }
 
@@ -68,12 +95,34 @@ class _SignupPageState extends State<SignupPage> {
 
     if (!mounted) return;
 
-    await AuthSessionRepository.instance.signInAsFree(
+    final registered = await AuthSessionRepository.instance.registerAsFree(
       email: email,
+      password: password,
       nickname: nickname,
     );
 
     if (!mounted) return;
+
+    if (!registered) {
+      setState(() {
+        isSubmitting = false;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이미 가입된 이메일입니다. 로그인해 주세요.')));
+      return;
+    }
+
+    await FishingRecordMemoryRepository.instance.loadRecords();
+    await OutboxMemoryRepository.instance.loadItems();
+    await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
+
+    if (!mounted) return;
+
+    if (widget.returnToPrevious) {
+      Navigator.of(context).pop(true);
+      return;
+    }
 
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AppShell()),
@@ -189,10 +238,23 @@ class _SignupPageState extends State<SignupPage> {
               children: [
                 const Text('이미 계정이 있으신가요?'),
                 TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (_) => const LoginPage()),
+                  onPressed: () async {
+                    if (!widget.returnToPrevious) {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(builder: (_) => const LoginPage()),
+                      );
+                      return;
+                    }
+
+                    final loggedIn = await Navigator.of(context).push<bool>(
+                      MaterialPageRoute(
+                        builder: (_) => const LoginPage(returnToPrevious: true),
+                      ),
                     );
+
+                    if (loggedIn == true && context.mounted) {
+                      Navigator.of(context).pop(true);
+                    }
                   },
                   child: const Text('로그인'),
                 ),

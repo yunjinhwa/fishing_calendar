@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/fishing_record.dart';
+import 'auth_session_repository.dart';
 
 class FishingRecordMemoryRepository extends ChangeNotifier {
   FishingRecordMemoryRepository._();
@@ -11,33 +12,39 @@ class FishingRecordMemoryRepository extends ChangeNotifier {
   static final FishingRecordMemoryRepository instance =
       FishingRecordMemoryRepository._();
 
-  static const String _storageKey = 'fishing_records';
+  static const String _legacyStorageKey = 'fishing_records';
+  static const String _storageKey = 'fishing_records_by_account_v1';
 
-  final List<FishingRecord> _records = [];
+  final Map<String, List<FishingRecord>> _recordsByOwner = {};
+  List<FishingRecord>? _quarantinedLegacyRecords;
+  bool _hasQuarantinedLegacyData = false;
+
+  String get _ownerKey => AuthSessionRepository.instance.dataOwnerKey;
+
+  List<FishingRecord> get _records =>
+      _recordsByOwner.putIfAbsent(_ownerKey, () => <FishingRecord>[]);
+
+  bool get hasQuarantinedLegacyData => _hasQuarantinedLegacyData;
+  bool get canImportQuarantinedLegacyRecords =>
+      _hasQuarantinedLegacyData && _quarantinedLegacyRecords != null;
+  int? get quarantinedLegacyRecordCount => _quarantinedLegacyRecords?.length;
 
   Future<void> loadRecords() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString(_storageKey);
+    final scopedJson = prefs.getString(_storageKey);
 
-    if (jsonString == null || jsonString.isEmpty) {
-      if (_records.isNotEmpty) {
-        _records.clear();
-        notifyListeners();
-      }
+    _recordsByOwner.clear();
 
-      return;
+    if (scopedJson != null && scopedJson.isNotEmpty) {
+      _recordsByOwner.addAll(_decodeScopedRecords(scopedJson));
     }
 
-    final jsonList = jsonDecode(jsonString) as List;
-
-    _records
-      ..clear()
-      ..addAll(
-        jsonList.map(
-          (item) =>
-              FishingRecord.fromJson(Map<String, dynamic>.from(item as Map)),
-        ),
-      );
+    final legacyJson = prefs.getString(_legacyStorageKey);
+    _hasQuarantinedLegacyData =
+        legacyJson != null && legacyJson.trim().isNotEmpty;
+    _quarantinedLegacyRecords = _hasQuarantinedLegacyData
+        ? _decodeLegacyRecords(legacyJson!)
+        : <FishingRecord>[];
 
     notifyListeners();
   }
@@ -45,10 +52,72 @@ class FishingRecordMemoryRepository extends ChangeNotifier {
   Future<void> _saveRecords() async {
     final prefs = await SharedPreferences.getInstance();
     final jsonString = jsonEncode(
-      _records.map((record) => record.toJson()).toList(),
+      _recordsByOwner.map(
+        (owner, records) =>
+            MapEntry(owner, records.map((record) => record.toJson()).toList()),
+      ),
     );
 
-    await prefs.setString(_storageKey, jsonString);
+    final saved = await prefs.setString(_storageKey, jsonString);
+    if (!saved) {
+      throw StateError('Failed to persist fishing records.');
+    }
+  }
+
+  Map<String, List<FishingRecord>> _decodeScopedRecords(String value) {
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is! Map) {
+        return <String, List<FishingRecord>>{};
+      }
+
+      final recordsByOwner = <String, List<FishingRecord>>{};
+      for (final entry in decoded.entries) {
+        if (entry.value is! List) {
+          continue;
+        }
+
+        final records = <FishingRecord>[];
+        for (final item in entry.value as List) {
+          try {
+            records.add(
+              FishingRecord.fromJson(Map<String, dynamic>.from(item as Map)),
+            );
+          } on FormatException {
+            continue;
+          } on TypeError {
+            continue;
+          }
+        }
+        recordsByOwner[entry.key.toString()] = records;
+      }
+      return recordsByOwner;
+    } on FormatException {
+      return <String, List<FishingRecord>>{};
+    } on TypeError {
+      return <String, List<FishingRecord>>{};
+    }
+  }
+
+  List<FishingRecord>? _decodeLegacyRecords(String value) {
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is! List) {
+        return null;
+      }
+
+      final records = <FishingRecord>[];
+      for (final item in decoded) {
+        records.add(
+          FishingRecord.fromJson(Map<String, dynamic>.from(item as Map)),
+        );
+      }
+      return records;
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
   }
 
   List<FishingRecord> getAllRecords() {
@@ -71,7 +140,12 @@ class FishingRecordMemoryRepository extends ChangeNotifier {
 
   Future<void> addRecord(FishingRecord record) async {
     _records.add(record);
-    await _saveRecords();
+    try {
+      await _saveRecords();
+    } catch (_) {
+      _records.removeLast();
+      rethrow;
+    }
     notifyListeners();
   }
 
@@ -84,20 +158,31 @@ class FishingRecordMemoryRepository extends ChangeNotifier {
       throw StateError('Record not found: ${record.id}');
     }
 
+    final previousRecord = _records[index];
     _records[index] = record;
-    await _saveRecords();
+    try {
+      await _saveRecords();
+    } catch (_) {
+      _records[index] = previousRecord;
+      rethrow;
+    }
     notifyListeners();
   }
 
   Future<void> deleteRecord(String recordId) async {
-    final previousLength = _records.length;
-
-    _records.removeWhere((record) => record.id == recordId);
-    await _saveRecords();
-
-    if (_records.length != previousLength) {
-      notifyListeners();
+    final index = _records.indexWhere((record) => record.id == recordId);
+    if (index == -1) {
+      return;
     }
+
+    final removedRecord = _records.removeAt(index);
+    try {
+      await _saveRecords();
+    } catch (_) {
+      _records.insert(index, removedRecord);
+      rethrow;
+    }
+    notifyListeners();
   }
 
   Future<void> clear() async {
@@ -106,14 +191,63 @@ class FishingRecordMemoryRepository extends ChangeNotifier {
       return;
     }
 
+    final previousRecords = List<FishingRecord>.of(_records);
     _records.clear();
-    await _saveRecords();
+    try {
+      await _saveRecords();
+    } catch (_) {
+      _records.addAll(previousRecords);
+      rethrow;
+    }
     notifyListeners();
+  }
+
+  Future<int> importQuarantinedLegacyRecords() async {
+    if (!AuthSessionRepository.instance.isMember) {
+      throw StateError('Only a signed-in member can import legacy records.');
+    }
+
+    if (!_hasQuarantinedLegacyData) {
+      return 0;
+    }
+
+    final legacyRecords = _quarantinedLegacyRecords;
+    if (legacyRecords == null) {
+      throw StateError('Legacy records could not be decoded safely.');
+    }
+
+    final existingIds = _records.map((record) => record.id).toSet();
+    final importedRecords = legacyRecords
+        .where((record) => existingIds.add(record.id))
+        .toList();
+    _records.addAll(importedRecords);
+
+    try {
+      await _saveRecords();
+    } catch (_) {
+      _records.removeWhere(
+        (record) => importedRecords.any((item) => item.id == record.id),
+      );
+      rethrow;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final removed = await prefs.remove(_legacyStorageKey);
+    if (!removed) {
+      throw StateError('Failed to finish the legacy record import.');
+    }
+
+    _hasQuarantinedLegacyData = false;
+    _quarantinedLegacyRecords = <FishingRecord>[];
+    notifyListeners();
+    return importedRecords.length;
   }
 
   @visibleForTesting
   void clearMemoryOnlyForTesting() {
-    _records.clear();
+    _recordsByOwner.clear();
+    _quarantinedLegacyRecords = null;
+    _hasQuarantinedLegacyData = false;
     notifyListeners();
   }
 }

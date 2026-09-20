@@ -37,3 +37,27 @@ enum UserPlan {
     }
   }
 }
+
+enum PlanMigrationStatus {
+  none,
+  localToCloudPending;
+
+  String get storageValue {
+    switch (this) {
+      case PlanMigrationStatus.none:
+        return 'none';
+      case PlanMigrationStatus.localToCloudPending:
+        return 'local_to_cloud_pending';
+    }
+  }
+
+  static PlanMigrationStatus fromStorageValue(String? value) {
+    switch (value) {
+      case 'local_to_cloud_pending':
+        return PlanMigrationStatus.localToCloudPending;
+      case 'none':
+      default:
+        return PlanMigrationStatus.none;
+    }
+  }
+}

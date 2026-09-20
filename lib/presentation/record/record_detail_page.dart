@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/services/record_mutation_service.dart';
 import '../auth/auth_access_guard.dart';
 import 'record_form_page.dart';
 
@@ -95,7 +96,7 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
       return;
     }
 
-    await _recordRepository.deleteRecord(record.id);
+    await RecordMutationService.instance.deleteRecord(record.id);
 
     if (!mounted) {
       return;

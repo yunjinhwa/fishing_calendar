@@ -18,6 +18,7 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  final authSession = AuthSessionRepository.instance;
   late int selectedIndex;
   int calendarRefreshKey = 0;
   final calendarNavigatorKey = GlobalKey<NavigatorState>();
@@ -25,7 +26,24 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    selectedIndex = _normalizeTabIndex(widget.initialIndex);
+    selectedIndex = _initialTabIndex(widget.initialIndex);
+    authSession.addListener(_handleSessionChange);
+  }
+
+  @override
+  void dispose() {
+    authSession.removeListener(_handleSessionChange);
+    super.dispose();
+  }
+
+  void _handleSessionChange() {
+    if (!mounted || !authSession.isGuest || !_isMemberOnlyTab(selectedIndex)) {
+      return;
+    }
+
+    setState(() {
+      selectedIndex = 1;
+    });
   }
 
   List<Widget> get pages {
@@ -64,8 +82,7 @@ class _AppShellState extends State<AppShell> {
           : NavigationBar(
               selectedIndex: selectedIndex,
               onDestinationSelected: (index) async {
-                if (_isMemberOnlyTab(index) &&
-                    !AuthSessionRepository.instance.canManageRecords) {
+                if (_isMemberOnlyTab(index) && !authSession.canManageRecords) {
                   final allowed = await requireMemberAccess(
                     context,
                     message: '출조 기록과 내 정보 관리는 로그인 후 사용할 수 있습니다.',
@@ -135,6 +152,15 @@ class _AppShellState extends State<AppShell> {
     }
 
     return index;
+  }
+
+  int _initialTabIndex(int index) {
+    final normalizedIndex = _normalizeTabIndex(index);
+    if (authSession.isGuest && _isMemberOnlyTab(normalizedIndex)) {
+      return 1;
+    }
+
+    return normalizedIndex;
   }
 }
 
