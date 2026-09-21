@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/outbox_item.dart';
 import '../../data/models/user_plan_policy.dart';
 import '../../data/repositories/auth_session_repository.dart';
-import '../../data/repositories/outbox_memory_repository.dart';
+import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/plan_policy_service.dart';
 import '../auth/auth_access_guard.dart';
 
@@ -36,12 +36,12 @@ class _OutboxPageState extends State<OutboxPage> {
   }
 
   Future<void> mockUploadAllPendingItems() async {
-    final items = OutboxMemoryRepository.instance.getAllItems();
+    final items = OutboxRepository.instance.getAllItems();
 
     for (final item in items) {
       if (item.status == OutboxStatus.pending ||
           item.status == OutboxStatus.failed) {
-        await OutboxMemoryRepository.instance.updateItemStatus(
+        await OutboxRepository.instance.updateItemStatus(
           itemId: item.id,
           status: OutboxStatus.succeeded,
         );
@@ -63,7 +63,7 @@ class _OutboxPageState extends State<OutboxPage> {
 
   @override
   Widget build(BuildContext context) {
-    final items = OutboxMemoryRepository.instance.getAllItems();
+    final items = OutboxRepository.instance.getAllItems();
 
     return PaidFeatureGate(
       title: '업로드 대기열',
@@ -92,7 +92,7 @@ class _OutboxPageState extends State<OutboxPage> {
                             !item.isMigration),
                   )
                   ? () async {
-                      await OutboxMemoryRepository.instance.clearSucceeded(
+                      await OutboxRepository.instance.clearSucceeded(
                         includeMigration: !AuthSessionRepository
                             .instance
                             .isPlanMigrationPending,
@@ -120,7 +120,7 @@ class _OutboxPageState extends State<OutboxPage> {
                   return _OutboxItemCard(
                     item: item,
                     onRetry: () async {
-                      await OutboxMemoryRepository.instance.retryItem(item.id);
+                      await OutboxRepository.instance.retryItem(item.id);
 
                       if (!context.mounted) {
                         return;
@@ -133,7 +133,7 @@ class _OutboxPageState extends State<OutboxPage> {
                       );
                     },
                     onMockSuccess: () async {
-                      await OutboxMemoryRepository.instance.updateItemStatus(
+                      await OutboxRepository.instance.updateItemStatus(
                         itemId: item.id,
                         status: OutboxStatus.succeeded,
                       );
@@ -145,7 +145,7 @@ class _OutboxPageState extends State<OutboxPage> {
                       }
                     },
                     onMockFail: () async {
-                      await OutboxMemoryRepository.instance.updateItemStatus(
+                      await OutboxRepository.instance.updateItemStatus(
                         itemId: item.id,
                         status: OutboxStatus.failed,
                         errorMessage: 'mock 업로드 실패',

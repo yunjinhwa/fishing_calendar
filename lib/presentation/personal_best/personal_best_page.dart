@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/personal_best_record.dart';
-import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/personal_best_repository.dart';
 import 'personal_best_detail_page.dart';
 
@@ -14,7 +14,7 @@ class PersonalBestPage extends StatefulWidget {
 
 class _PersonalBestPageState extends State<PersonalBestPage> {
   PersonalBestSortType sortType = PersonalBestSortType.length;
-  final _recordRepository = FishingRecordMemoryRepository.instance;
+  final _recordRepository = FishingRecordRepository.instance;
 
   @override
   void initState() {

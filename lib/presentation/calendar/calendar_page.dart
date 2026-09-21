@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'daily_record_list_page.dart';
 import '../../data/models/fishing_record.dart';
-import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 //import 'calendar_settings_page.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -14,7 +14,7 @@ class CalendarPage extends StatefulWidget {
 
 class _CalendarPageState extends State<CalendarPage> {
   DateTime focusedMonth = DateTime(DateTime.now().year, DateTime.now().month);
-  final _recordRepository = FishingRecordMemoryRepository.instance;
+  final _recordRepository = FishingRecordRepository.instance;
 
   @override
   void initState() {

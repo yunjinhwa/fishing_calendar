@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 import '../record/record_detail_page.dart';
 
 class DailyRecordListPage extends StatefulWidget {
@@ -14,7 +14,7 @@ class DailyRecordListPage extends StatefulWidget {
 
 class _DailyRecordListPageState extends State<DailyRecordListPage> {
   bool hasChanged = false;
-  final _recordRepository = FishingRecordMemoryRepository.instance;
+  final _recordRepository = FishingRecordRepository.instance;
 
   @override
   void initState() {
