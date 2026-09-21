@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/validation/auth_input_validator.dart';
+import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/plan_policy_service.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../shell/app_shell.dart';
+import 'auth_error_message.dart';
 import 'signup_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -32,7 +34,7 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void login() async {
+  Future<void> login() async {
     final email = emailController.text.trim();
     final password = passwordController.text;
 
@@ -54,50 +56,90 @@ class _LoginPageState extends State<LoginPage> {
       isSubmitting = true;
     });
 
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      String? replacementNickname;
+      late AuthSignInResult result;
+      while (true) {
+        try {
+          result = await AuthSessionRepository.instance.signIn(
+            email: email,
+            password: password,
+            nickname: replacementNickname,
+            rememberSession: rememberLogin,
+          );
+          break;
+        } on AuthFailure catch (failure) {
+          final needsNickname =
+              failure.code == AuthFailureCode.nicknameAlreadyInUse ||
+              failure.code == AuthFailureCode.nicknameRequired;
+          if (!needsNickname || !mounted) {
+            rethrow;
+          }
 
-    if (!mounted) return;
+          replacementNickname = await _requestReplacementNickname(
+            alreadyInUse: failure.code == AuthFailureCode.nicknameAlreadyInUse,
+          );
+          if (replacementNickname == null || !mounted) {
+            return;
+          }
+        }
+      }
 
-    final result = await AuthSessionRepository.instance.signIn(
-      email: email,
-      password: password,
-      rememberSession: rememberLogin,
-    );
+      if (result != AuthSignInResult.success) {
+        if (!mounted) return;
+        final message = switch (result) {
+          AuthSignInResult.accountNotFound => '가입된 계정을 찾을 수 없습니다.',
+          AuthSignInResult.invalidCredentials => '이메일 또는 비밀번호가 일치하지 않습니다.',
+          AuthSignInResult.credentialSetupRequired =>
+            '이전 버전 계정입니다. 기존 비밀번호로 계정을 이전할 수 없습니다. 관리자에게 문의해 주세요.',
+          AuthSignInResult.success => '',
+        };
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+        return;
+      }
 
-    if (result != AuthSignInResult.success) {
+      await FishingRecordRepository.instance.loadRecords();
+      await OutboxRepository.instance.loadItems();
+      await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
+      await PlanPolicyService.instance.resumePendingMigration();
+
       if (!mounted) return;
-
-      setState(() {
-        isSubmitting = false;
-      });
-      final message = switch (result) {
-        AuthSignInResult.accountNotFound => '가입된 계정을 찾을 수 없습니다.',
-        AuthSignInResult.invalidCredentials => '이메일 또는 비밀번호가 일치하지 않습니다.',
-        AuthSignInResult.credentialSetupRequired =>
-          '이전 버전 계정입니다. 기존 로그인 상태에서 비밀번호를 먼저 설정해 주세요.',
-        AuthSignInResult.success => '',
-      };
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-      return;
+      if (widget.returnToPrevious) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AppShell()),
+        (route) => false,
+      );
+    } on AuthFailure catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(authFailureMessage(failure))));
+      }
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('로그인 중 오류가 발생했습니다. 다시 시도해 주세요.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+        });
+      }
     }
+  }
 
-    await FishingRecordRepository.instance.loadRecords();
-    await OutboxRepository.instance.loadItems();
-    await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
-    await PlanPolicyService.instance.resumePendingMigration();
-
-    if (!mounted) return;
-
-    if (widget.returnToPrevious) {
-      Navigator.of(context).pop(true);
-      return;
-    }
-
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const AppShell()),
-      (route) => false,
+  Future<String?> _requestReplacementNickname({required bool alreadyInUse}) {
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ReplacementNicknameDialog(alreadyInUse: alreadyInUse),
     );
   }
 
@@ -171,10 +213,16 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 16),
 
-            OutlinedButton(onPressed: () {}, child: const Text('Google로 계속하기')),
+            const OutlinedButton(
+              onPressed: null,
+              child: Text('Google로 계속하기 (준비 중)'),
+            ),
             const SizedBox(height: 8),
 
-            OutlinedButton(onPressed: () {}, child: const Text('Apple로 계속하기')),
+            const OutlinedButton(
+              onPressed: null,
+              child: Text('Apple로 계속하기 (준비 중)'),
+            ),
             const SizedBox(height: 24),
 
             Row(
@@ -208,6 +256,75 @@ class _LoginPageState extends State<LoginPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ReplacementNicknameDialog extends StatefulWidget {
+  final bool alreadyInUse;
+
+  const _ReplacementNicknameDialog({required this.alreadyInUse});
+
+  @override
+  State<_ReplacementNicknameDialog> createState() =>
+      _ReplacementNicknameDialogState();
+}
+
+class _ReplacementNicknameDialogState
+    extends State<_ReplacementNicknameDialog> {
+  final TextEditingController controller = TextEditingController();
+  String? validationMessage;
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  void submit() {
+    final value = controller.text.trim();
+    if (!AuthInputValidator.isValidNickname(value)) {
+      setState(() {
+        validationMessage = '2~20자의 한글, 영문, 숫자, 공백, 밑줄, 하이픈만 사용할 수 있습니다.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('닉네임 설정'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.alreadyInUse
+                ? '기존 닉네임이 이미 사용 중입니다. 계속하려면 다른 닉네임을 입력하세요.'
+                : '이 계정에 사용할 고유 닉네임을 입력하세요.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: '새 닉네임',
+              errorText: validationMessage,
+              border: const OutlineInputBorder(),
+            ),
+            onSubmitted: (_) => submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(onPressed: submit, child: const Text('확인')),
+      ],
     );
   }
 }

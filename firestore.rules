@@ -1,0 +1,101 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function validNicknameData(data, uid, nicknameKey) {
+      return data.keys().hasOnly(['uid', 'nickname', 'nicknameKey'])
+        && data.uid == uid
+        && data.nickname is string
+        && data.nicknameKey is string
+        && data.nickname == data.nickname.trim()
+        && data.nickname.size() >= 2
+        && data.nickname.size() <= 20
+        && data.nickname.matches('^[A-Za-z0-9가-힣 _-]+$')
+        && data.nicknameKey == data.nickname.lower()
+        && data.nicknameKey == nicknameKey;
+    }
+
+    function profileMatchesClaim(uid, nicknameKey) {
+      return existsAfter(
+          /databases/$(database)/documents/user_profiles/$(uid))
+        && validNicknameData(
+          getAfter(
+            /databases/$(database)/documents/user_profiles/$(uid)
+          ).data,
+          uid,
+          nicknameKey
+        );
+    }
+
+    function claimMatchesProfile(uid, nicknameKey) {
+      return existsAfter(
+          /databases/$(database)/documents/nickname_claims/$(nicknameKey))
+        && validNicknameData(
+          getAfter(
+            /databases/$(database)/documents/nickname_claims/$(nicknameKey)
+          ).data,
+          uid,
+          nicknameKey
+        );
+    }
+
+    match /nickname_claims/{nicknameKey} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.auth.uid == request.resource.data.uid
+        && validNicknameData(
+          request.resource.data,
+          request.auth.uid,
+          nicknameKey
+        )
+        && profileMatchesClaim(request.auth.uid, nicknameKey);
+
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && resource.data.nicknameKey == nicknameKey
+        && request.resource.data.uid == request.auth.uid
+        && validNicknameData(
+          request.resource.data,
+          request.auth.uid,
+          nicknameKey
+        )
+        && profileMatchesClaim(request.auth.uid, nicknameKey);
+
+      allow delete: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && !existsAfter(
+          /databases/$(database)/documents/user_profiles/$(request.auth.uid)
+        );
+    }
+
+    match /user_profiles/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && validNicknameData(request.resource.data, uid, request.resource.data.nicknameKey)
+        && claimMatchesProfile(uid, request.resource.data.nicknameKey);
+
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && resource.data.uid == uid
+        && resource.data.nicknameKey == request.resource.data.nicknameKey
+        && validNicknameData(request.resource.data, uid, request.resource.data.nicknameKey)
+        && claimMatchesProfile(uid, request.resource.data.nicknameKey);
+
+      allow delete: if signedIn()
+        && request.auth.uid == uid
+        && resource.data.uid == uid
+        && !existsAfter(
+          /databases/$(database)/documents/nickname_claims/$(resource.data.nicknameKey)
+        );
+    }
+  }
+}

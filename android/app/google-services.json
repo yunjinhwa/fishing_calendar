@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "958281447142",
+    "project_id": "fishingbuild",
+    "storage_bucket": "fishingbuild.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:958281447142:android:02b9ba2952cc6f0189ed27",
+        "android_client_info": {
+          "package_name": "com.jinhwan.fishing_build"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBIQ396RXjmIqXkhM3yFti2Yy55hYNjtU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

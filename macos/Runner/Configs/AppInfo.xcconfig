@@ -8,7 +8,7 @@
 PRODUCT_NAME = fishing_build
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.fishingBuild
+PRODUCT_BUNDLE_IDENTIFIER = com.jinhwan.fishingBuild
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.

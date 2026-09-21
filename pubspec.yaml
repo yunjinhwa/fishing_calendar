@@ -48,6 +48,9 @@ dependencies:
   connectivity_plus: ^6.0.3
   image_picker: ^1.2.2
   crypto: ^3.0.7
+  firebase_core: ^4.15.0
+  firebase_auth: ^6.7.0
+  cloud_firestore: ^6.10.0
 
 dev_dependencies:
   flutter_test:
