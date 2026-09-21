@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../../data/models/fishing_record.dart';
-import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../auth/auth_access_guard.dart';
 import 'record_form_page.dart';
@@ -19,7 +19,7 @@ class RecordDetailPage extends StatefulWidget {
 }
 
 class _RecordDetailPageState extends State<RecordDetailPage> {
-  final _recordRepository = FishingRecordMemoryRepository.instance;
+  final _recordRepository = FishingRecordRepository.instance;
 
   late FishingRecord record;
 

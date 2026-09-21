@@ -2,7 +2,7 @@ import 'package:fishing_build/app.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
-import 'package:fishing_build/data/repositories/fishing_record_memory_repository.dart';
+import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/presentation/calendar/calendar_page.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
@@ -11,11 +11,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'support/test_database.dart';
+
 void main() {
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await resetTestDatabase();
     AuthSessionRepository.instance.clearMemoryOnlyForTesting();
-    FishingRecordMemoryRepository.instance.clearMemoryOnlyForTesting();
+    FishingRecordRepository.instance.clearCacheOnlyForTesting();
   });
 
   testWidgets('app starts on the login choice page', (
@@ -29,7 +32,7 @@ void main() {
   testWidgets('calendar refreshes when records change', (
     WidgetTester tester,
   ) async {
-    final repository = FishingRecordMemoryRepository.instance;
+    final repository = FishingRecordRepository.instance;
     await repository.clear();
 
     addTearDown(() async {
@@ -84,7 +87,7 @@ void main() {
   testWidgets('saved records reload from local storage', (
     WidgetTester tester,
   ) async {
-    final repository = FishingRecordMemoryRepository.instance;
+    final repository = FishingRecordRepository.instance;
     final startAt = DateTime(2026, 5, 21, 12);
 
     await repository.addRecord(
@@ -97,7 +100,7 @@ void main() {
       ),
     );
 
-    repository.clearMemoryOnlyForTesting();
+    repository.clearCacheOnlyForTesting();
 
     expect(repository.getAllRecords(), isEmpty);
 
@@ -109,7 +112,7 @@ void main() {
   });
 
   test('updated records replace the saved record', () async {
-    final repository = FishingRecordMemoryRepository.instance;
+    final repository = FishingRecordRepository.instance;
     final startAt = DateTime(2026, 5, 21, 12);
 
     await repository.addRecord(
@@ -146,7 +149,7 @@ void main() {
       email: 'tester@example.com',
     );
 
-    final repository = FishingRecordMemoryRepository.instance;
+    final repository = FishingRecordRepository.instance;
     final startAt = DateTime(2026, 5, 21, 12);
     final record = _createRecord(
       id: 'detail-edit-test',
@@ -229,7 +232,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('물때를 입력하세요.'), findsOneWidget);
-    expect(FishingRecordMemoryRepository.instance.getAllRecords(), isEmpty);
+    expect(FishingRecordRepository.instance.getAllRecords(), isEmpty);
   });
 
   testWidgets('record search stays scrollable while the keyboard is visible', (

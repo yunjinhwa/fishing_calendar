@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/validation/auth_input_validator.dart';
 import '../../data/repositories/auth_session_repository.dart';
-import '../../data/repositories/fishing_record_memory_repository.dart';
-import '../../data/repositories/outbox_memory_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/plan_policy_service.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../shell/app_shell.dart';
@@ -83,8 +83,8 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    await FishingRecordMemoryRepository.instance.loadRecords();
-    await OutboxMemoryRepository.instance.loadItems();
+    await FishingRecordRepository.instance.loadRecords();
+    await OutboxRepository.instance.loadItems();
     await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
     await PlanPolicyService.instance.resumePendingMigration();
 

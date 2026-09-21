@@ -1,6 +1,6 @@
 import '../models/fishing_record.dart';
 import '../models/personal_best_record.dart';
-import 'fishing_record_memory_repository.dart';
+import 'fishing_record_repository.dart';
 
 class PersonalBestRepository {
   PersonalBestRepository._();
@@ -10,7 +10,7 @@ class PersonalBestRepository {
   List<PersonalBestRecord> getPersonalBests({
     PersonalBestSortType sortType = PersonalBestSortType.length,
   }) {
-    final records = FishingRecordMemoryRepository.instance.getAllRecords();
+    final records = FishingRecordRepository.instance.getAllRecords();
     final bestBySpecies = <String, PersonalBestRecord>{};
 
     for (final record in records) {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/user_plan_policy.dart';
 import '../../data/repositories/auth_session_repository.dart';
-import '../../data/repositories/outbox_memory_repository.dart';
+import '../../data/repositories/outbox_repository.dart';
 import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
 import '../record/record_form_page.dart';
@@ -38,7 +38,7 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
   @override
   Widget build(BuildContext context) {
-    final pendingCount = OutboxMemoryRepository.instance.pendingCount;
+    final pendingCount = OutboxRepository.instance.pendingCount;
     return PaidFeatureGate(
       title: '오프라인 모드',
       message: '오프라인 업로드 대기열은 유료 플랜에서 사용할 수 있습니다.',

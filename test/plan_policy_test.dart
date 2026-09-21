@@ -6,8 +6,8 @@ import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/models/user_plan_policy.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/conflict_memory_repository.dart';
-import 'package:fishing_build/data/repositories/fishing_record_memory_repository.dart';
-import 'package:fishing_build/data/repositories/outbox_memory_repository.dart';
+import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
+import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/plan_policy_service.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:fishing_build/core/validation/auth_input_validator.dart';
@@ -22,18 +22,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'support/test_database.dart';
+
 void main() {
   final authSession = AuthSessionRepository.instance;
-  final outboxRepository = OutboxMemoryRepository.instance;
+  final outboxRepository = OutboxRepository.instance;
   final conflictRepository = ConflictMemoryRepository.instance;
-  final recordRepository = FishingRecordMemoryRepository.instance;
+  final recordRepository = FishingRecordRepository.instance;
 
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await resetTestDatabase();
     authSession.clearMemoryOnlyForTesting();
-    outboxRepository.clearMemoryOnlyForTesting();
+    outboxRepository.clearCacheOnlyForTesting();
     conflictRepository.clearAll();
-    recordRepository.clearMemoryOnlyForTesting();
+    recordRepository.clearCacheOnlyForTesting();
   });
 
   test('guest, free, and paid plans expose the expected capabilities', () {
@@ -397,8 +400,8 @@ void main() {
     final originalItem = outboxRepository.getAllItems().single;
 
     authSession.clearMemoryOnlyForTesting();
-    outboxRepository.clearMemoryOnlyForTesting();
-    recordRepository.clearMemoryOnlyForTesting();
+    outboxRepository.clearCacheOnlyForTesting();
+    recordRepository.clearCacheOnlyForTesting();
     await authSession.loadSession();
     await recordRepository.loadRecords();
     await outboxRepository.loadItems();
@@ -501,8 +504,8 @@ void main() {
         ),
       );
 
-      recordRepository.clearMemoryOnlyForTesting();
-      outboxRepository.clearMemoryOnlyForTesting();
+      recordRepository.clearCacheOnlyForTesting();
+      outboxRepository.clearCacheOnlyForTesting();
       await recordRepository.loadRecords();
       await outboxRepository.loadItems();
       await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
@@ -523,8 +526,8 @@ void main() {
           payload: updated.toJson(),
         ),
       );
-      recordRepository.clearMemoryOnlyForTesting();
-      outboxRepository.clearMemoryOnlyForTesting();
+      recordRepository.clearCacheOnlyForTesting();
+      outboxRepository.clearCacheOnlyForTesting();
       await recordRepository.loadRecords();
       await outboxRepository.loadItems();
       await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
@@ -760,7 +763,7 @@ void main() {
       expect(prefs.getString('fishing_records'), isNotNull);
 
       authSession.clearMemoryOnlyForTesting();
-      recordRepository.clearMemoryOnlyForTesting();
+      recordRepository.clearCacheOnlyForTesting();
       await authSession.loadSession();
       await recordRepository.loadRecords();
 
@@ -845,8 +848,8 @@ void main() {
     expect(recordRepository.getAllRecords(), isEmpty);
     expect(outboxRepository.getAllItems(), isEmpty);
 
-    recordRepository.clearMemoryOnlyForTesting();
-    outboxRepository.clearMemoryOnlyForTesting();
+    recordRepository.clearCacheOnlyForTesting();
+    outboxRepository.clearCacheOnlyForTesting();
     await recordRepository.loadRecords();
     await outboxRepository.loadItems();
     expect(recordRepository.getAllRecords(), isEmpty);
@@ -857,6 +860,8 @@ void main() {
       email: 'account-a@example.com',
       password: 'Password1',
     );
+    await recordRepository.loadRecords();
+    await outboxRepository.loadItems();
 
     expect(recordRepository.getAllRecords().single.id, 'account-a-record');
     expect(outboxRepository.getAllItems().single.recordId, 'account-a-record');
@@ -882,7 +887,7 @@ void main() {
     expect(deleteItem.payload?['location'], '삭제 전 위치');
     expect(recordRepository.getAllRecords(), isEmpty);
 
-    outboxRepository.clearMemoryOnlyForTesting();
+    outboxRepository.clearCacheOnlyForTesting();
     await outboxRepository.loadItems();
 
     final restoredDeleteItem = outboxRepository.getAllItems().singleWhere(

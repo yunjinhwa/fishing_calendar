@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/validation/auth_input_validator.dart';
 import '../../data/repositories/auth_session_repository.dart';
-import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 import '../auth/auth_access_guard.dart';
 import '../auth/login_choice_page.dart';
 import '../offline/offline_mode_page.dart';
@@ -23,7 +23,7 @@ class MyPage extends StatelessWidget {
   }
 
   Future<void> _showLegacyRecordImportDialog(BuildContext context) async {
-    final repository = FishingRecordMemoryRepository.instance;
+    final repository = FishingRecordRepository.instance;
     if (!repository.canImportQuarantinedLegacyRecords) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('이전 기록 원본은 보존되어 있지만 안전하게 읽을 수 없습니다.')),
@@ -78,7 +78,7 @@ class MyPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final authSession = AuthSessionRepository.instance;
-    final recordRepository = FishingRecordMemoryRepository.instance;
+    final recordRepository = FishingRecordRepository.instance;
 
     return AnimatedBuilder(
       animation: Listenable.merge([authSession, recordRepository]),

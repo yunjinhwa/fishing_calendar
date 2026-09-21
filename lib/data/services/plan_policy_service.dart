@@ -3,8 +3,8 @@ import 'dart:convert';
 import '../models/outbox_item.dart';
 import '../models/user_plan.dart';
 import '../repositories/auth_session_repository.dart';
-import '../repositories/fishing_record_memory_repository.dart';
-import '../repositories/outbox_memory_repository.dart';
+import '../repositories/fishing_record_repository.dart';
+import '../repositories/outbox_repository.dart';
 
 enum PlanChangeResult { changed, unchanged, blockedByPendingUploads }
 
@@ -14,8 +14,8 @@ class PlanPolicyService {
   static final PlanPolicyService instance = PlanPolicyService._();
 
   final _authSession = AuthSessionRepository.instance;
-  final _recordRepository = FishingRecordMemoryRepository.instance;
-  final _outboxRepository = OutboxMemoryRepository.instance;
+  final _recordRepository = FishingRecordRepository.instance;
+  final _outboxRepository = OutboxRepository.instance;
 
   Future<PlanChangeResult> changePlan(UserPlan nextPlan) async {
     if (!_authSession.isMember) {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/fishing_record.dart';
-import '../../data/repositories/fishing_record_memory_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_detail_page.dart';
 import '../record/record_form_page.dart';
@@ -24,7 +24,7 @@ class RecordSearchPage extends StatefulWidget {
 
 class _RecordSearchPageState extends State<RecordSearchPage> {
   final searchController = TextEditingController();
-  final _recordRepository = FishingRecordMemoryRepository.instance;
+  final _recordRepository = FishingRecordRepository.instance;
 
   String? selectedGenre;
   DateTime? startDate;
