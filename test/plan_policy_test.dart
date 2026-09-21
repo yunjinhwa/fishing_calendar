@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:fishing_build/data/auth/auth_gateway.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/outbox_item.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
@@ -90,6 +91,7 @@ void main() {
     await authSession.registerAsFree(
       email: 'temporary@example.com',
       password: 'Password1',
+      nickname: '임시회원',
     );
     await authSession.logout();
     await authSession.signIn(
@@ -112,6 +114,7 @@ void main() {
     await authSession.registerAsFree(
       email: 'login@example.com',
       password: 'Password1',
+      nickname: '로그인회원',
     );
     await authSession.logout();
 
@@ -231,6 +234,7 @@ void main() {
     await authSession.registerAsFree(
       email: 'return@example.com',
       password: 'Password1',
+      nickname: '복귀회원',
     );
     await authSession.logout();
     await authSession.continueAsGuest();
@@ -259,6 +263,7 @@ void main() {
     final registered = await authSession.registerAsFree(
       email: 'existing@example.com',
       password: 'Password1',
+      nickname: '기존회원',
     );
     expect(registered, isTrue);
     await PlanPolicyService.instance.changePlan(UserPlan.paid);
@@ -267,6 +272,7 @@ void main() {
     final duplicate = await authSession.registerAsFree(
       email: 'existing@example.com',
       password: 'Password2',
+      nickname: '다른회원',
     );
 
     expect(duplicate, isFalse);
@@ -275,6 +281,30 @@ void main() {
       password: 'Password1',
     );
     expect(authSession.isPaid, isTrue);
+  });
+
+  test('local signup rejects a normalized duplicate nickname', () async {
+    await authSession.registerAsFree(
+      email: 'nickname-a@example.com',
+      password: 'Password1',
+      nickname: 'LocalFisher',
+    );
+    await authSession.logout();
+
+    await expectLater(
+      authSession.registerAsFree(
+        email: 'nickname-b@example.com',
+        password: 'Password1',
+        nickname: ' localfisher ',
+      ),
+      throwsA(
+        isA<AuthFailure>().having(
+          (failure) => failure.code,
+          'code',
+          AuthFailureCode.nicknameAlreadyInUse,
+        ),
+      ),
+    );
   });
 
   test('signup recovers from an orphaned credential write', () async {
@@ -287,6 +317,7 @@ void main() {
     final registered = await authSession.registerAsFree(
       email: 'retry-signup@example.com',
       password: 'Password1',
+      nickname: '재시도회원',
     );
     expect(registered, isTrue);
 
@@ -302,6 +333,7 @@ void main() {
     await authSession.registerAsFree(
       email: 'account-a@example.com',
       password: 'Password1',
+      nickname: '계정회원A',
     );
     await PlanPolicyService.instance.changePlan(UserPlan.paid);
     await authSession.logout();
@@ -309,6 +341,7 @@ void main() {
     await authSession.registerAsFree(
       email: 'account-b@example.com',
       password: 'Password2',
+      nickname: '계정회원B',
     );
     expect(authSession.isFree, isTrue);
     await authSession.logout();
@@ -754,6 +787,7 @@ void main() {
       await authSession.registerAsFree(
         email: 'new-owner@example.com',
         password: 'Password1',
+        nickname: '신규소유자',
       );
       await recordRepository.loadRecords();
 

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../core/validation/auth_input_validator.dart';
+import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../auth/auth_error_message.dart';
 import '../auth/login_choice_page.dart';
 import '../offline/offline_mode_page.dart';
 import '../plan/plan_page.dart';
@@ -299,11 +301,17 @@ class MyPage extends StatelessWidget {
                       return;
                     }
 
-                    await authSession.logout();
-
-                    if (!context.mounted) {
-                      return;
+                    try {
+                      await authSession.logout();
+                    } on AuthFailure catch (failure) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(authFailureMessage(failure))),
+                        );
+                      }
                     }
+
+                    if (!context.mounted) return;
 
                     Navigator.of(
                       context,
@@ -368,9 +376,27 @@ class _PasswordSetupDialogState extends State<_PasswordSetupDialog> {
       errorText = null;
     });
 
-    await AuthSessionRepository.instance.setPasswordForCurrentMember(password);
-    if (mounted) {
-      Navigator.of(context).pop();
+    try {
+      await AuthSessionRepository.instance.setPasswordForCurrentMember(
+        password,
+      );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } on AuthFailure catch (failure) {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+          errorText = authFailureMessage(failure);
+        });
+      }
+    } on Object {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+          errorText = '비밀번호를 설정하지 못했습니다. 다시 시도해 주세요.';
+        });
+      }
     }
   }
 

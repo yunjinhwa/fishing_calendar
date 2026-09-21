@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'app.dart';
+import 'data/auth/firebase_auth_bootstrap.dart';
 import 'data/repositories/auth_session_repository.dart';
 import 'data/repositories/fishing_record_repository.dart';
 import 'data/repositories/outbox_repository.dart';
@@ -16,6 +17,7 @@ Future<void> main() async {
   unawaited(NetworkStatusService.instance.initialize());
 
   final authSession = AuthSessionRepository.instance;
+  authSession.configureAuthGateway(await FirebaseAuthBootstrap.initialize());
   await authSession.loadSession();
   await FishingRecordRepository.instance.loadRecords();
   await OutboxRepository.instance.loadItems();

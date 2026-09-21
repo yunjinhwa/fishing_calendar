@@ -1,3 +1,5 @@
+import '../../data/auth/nickname_policy.dart';
+
 class AuthInputValidator {
   AuthInputValidator._();
 
@@ -18,7 +20,6 @@ class AuthInputValidator {
   }
 
   static bool isValidNickname(String value) {
-    final nickname = value.trim();
-    return nickname.length >= 2 && nickname.length <= 20;
+    return NicknamePolicy.isValid(value);
   }
 }

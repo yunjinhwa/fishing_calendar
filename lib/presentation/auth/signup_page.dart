@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../core/validation/auth_input_validator.dart';
+import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../shell/app_shell.dart';
+import 'auth_error_message.dart';
 import 'login_page.dart';
 
 class SignupPage extends StatefulWidget {
@@ -36,7 +38,7 @@ class _SignupPageState extends State<SignupPage> {
     super.dispose();
   }
 
-  void signup() async {
+  Future<void> signup() async {
     final email = emailController.text.trim();
     final password = passwordController.text;
     final passwordConfirm = passwordConfirmController.text;
@@ -75,7 +77,9 @@ class _SignupPageState extends State<SignupPage> {
 
     if (!AuthInputValidator.isValidNickname(nickname)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('닉네임은 2자 이상 20자 이하로 입력하세요.')),
+        const SnackBar(
+          content: Text('닉네임은 2~20자의 한글, 영문, 숫자, 공백, 밑줄, 하이픈만 사용할 수 있습니다.'),
+        ),
       );
       return;
     }
@@ -91,43 +95,53 @@ class _SignupPageState extends State<SignupPage> {
       isSubmitting = true;
     });
 
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      final registered = await AuthSessionRepository.instance.registerAsFree(
+        email: email,
+        password: password,
+        nickname: nickname,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
+      if (!registered) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('이미 가입된 이메일입니다. 로그인해 주세요.')),
+        );
+        return;
+      }
 
-    final registered = await AuthSessionRepository.instance.registerAsFree(
-      email: email,
-      password: password,
-      nickname: nickname,
-    );
+      await FishingRecordRepository.instance.loadRecords();
+      await OutboxRepository.instance.loadItems();
+      await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
 
-    if (!mounted) return;
-
-    if (!registered) {
-      setState(() {
-        isSubmitting = false;
-      });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('이미 가입된 이메일입니다. 로그인해 주세요.')));
-      return;
+      if (!mounted) return;
+      if (widget.returnToPrevious) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AppShell()),
+        (route) => false,
+      );
+    } on AuthFailure catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(authFailureMessage(failure))));
+      }
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('회원가입 중 오류가 발생했습니다. 다시 시도해 주세요.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+        });
+      }
     }
-
-    await FishingRecordRepository.instance.loadRecords();
-    await OutboxRepository.instance.loadItems();
-    await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
-
-    if (!mounted) return;
-
-    if (widget.returnToPrevious) {
-      Navigator.of(context).pop(true);
-      return;
-    }
-
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const AppShell()),
-      (route) => false,
-    );
   }
 
   @override

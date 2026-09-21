@@ -1,0 +1,40 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": true
+    }
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "fishingbuild",
+          "appId": "1:958281447142:android:02b9ba2952cc6f0189ed27",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "fishingbuild",
+          "configurations": {
+            "android": "1:958281447142:android:02b9ba2952cc6f0189ed27",
+            "ios": "1:958281447142:ios:74f22b9c0bcf2d1989ed27",
+            "macos": "1:958281447142:ios:74f22b9c0bcf2d1989ed27",
+            "web": "1:958281447142:web:f160968c061a40eb89ed27",
+            "windows": "1:958281447142:web:99f16e03fe38b03989ed27"
+          }
+        }
+      }
+    }
+  }
+}
