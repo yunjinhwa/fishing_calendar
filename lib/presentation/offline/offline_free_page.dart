@@ -1,35 +1,27 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/auth_session_repository.dart';
+import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
-import '../record/record_form_page.dart';
 import '../calendar/calendar_page.dart';
+import '../record/record_form_page.dart';
+import 'network_status_widgets.dart';
 
 class OfflineFreePage extends StatelessWidget {
-  const OfflineFreePage({super.key});
+  final NetworkStatusService? networkStatusService;
+
+  const OfflineFreePage({super.key, this.networkStatusService});
 
   @override
   Widget build(BuildContext context) {
+    final networkStatus = networkStatusService ?? NetworkStatusService.instance;
     return Scaffold(
       appBar: AppBar(title: const Text('오프라인 모드')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            Icon(
-              Icons.cloud_off_outlined,
-              size: 64,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 24),
-
-            Text(
-              '오프라인 상태입니다',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
+            NetworkStatusSummary(service: networkStatus),
             const SizedBox(height: 12),
 
             Text(
@@ -90,15 +82,7 @@ class OfflineFreePage extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
-            TextButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('네트워크 연결 상태를 다시 확인합니다.')),
-                );
-              },
-              icon: const Icon(Icons.refresh),
-              label: const Text('다시 시도'),
-            ),
+            NetworkStatusRetryButton(service: networkStatus),
           ],
         ),
       ),

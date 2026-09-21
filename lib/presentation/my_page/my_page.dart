@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/validation/auth_input_validator.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../auth/login_choice_page.dart';
 import '../offline/offline_mode_page.dart';
@@ -12,7 +13,9 @@ import '../sync/outbox_page.dart';
 import '../sync/sync_conflict_page.dart';
 
 class MyPage extends StatelessWidget {
-  const MyPage({super.key});
+  final NetworkStatusService? networkStatusService;
+
+  const MyPage({super.key, this.networkStatusService});
 
   Future<void> _showPasswordSetupDialog(BuildContext context) {
     return showDialog<void>(
@@ -252,7 +255,9 @@ class MyPage extends StatelessWidget {
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => const OfflineModePage(),
+                          builder: (_) => OfflineModePage(
+                            networkStatusService: networkStatusService,
+                          ),
                         ),
                       );
                     },

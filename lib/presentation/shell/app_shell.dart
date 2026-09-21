@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/auth_session_repository.dart';
+import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
 import '../fish_dictionary/fish_dictionary_page.dart';
@@ -10,8 +11,9 @@ import '../record/record_page.dart';
 
 class AppShell extends StatefulWidget {
   final int initialIndex;
+  final NetworkStatusService? networkStatusService;
 
-  const AppShell({super.key, this.initialIndex = 0});
+  const AppShell({super.key, this.initialIndex = 0, this.networkStatusService});
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -55,7 +57,7 @@ class _AppShellState extends State<AppShell> {
       const MapPage(),
       const RecordPage(),
       const FishDictionaryPage(),
-      const MyPage(),
+      MyPage(networkStatusService: widget.networkStatusService),
     ];
   }
 
