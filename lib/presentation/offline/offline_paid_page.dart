@@ -3,13 +3,17 @@ import 'package:flutter/material.dart';
 import '../../data/models/user_plan_policy.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
+import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
 import '../record/record_form_page.dart';
 import '../sync/outbox_page.dart';
+import 'network_status_widgets.dart';
 
 class OfflinePaidPage extends StatefulWidget {
-  const OfflinePaidPage({super.key});
+  final NetworkStatusService? networkStatusService;
+
+  const OfflinePaidPage({super.key, this.networkStatusService});
 
   @override
   State<OfflinePaidPage> createState() => _OfflinePaidPageState();
@@ -38,6 +42,8 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
   @override
   Widget build(BuildContext context) {
+    final networkStatus =
+        widget.networkStatusService ?? NetworkStatusService.instance;
     final pendingCount = OutboxRepository.instance.pendingCount;
     return PaidFeatureGate(
       title: '오프라인 모드',
@@ -49,20 +55,7 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
-              Icon(
-                Icons.sync_problem_outlined,
-                size: 64,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(height: 24),
-
-              Text(
-                '오프라인 상태입니다',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
+              NetworkStatusSummary(service: networkStatus),
               const SizedBox(height: 12),
 
               Text(
@@ -160,15 +153,7 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
               ),
               const SizedBox(height: 12),
 
-              TextButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('네트워크 연결 상태를 다시 확인합니다.')),
-                  );
-                },
-                icon: const Icon(Icons.refresh),
-                label: const Text('다시 시도'),
-              ),
+              NetworkStatusRetryButton(service: networkStatus),
             ],
           ),
         ),
