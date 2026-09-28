@@ -4,7 +4,7 @@ import '../../data/models/outbox_item.dart';
 import '../../data/models/user_plan_policy.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
-import '../../data/services/plan_policy_service.dart';
+import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 
 class OutboxPage extends StatefulWidget {
@@ -15,15 +15,23 @@ class OutboxPage extends StatefulWidget {
 }
 
 class _OutboxPageState extends State<OutboxPage> {
+  String? _retryingItemId;
+  bool _isClearingSucceeded = false;
+
+  bool get _isLocalActionInProgress =>
+      _retryingItemId != null || _isClearingSucceeded;
+
   @override
   void initState() {
     super.initState();
     AuthSessionRepository.instance.addListener(_handlePlanChange);
+    RecordSyncService.instance.addListener(_handleSyncChange);
   }
 
   @override
   void dispose() {
     AuthSessionRepository.instance.removeListener(_handlePlanChange);
+    RecordSyncService.instance.removeListener(_handleSyncChange);
     super.dispose();
   }
 
@@ -35,35 +43,100 @@ class _OutboxPageState extends State<OutboxPage> {
     setState(() {});
   }
 
-  Future<void> mockUploadAllPendingItems() async {
-    final items = OutboxRepository.instance.getAllItems();
-
-    for (final item in items) {
-      if (item.status == OutboxStatus.pending ||
-          item.status == OutboxStatus.failed) {
-        await OutboxRepository.instance.updateItemStatus(
-          itemId: item.id,
-          status: OutboxStatus.succeeded,
-        );
-      }
+  void _handleSyncChange() {
+    if (mounted) {
+      setState(() {});
     }
+  }
 
-    await PlanPolicyService.instance.completeMigrationIfPossible();
+  Future<void> _syncAllPendingItems() async {
+    final result = await RecordSyncService.instance.syncNow();
+    if (!mounted) return;
 
-    if (!mounted) {
+    final message = switch (result.skipReason) {
+      RecordSyncSkipReason.gatewayUnavailable =>
+        'Firebase가 연결된 빌드에서 동기화할 수 있습니다.',
+      RecordSyncSkipReason.signedOut => '로그인 후 동기화할 수 있습니다.',
+      RecordSyncSkipReason.paidPlanRequired => '유료 플랜에서 동기화할 수 있습니다.',
+      RecordSyncSkipReason.offline => '인터넷 연결을 확인한 뒤 다시 시도하세요.',
+      RecordSyncSkipReason.sessionChanged => '계정이 변경되어 동기화를 중단했습니다.',
+      RecordSyncSkipReason.none when result.isSuccess =>
+        '서버 동기화를 완료했습니다. 업로드 ${result.pushedCount}건',
+      RecordSyncSkipReason.none => result.errorMessage ?? '기록을 동기화하지 못했습니다.',
+    };
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _retryItem(String itemId) async {
+    if (_isLocalActionInProgress || RecordSyncService.instance.isSyncing) {
       return;
     }
 
-    setState(() {});
+    setState(() {
+      _retryingItemId = itemId;
+    });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('대기 중인 항목을 모두 업로드 완료 상태로 변경했습니다.')),
-    );
+    try {
+      await OutboxRepository.instance.retryItem(itemId);
+      await _syncAllPendingItems();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('재시도 요청을 처리하지 못했습니다.')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _retryingItemId = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _clearSucceededItems() async {
+    if (_isLocalActionInProgress || RecordSyncService.instance.isSyncing) {
+      return;
+    }
+
+    setState(() {
+      _isClearingSucceeded = true;
+    });
+
+    try {
+      await OutboxRepository.instance.clearSucceeded(
+        includeMigration:
+            !AuthSessionRepository.instance.isPlanMigrationPending,
+      );
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('완료 항목을 정리하지 못했습니다.')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isClearingSucceeded = false;
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final items = OutboxRepository.instance.getAllItems();
+    final syncService = RecordSyncService.instance;
+    final canStartQueueAction =
+        !syncService.isSyncing && !_isLocalActionInProgress;
+    final hasClearableItems = items.any(
+      (item) =>
+          item.status == OutboxStatus.succeeded &&
+          (!AuthSessionRepository.instance.isPlanMigrationPending ||
+              !item.isMigration),
+    );
 
     return PaidFeatureGate(
       title: '업로드 대기열',
@@ -75,34 +148,28 @@ class _OutboxPageState extends State<OutboxPage> {
           actions: [
             IconButton(
               onPressed:
-                  items.any((item) => item.status != OutboxStatus.succeeded)
-                  ? mockUploadAllPendingItems
+                  canStartQueueAction &&
+                      items.any((item) => item.status != OutboxStatus.succeeded)
+                  ? _syncAllPendingItems
                   : null,
-              icon: const Icon(Icons.cloud_upload_outlined),
+              icon: syncService.isSyncing
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.cloud_upload_outlined),
               tooltip: '전체 전송 처리',
             ),
             IconButton(
-              onPressed:
-                  items.any(
-                    (item) =>
-                        item.status == OutboxStatus.succeeded &&
-                        (!AuthSessionRepository
-                                .instance
-                                .isPlanMigrationPending ||
-                            !item.isMigration),
-                  )
-                  ? () async {
-                      await OutboxRepository.instance.clearSucceeded(
-                        includeMigration: !AuthSessionRepository
-                            .instance
-                            .isPlanMigrationPending,
-                      );
-                      if (mounted) {
-                        setState(() {});
-                      }
-                    }
+              onPressed: canStartQueueAction && hasClearableItems
+                  ? _clearSucceededItems
                   : null,
-              icon: const Icon(Icons.cleaning_services_outlined),
+              icon: _isClearingSucceeded
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.cleaning_services_outlined),
               tooltip: '완료 항목 정리',
             ),
           ],
@@ -119,42 +186,10 @@ class _OutboxPageState extends State<OutboxPage> {
 
                   return _OutboxItemCard(
                     item: item,
-                    onRetry: () async {
-                      await OutboxRepository.instance.retryItem(item.id);
-
-                      if (!context.mounted) {
-                        return;
-                      }
-
-                      setState(() {});
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('재시도 대기 상태로 변경했습니다.')),
-                      );
-                    },
-                    onMockSuccess: () async {
-                      await OutboxRepository.instance.updateItemStatus(
-                        itemId: item.id,
-                        status: OutboxStatus.succeeded,
-                      );
-                      await PlanPolicyService.instance
-                          .completeMigrationIfPossible();
-
-                      if (context.mounted) {
-                        setState(() {});
-                      }
-                    },
-                    onMockFail: () async {
-                      await OutboxRepository.instance.updateItemStatus(
-                        itemId: item.id,
-                        status: OutboxStatus.failed,
-                        errorMessage: 'mock 업로드 실패',
-                      );
-
-                      if (context.mounted) {
-                        setState(() {});
-                      }
-                    },
+                    isRetrying: _retryingItemId == item.id,
+                    onRetry: canStartQueueAction
+                        ? () => _retryItem(item.id)
+                        : null,
                   );
                 },
               ),
@@ -165,15 +200,13 @@ class _OutboxPageState extends State<OutboxPage> {
 
 class _OutboxItemCard extends StatelessWidget {
   final OutboxItem item;
-  final VoidCallback onRetry;
-  final VoidCallback onMockSuccess;
-  final VoidCallback onMockFail;
+  final bool isRetrying;
+  final VoidCallback? onRetry;
 
   const _OutboxItemCard({
     required this.item,
+    required this.isRetrying,
     required this.onRetry,
-    required this.onMockSuccess,
-    required this.onMockFail,
   });
 
   @override
@@ -234,19 +267,14 @@ class _OutboxItemCard extends StatelessWidget {
                 if (item.status == OutboxStatus.failed)
                   OutlinedButton.icon(
                     onPressed: onRetry,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('재시도'),
+                    icon: isRetrying
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh),
+                    label: Text(isRetrying ? '재시도 중' : '재시도'),
                   ),
-                OutlinedButton.icon(
-                  onPressed: onMockSuccess,
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('성공 처리'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: onMockFail,
-                  icon: const Icon(Icons.error_outline),
-                  label: const Text('실패 처리'),
-                ),
               ],
             ),
           ],

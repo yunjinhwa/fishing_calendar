@@ -7,6 +7,7 @@ import '../local/app_database.dart';
 import '../local/local_data_migration_service.dart';
 import '../local/local_data_store.dart';
 import '../models/fishing_record.dart';
+import '../models/outbox_item.dart';
 import 'auth_session_repository.dart';
 
 class FishingRecordRepository extends ChangeNotifier {
@@ -76,6 +77,11 @@ class FishingRecordRepository extends ChangeNotifier {
 
   List<FishingRecord> getAllRecords() => List.unmodifiable(_records);
 
+  List<FishingRecord> getAllRecordsForOwner(String ownerKey) =>
+      List.unmodifiable(
+        _recordsByOwner.putIfAbsent(ownerKey, () => <FishingRecord>[]),
+      );
+
   FishingRecord? getRecordById(String recordId) {
     for (final record in _records) {
       if (record.id == recordId) {
@@ -132,6 +138,77 @@ class FishingRecordRepository extends ChangeNotifier {
       );
     });
     await reloadOwner(ownerKey);
+  }
+
+  /// Replaces the current owner's cache with an authoritative remote snapshot.
+  ///
+  /// Photos are still device-local in this release, so matching local paths
+  /// are preserved while all server-backed record fields are replaced.
+  Future<bool> replaceWithRemoteSnapshot(
+    List<FishingRecord> remoteRecords, {
+    String? ownerKey,
+  }) async {
+    final resolvedOwnerKey = ownerKey ?? _ownerKey;
+    final localById = <String, FishingRecord>{
+      for (final record in getAllRecordsForOwner(resolvedOwnerKey))
+        record.id: record,
+    };
+    final resolvedRecords = remoteRecords
+        .map((remoteRecord) {
+          final localRecord = localById[remoteRecord.id];
+          if (remoteRecord.photoPaths.isNotEmpty ||
+              localRecord == null ||
+              localRecord.photoPaths.isEmpty) {
+            return remoteRecord;
+          }
+
+          return FishingRecord(
+            id: remoteRecord.id,
+            location: remoteRecord.location,
+            startAt: remoteRecord.startAt,
+            endAt: remoteRecord.endAt,
+            genreName: remoteRecord.genreName,
+            tide: remoteRecord.tide,
+            weather: remoteRecord.weather,
+            airTemperature: remoteRecord.airTemperature,
+            waterTemperature: remoteRecord.waterTemperature,
+            catches: remoteRecord.catches,
+            photoPaths: localRecord.photoPaths,
+            memo: remoteRecord.memo,
+          );
+        })
+        .toList(growable: false);
+
+    var replaced = false;
+    await AppDatabase.instance.transaction((transaction) async {
+      final unfinishedRows = await transaction.rawQuery(
+        '''
+        SELECT COUNT(*) AS unfinished_count
+        FROM ${AppDatabase.outboxItemsTable}
+        WHERE owner_key = ? AND status != ?
+        ''',
+        <Object?>[resolvedOwnerKey, OutboxStatus.succeeded.name],
+      );
+      final unfinishedCount = (unfinishedRows.single['unfinished_count'] as num)
+          .toInt();
+      if (unfinishedCount > 0) {
+        return;
+      }
+
+      await _store.deleteAllRecords(transaction, ownerKey: resolvedOwnerKey);
+      for (final record in resolvedRecords) {
+        await _store.insertRecord(
+          transaction,
+          ownerKey: resolvedOwnerKey,
+          record: record,
+        );
+      }
+      replaced = true;
+    });
+    if (replaced) {
+      await reloadOwner(resolvedOwnerKey);
+    }
+    return replaced;
   }
 
   Future<void> clear() async {

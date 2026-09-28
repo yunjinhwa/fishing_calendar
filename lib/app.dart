@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'core/theme/app_theme.dart';
 import 'data/repositories/auth_session_repository.dart';
 import 'data/services/network_status_service.dart';
+import 'data/services/record_sync_service.dart';
 import 'presentation/auth/login_choice_page.dart';
 import 'presentation/shell/app_shell.dart';
 
@@ -62,6 +63,7 @@ class _FishingBuildAppState extends State<FishingBuildApp>
     } else {
       await _networkStatusService.initialize();
     }
+    await RecordSyncService.instance.syncNow();
   }
 
   @override

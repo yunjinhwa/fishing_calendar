@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/models/user_plan.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/plan_policy_service.dart';
+import '../../data/services/record_sync_service.dart';
 
 class PlanPage extends StatefulWidget {
   const PlanPage({super.key});
@@ -53,6 +56,11 @@ class _PlanPageState extends State<PlanPage> {
 
     try {
       final result = await PlanPolicyService.instance.changePlan(nextPlan);
+      if (result == PlanChangeResult.changed && nextPlan == UserPlan.paid) {
+        unawaited(
+          RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),
+        );
+      }
 
       if (!mounted) {
         return;

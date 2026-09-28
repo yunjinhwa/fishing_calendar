@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/validation/auth_input_validator.dart';
@@ -7,6 +9,7 @@ import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/plan_policy_service.dart';
 import '../../data/services/record_mutation_service.dart';
+import '../../data/services/record_sync_service.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
 import 'signup_page.dart';
@@ -104,6 +107,9 @@ class _LoginPageState extends State<LoginPage> {
       await OutboxRepository.instance.loadItems();
       await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
       await PlanPolicyService.instance.resumePendingMigration();
+      unawaited(
+        RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),
+      );
 
       if (!mounted) return;
       if (widget.returnToPrevious) {

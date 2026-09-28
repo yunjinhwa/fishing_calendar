@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/network_status_service.dart';
+import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
 import '../fish_dictionary/fish_dictionary_page.dart';
@@ -95,19 +98,25 @@ class _AppShellState extends State<AppShell> {
                   }
                 }
 
+                final isTabChange = index != selectedIndex;
                 if (index == 0) {
                   calendarNavigatorKey.currentState?.popUntil(
                     (route) => route.isFirst,
                   );
                 }
 
-                setState(() {
-                  selectedIndex = index;
+                if (isTabChange || index == 0) {
+                  setState(() {
+                    selectedIndex = index;
+                    if (index == 0) {
+                      calendarRefreshKey++;
+                    }
+                  });
+                }
 
-                  if (index == 0) {
-                    calendarRefreshKey++;
-                  }
-                });
+                if (isTabChange) {
+                  unawaited(RecordSyncService.instance.syncNow());
+                }
               },
               destinations: const [
                 NavigationDestination(
