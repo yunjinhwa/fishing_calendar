@@ -43,6 +43,150 @@ service cloud.firestore {
         );
     }
 
+    function ownsUserData(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function recordHasMatchingReceipt(data, uid, recordId) {
+      return existsAfter(
+          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId))
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+        ).data.ownerUid == uid
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+        ).data.outboxId == data.lastOutboxId
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+        ).data.recordId == recordId
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+        ).data.resultingVersionNo == data.versionNo
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+        ).data.processedAt == request.time
+        && (
+          (data.recordStatus == 'DELETED'
+            && getAfter(
+              /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+            ).data.operationType == 'delete')
+          || (data.recordStatus == 'ACTIVE'
+            && getAfter(
+              /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+            ).data.operationType in ['create', 'update'])
+        );
+    }
+
+    function receiptHasMatchingRecord(data, uid, outboxId) {
+      return existsAfter(
+          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId))
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
+        ).data.ownerUid == uid
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
+        ).data.recordId == data.recordId
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
+        ).data.lastOutboxId == outboxId
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
+        ).data.versionNo == data.resultingVersionNo
+        && getAfter(
+          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
+        ).data.serverUpdatedAt == request.time
+        && (
+          (data.operationType == 'delete'
+            && getAfter(
+              /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
+            ).data.recordStatus == 'DELETED')
+          || (data.operationType in ['create', 'update']
+            && getAfter(
+              /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
+            ).data.recordStatus == 'ACTIVE')
+        );
+    }
+
+    function validRecordBase(data, uid, recordId) {
+      return data.schemaVersion == 1
+        && data.ownerUid == uid
+        && data.recordId == recordId
+        && data.recordId.matches('^[^/]{1,200}$')
+        && data.recordStatus in ['ACTIVE', 'DELETED']
+        && data.versionNo is int
+        && data.versionNo >= 1
+        && data.clientModifiedAt is timestamp
+        && data.createdAt is timestamp
+        && data.serverUpdatedAt == request.time
+        && data.lastOutboxId is string
+        && data.lastOutboxId.matches('^[^/]{1,300}$')
+        && recordHasMatchingReceipt(data, uid, recordId);
+    }
+
+    function validActiveRecord(data, uid, recordId) {
+      return data.keys().hasOnly([
+          'schemaVersion', 'ownerUid', 'recordId', 'recordStatus',
+          'location', 'startAt', 'endAt', 'genreName', 'tide', 'weather',
+          'airTemperature', 'waterTemperature', 'catches', 'memo',
+          'photoUploadPending', 'versionNo', 'clientModifiedAt',
+          'createdAt', 'serverUpdatedAt', 'lastOutboxId'
+        ])
+        && validRecordBase(data, uid, recordId)
+        && data.recordStatus == 'ACTIVE'
+        && data.location is string
+        && data.location.size() > 0
+        && data.location.size() <= 200
+        && data.startAt is timestamp
+        && data.endAt is timestamp
+        && data.startAt < data.endAt
+        && data.genreName is string
+        && data.genreName.size() > 0
+        && data.genreName.size() <= 100
+        && (data.tide == null
+          || (data.tide is string && data.tide.size() <= 100))
+        && (data.weather == null
+          || (data.weather is string && data.weather.size() <= 100))
+        && (data.airTemperature == null || data.airTemperature is number)
+        && (data.waterTemperature == null || data.waterTemperature is number)
+        && data.catches is list
+        && data.catches.size() <= 100
+        && (data.memo == null || (data.memo is string && data.memo.size() <= 5000))
+        && data.photoUploadPending is bool;
+    }
+
+    function validDeletedRecord(data, uid, recordId) {
+      return data.keys().hasOnly([
+          'schemaVersion', 'ownerUid', 'recordId', 'recordStatus',
+          'versionNo', 'clientModifiedAt', 'createdAt', 'serverUpdatedAt',
+          'lastOutboxId'
+        ])
+        && validRecordBase(data, uid, recordId)
+        && data.recordStatus == 'DELETED';
+    }
+
+    function validRecord(data, uid, recordId) {
+      return validActiveRecord(data, uid, recordId)
+        || validDeletedRecord(data, uid, recordId);
+    }
+
+    function validSyncReceipt(data, uid, outboxId) {
+      return data.keys().hasOnly([
+          'ownerUid', 'outboxId', 'recordId', 'operationType',
+          'resultingVersionNo', 'processedAt'
+        ])
+        && data.ownerUid == uid
+        && data.outboxId == outboxId
+        && data.recordId is string
+        && data.recordId.matches('^[^/]{1,200}$')
+        && data.outboxId is string
+        && data.outboxId.matches('^[^/]{1,300}$')
+        && data.operationType in ['create', 'update', 'delete']
+        && data.resultingVersionNo is int
+        && data.resultingVersionNo >= 1
+        && data.processedAt == request.time
+        && receiptHasMatchingRecord(data, uid, outboxId);
+    }
+
     match /nickname_claims/{nicknameKey} {
       allow get: if signedIn();
       allow list: if false;
@@ -96,6 +240,37 @@ service cloud.firestore {
         && !existsAfter(
           /databases/$(database)/documents/nickname_claims/$(resource.data.nicknameKey)
         );
+    }
+
+    // The app currently enforces paid-plan access locally. These rules enforce
+    // account ownership; server-owned entitlement claims are added with the
+    // billing backend before production billing is enabled.
+    match /users/{uid}/records/{recordId} {
+      allow get, list: if ownsUserData(uid);
+
+      allow create: if ownsUserData(uid)
+        && validRecord(request.resource.data, uid, recordId)
+        && request.resource.data.versionNo == 1
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if ownsUserData(uid)
+        && resource.data.ownerUid == uid
+        && resource.data.recordId == recordId
+        && validRecord(request.resource.data, uid, recordId)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.versionNo == resource.data.versionNo + 1;
+
+      // Deletes are represented by validated tombstones so another device can
+      // observe them during its next complete snapshot pull.
+      allow delete: if false;
+    }
+
+    match /users/{uid}/sync_receipts/{outboxId} {
+      allow get: if ownsUserData(uid);
+      allow list: if false;
+      allow create: if ownsUserData(uid)
+        && validSyncReceipt(request.resource.data, uid, outboxId);
+      allow update, delete: if false;
     }
   }
 }

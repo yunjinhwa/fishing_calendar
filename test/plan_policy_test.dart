@@ -11,6 +11,7 @@ import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/plan_policy_service.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
+import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/core/validation/auth_input_validator.dart';
 import 'package:fishing_build/presentation/auth/signup_page.dart';
 import 'package:fishing_build/presentation/my_page/my_page.dart';
@@ -24,6 +25,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/test_database.dart';
+import 'support/fake_record_sync_gateway.dart';
 
 void main() {
   final authSession = AuthSessionRepository.instance;
@@ -33,6 +35,7 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await RecordSyncService.instance.resetForTesting();
     await resetTestDatabase();
     authSession.clearMemoryOnlyForTesting();
     outboxRepository.clearCacheOnlyForTesting();
@@ -729,6 +732,8 @@ void main() {
     );
     await PlanPolicyService.instance.changePlan(UserPlan.paid);
     expect(authSession.canUseCloudSync, isFalse);
+
+    RecordSyncService.instance.configureGateway(FakeRecordSyncGateway());
 
     await tester.pumpWidget(const MaterialApp(home: OutboxPage()));
     await tester.tap(find.byTooltip('전체 전송 처리'));

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/validation/fishing_record_validator.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../auth/auth_access_guard.dart';
@@ -281,6 +282,12 @@ class _RecordFormPageState extends State<RecordFormPage> {
           : memoController.text.trim(),
     );
 
+    final validationMessage = FishingRecordValidator.validate(record);
+    if (validationMessage != null) {
+      showMessage(validationMessage);
+      return;
+    }
+
     if (isEditMode) {
       await RecordMutationService.instance.updateRecord(record);
     } else {
@@ -330,6 +337,12 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   void addCatchItem() {
+    if (catchItems.length >= FishingRecordValidator.maxCatchCount) {
+      showMessage(
+        '조과는 최대 ${FishingRecordValidator.maxCatchCount}개까지 입력할 수 있습니다.',
+      );
+      return;
+    }
     setState(() {
       catchItems.add(_CatchItemInput());
     });
@@ -449,6 +462,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
             TextField(
               controller: locationController,
+              maxLength: FishingRecordValidator.maxLocationLength,
               decoration: const InputDecoration(
                 labelText: '위치 *',
                 hintText: '예: 부산 영도구 동삼동',
@@ -498,6 +512,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
               const SizedBox(height: 12),
               TextField(
                 controller: customGenreController,
+                maxLength: FishingRecordValidator.maxGenreNameLength,
                 decoration: const InputDecoration(
                   labelText: '기타 낚시 장르 *',
                   hintText: '예: 에깅, 플라이낚시, 문어낚시',
@@ -520,6 +535,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
             TextField(
               controller: tideController,
+              maxLength: FishingRecordValidator.maxTideLength,
               decoration: const InputDecoration(
                 labelText: '물때 *',
                 hintText: '예: 7물',
@@ -530,6 +546,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
             TextField(
               controller: weatherController,
+              maxLength: FishingRecordValidator.maxWeatherLength,
               decoration: const InputDecoration(
                 labelText: '날씨 *',
                 hintText: '예: 흐림',
@@ -651,6 +668,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
             TextField(
               controller: memoController,
+              maxLength: FishingRecordValidator.maxMemoLength,
               minLines: 3,
               maxLines: 5,
               decoration: const InputDecoration(
@@ -775,6 +793,7 @@ class _CatchItemCard extends StatelessWidget {
             const SizedBox(height: 8),
             TextField(
               controller: item.speciesController,
+              maxLength: FishingRecordValidator.maxSpeciesNameLength,
               decoration: const InputDecoration(
                 labelText: '어종',
                 hintText: '예: 광어',

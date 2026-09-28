@@ -31,11 +31,19 @@ class OutboxRepository {
 
   List<OutboxItem> getAllItems() => List.unmodifiable(_items);
 
+  List<OutboxItem> getAllItemsForOwner(String ownerKey) => List.unmodifiable(
+    _itemsByOwner.putIfAbsent(ownerKey, () => <OutboxItem>[]),
+  );
+
   int get pendingCount =>
       _items.where((item) => item.status != OutboxStatus.succeeded).length;
 
   bool get hasUnfinishedItems =>
       _items.any((item) => item.status != OutboxStatus.succeeded);
+
+  bool hasUnfinishedItemsForOwner(String ownerKey) => getAllItemsForOwner(
+    ownerKey,
+  ).any((item) => item.status != OutboxStatus.succeeded);
 
   bool hasItem({
     required String recordId,
@@ -50,8 +58,9 @@ class OutboxRepository {
     );
   }
 
-  Future<void> addItem(OutboxItem item) async {
-    final ownerKey = _ownerKey;
+  Future<void> addItem(OutboxItem item) => addItemForOwner(_ownerKey, item);
+
+  Future<void> addItemForOwner(String ownerKey, OutboxItem item) async {
     await AppDatabase.instance.transaction((transaction) async {
       await _store.insertOutboxItem(
         transaction,
@@ -62,12 +71,16 @@ class OutboxRepository {
     await reloadOwner(ownerKey);
   }
 
-  Future<void> replaceItem(OutboxItem item) async {
-    if (!_items.any((savedItem) => savedItem.id == item.id)) {
+  Future<void> replaceItem(OutboxItem item) =>
+      replaceItemForOwner(_ownerKey, item);
+
+  Future<void> replaceItemForOwner(String ownerKey, OutboxItem item) async {
+    if (!getAllItemsForOwner(
+      ownerKey,
+    ).any((savedItem) => savedItem.id == item.id)) {
       throw StateError('Outbox item not found: ${item.id}');
     }
 
-    final ownerKey = _ownerKey;
     await AppDatabase.instance.transaction((transaction) async {
       await _store.insertOutboxItem(
         transaction,
@@ -83,13 +96,26 @@ class OutboxRepository {
     required String itemId,
     required OutboxStatus status,
     String? errorMessage,
+  }) => updateItemStatusForOwner(
+    ownerKey: _ownerKey,
+    itemId: itemId,
+    status: status,
+    errorMessage: errorMessage,
+  );
+
+  Future<void> updateItemStatusForOwner({
+    required String ownerKey,
+    required String itemId,
+    required OutboxStatus status,
+    String? errorMessage,
   }) async {
-    final item = _findItem(itemId);
+    final item = _findItem(itemId, ownerKey: ownerKey);
     if (item == null) {
       return;
     }
 
-    await replaceItem(
+    await replaceItemForOwner(
+      ownerKey,
       item.copyWith(
         status: status,
         lastTriedAt: DateTime.now(),
@@ -100,13 +126,20 @@ class OutboxRepository {
     );
   }
 
-  Future<void> retryItem(String itemId) async {
-    final item = _findItem(itemId);
+  Future<void> retryItem(String itemId) =>
+      retryItemForOwner(ownerKey: _ownerKey, itemId: itemId);
+
+  Future<void> retryItemForOwner({
+    required String ownerKey,
+    required String itemId,
+  }) async {
+    final item = _findItem(itemId, ownerKey: ownerKey);
     if (item == null) {
       return;
     }
 
-    await replaceItem(
+    await replaceItemForOwner(
+      ownerKey,
       item.copyWith(
         status: OutboxStatus.pending,
         lastTriedAt: DateTime.now(),
@@ -161,8 +194,8 @@ class OutboxRepository {
     await reloadOwner(ownerKey);
   }
 
-  OutboxItem? _findItem(String itemId) {
-    for (final item in _items) {
+  OutboxItem? _findItem(String itemId, {required String ownerKey}) {
+    for (final item in getAllItemsForOwner(ownerKey)) {
       if (item.id == itemId) {
         return item;
       }

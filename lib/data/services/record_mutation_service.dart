@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import '../../core/validation/fishing_record_validator.dart';
 import '../local/app_database.dart';
 import '../local/local_data_store.dart';
 import '../models/fishing_record.dart';
@@ -5,6 +8,7 @@ import '../models/outbox_item.dart';
 import '../repositories/auth_session_repository.dart';
 import '../repositories/fishing_record_repository.dart';
 import '../repositories/outbox_repository.dart';
+import 'record_sync_service.dart';
 
 class RecordMutationService {
   RecordMutationService._();
@@ -18,6 +22,7 @@ class RecordMutationService {
 
   Future<void> addRecord(FishingRecord record) async {
     _ensureRecordAccess();
+    _ensureValidRecord(record);
     final ownerKey = _authSession.dataOwnerKey;
     final outboxItem = _createOutboxIfNeeded(
       record.id,
@@ -44,6 +49,7 @@ class RecordMutationService {
 
   Future<void> updateRecord(FishingRecord record) async {
     _ensureRecordAccess();
+    _ensureValidRecord(record);
     if (_recordRepository.getRecordById(record.id) == null) {
       throw StateError('Record not found: ${record.id}');
     }
@@ -110,7 +116,7 @@ class RecordMutationService {
     }
 
     for (final item in _outboxRepository.getAllItems()) {
-      if (item.isMigration) {
+      if (item.isMigration || item.status == OutboxStatus.succeeded) {
         continue;
       }
 
@@ -149,6 +155,13 @@ class RecordMutationService {
     }
   }
 
+  void _ensureValidRecord(FishingRecord record) {
+    final errorMessage = FishingRecordValidator.validate(record);
+    if (errorMessage != null) {
+      throw ArgumentError.value(record, 'record', errorMessage);
+    }
+  }
+
   OutboxItem? _createOutboxIfNeeded(
     String recordId,
     OutboxOperationType operationType, {
@@ -180,6 +193,9 @@ class RecordMutationService {
     await _recordRepository.reloadOwner(ownerKey);
     if (hasOutboxItem) {
       await _outboxRepository.reloadOwner(ownerKey);
+      unawaited(
+        RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),
+      );
     }
   }
 }
