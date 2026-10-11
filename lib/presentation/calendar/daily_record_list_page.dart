@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../data/models/outbox_item.dart';
+import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/repositories/outbox_repository.dart';
+import '../../data/services/record_sync_service.dart';
 import '../record/record_detail_page.dart';
 
 class DailyRecordListPage extends StatefulWidget {
@@ -14,17 +18,22 @@ class DailyRecordListPage extends StatefulWidget {
 
 class _DailyRecordListPageState extends State<DailyRecordListPage> {
   bool hasChanged = false;
+  final _authSession = AuthSessionRepository.instance;
   final _recordRepository = FishingRecordRepository.instance;
+  final _outboxRepository = OutboxRepository.instance;
+  final _syncService = RecordSyncService.instance;
 
   @override
   void initState() {
     super.initState();
     _recordRepository.addListener(_refreshRecords);
+    _syncService.addListener(_refreshRecords);
   }
 
   @override
   void dispose() {
     _recordRepository.removeListener(_refreshRecords);
+    _syncService.removeListener(_refreshRecords);
     super.dispose();
   }
 
@@ -74,8 +83,7 @@ class _DailyRecordListPageState extends State<DailyRecordListPage> {
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
                           '${_formatTimeRange(record.startAt, record.endAt)}\n'
-                          '${record.location}\n'
-                          '로컬 저장',
+                          '${record.location}\n${_syncStatusFor(record.id)}',
                         ),
                       ),
                       isThreeLine: true,
@@ -103,6 +111,40 @@ class _DailyRecordListPageState extends State<DailyRecordListPage> {
 
   String _formatDate(DateTime date) {
     return '${date.year}년 ${date.month}월 ${date.day}일 기록';
+  }
+
+  String _syncStatusFor(String recordId) {
+    if (!_authSession.isPaid) {
+      return '로컬 저장';
+    }
+
+    final recordItems = _outboxRepository
+        .getAllItems()
+        .where(
+          (item) =>
+              item.recordId == recordId &&
+              item.operationType != OutboxOperationType.delete,
+        )
+        .toList(growable: false);
+
+    if (recordItems.any((item) => item.status == OutboxStatus.failed)) {
+      return '기록 동기화 실패';
+    }
+    if (recordItems.any((item) => item.status == OutboxStatus.sending)) {
+      return '기록 동기화 중';
+    }
+    if (recordItems.any((item) => item.status == OutboxStatus.pending)) {
+      return '기록 동기화 대기';
+    }
+    if (recordItems.any((item) => item.status == OutboxStatus.succeeded) ||
+        _syncService.state == RecordSyncState.succeeded) {
+      return '기록 동기화 완료';
+    }
+    if (_syncService.lastResult?.skipReason ==
+        RecordSyncSkipReason.gatewayUnavailable) {
+      return '로컬 저장 · 기록 동기화 사용 불가';
+    }
+    return '기록 동기화 상태 확인 전';
   }
 
   String _formatTimeRange(DateTime startAt, DateTime endAt) {

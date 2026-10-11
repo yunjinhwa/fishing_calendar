@@ -59,7 +59,6 @@ FlutterFire CLI가 만든 파일을 사용하지 않고 실행별 설정을 주�
   "FIREBASE_MESSAGING_SENDER_ID": "...",
   "FIREBASE_PROJECT_ID": "...",
   "FIREBASE_AUTH_DOMAIN": "...",
-  "FIREBASE_STORAGE_BUCKET": "...",
   "FIREBASE_IOS_BUNDLE_ID": "..."
 }
 ```

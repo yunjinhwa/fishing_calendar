@@ -13,6 +13,17 @@ class FishingRecordValidator {
   static const int maxCatchCount = 100;
   static const int maxSpeciesNameLength = 100;
   static const int maxMemoLength = 5000;
+  static const int maxPhotoCount = 10;
+  static const int maxPhotoIdLength = 100;
+  static const int maxPhotoBytes = 10 * 1024 * 1024;
+  static const Set<String> allowedPhotoContentTypes = <String>{
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  };
+
+  static final RegExp _photoIdPattern = RegExp(r'^[A-Za-z0-9_-]+$');
+  static final RegExp _photoChecksumPattern = RegExp(r'^[0-9a-f]{64}$');
 
   static String? validate(FishingRecord record) {
     if (record.id.trim().isEmpty ||
@@ -71,6 +82,48 @@ class FishingRecordValidator {
     final memo = record.memo;
     if (memo != null && memo.length > maxMemoLength) {
       return '메모는 $maxMemoLength자 이하로 입력하세요.';
+    }
+    if (record.photos.length > maxPhotoCount) {
+      return '사진은 최대 $maxPhotoCount장까지 첨부할 수 있습니다.';
+    }
+    final photoIds = <String>{};
+    for (var index = 0; index < record.photos.length; index++) {
+      final photo = record.photos[index];
+      final photoNumber = index + 1;
+      if (photo.id.isEmpty ||
+          photo.id.length > maxPhotoIdLength ||
+          !_photoIdPattern.hasMatch(photo.id)) {
+        return '사진 $photoNumber의 ID 형식이 올바르지 않습니다.';
+      }
+      if (!photoIds.add(photo.id)) {
+        return '같은 사진 ID를 중복해서 사용할 수 없습니다.';
+      }
+
+      final localPath = photo.localPath?.trim();
+      if (localPath == null || localPath.isEmpty) {
+        return '사진 $photoNumber의 파일 경로가 없습니다.';
+      }
+
+      final contentType = photo.contentType?.trim().toLowerCase();
+      final sizeBytes = photo.sizeBytes;
+      final checksum = photo.checksum?.trim();
+      final hasAnyMetadata =
+          contentType != null || sizeBytes != null || checksum != null;
+      final hasAllMetadata =
+          contentType != null && sizeBytes != null && checksum != null;
+      if (hasAnyMetadata && !hasAllMetadata) {
+        return '사진 $photoNumber의 파일 정보가 완전하지 않습니다.';
+      }
+      if (contentType != null &&
+          !allowedPhotoContentTypes.contains(contentType)) {
+        return '사진은 JPEG, PNG, WebP 형식만 사용할 수 있습니다.';
+      }
+      if (sizeBytes != null && (sizeBytes < 1 || sizeBytes > maxPhotoBytes)) {
+        return '사진은 비어 있지 않은 10 MiB 이하 파일만 사용할 수 있습니다.';
+      }
+      if (checksum != null && !_photoChecksumPattern.hasMatch(checksum)) {
+        return '사진 $photoNumber의 체크섬 형식이 올바르지 않습니다.';
+      }
     }
     return null;
   }

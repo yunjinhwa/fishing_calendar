@@ -11,10 +11,10 @@ class FishingRecord {
   final double? waterTemperature;
 
   final List<CatchRecord> catches;
-  final List<String> photoPaths;
+  final List<RecordPhoto> photos;
   final String? memo;
 
-  const FishingRecord({
+  FishingRecord({
     required this.id,
     required this.location,
     required this.startAt,
@@ -25,9 +25,12 @@ class FishingRecord {
     this.airTemperature,
     this.waterTemperature,
     this.catches = const [],
-    this.photoPaths = const [],
+    List<RecordPhoto> photos = const [],
+    List<String> photoPaths = const [],
     this.memo,
-  });
+  }) : photos = List<RecordPhoto>.unmodifiable(
+         photos.isNotEmpty ? photos : _legacyPhotos(photoPaths),
+       );
 
   factory FishingRecord.fromJson(Map<String, dynamic> json) {
     return FishingRecord(
@@ -42,14 +45,11 @@ class FishingRecord {
       waterTemperature: (json['waterTemperature'] as num?)?.toDouble(),
       catches: ((json['catches'] as List?) ?? [])
           .map(
-            (item) => CatchRecord.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ),
+            (item) =>
+                CatchRecord.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
-      photoPaths: ((json['photoPaths'] as List?) ?? [])
-        .map((item) => item as String)
-        .toList(),
+      photos: _photosFromJson(json),
       memo: json['memo'] as String?,
     );
   }
@@ -66,9 +66,39 @@ class FishingRecord {
       'airTemperature': airTemperature,
       'waterTemperature': waterTemperature,
       'catches': catches.map((catchRecord) => catchRecord.toJson()).toList(),
-      'photoPaths': photoPaths,
+      'photos': photos.map((photo) => photo.toJson()).toList(),
       'memo': memo,
     };
+  }
+
+  /// Device-local paths kept for compatibility with the existing UI.
+  ///
+  /// Cloud-only photos intentionally do not appear in this view.
+  List<String> get photoPaths => List<String>.unmodifiable(
+    photos.map((photo) => photo.localPath).whereType<String>(),
+  );
+
+  static List<RecordPhoto> _photosFromJson(Map<String, dynamic> json) {
+    if (json.containsKey('photos')) {
+      return ((json['photos'] as List?) ?? const <Object?>[])
+          .map(
+            (item) =>
+                RecordPhoto.fromJson(Map<String, dynamic>.from(item as Map)),
+          )
+          .toList(growable: false);
+    }
+
+    final legacyPaths = ((json['photoPaths'] as List?) ?? const <Object?>[])
+        .map((item) => item as String)
+        .toList(growable: false);
+    return _legacyPhotos(legacyPaths);
+  }
+
+  static List<RecordPhoto> _legacyPhotos(List<String> paths) {
+    return <RecordPhoto>[
+      for (var index = 0; index < paths.length; index++)
+        RecordPhoto(id: 'legacy-$index', localPath: paths[index]),
+    ];
   }
 
   String get summaryTitle {
@@ -92,16 +122,48 @@ class FishingRecord {
   }
 }
 
+class RecordPhoto {
+  final String id;
+  final String? localPath;
+  final String? contentType;
+  final int? sizeBytes;
+  final String? checksum;
+
+  const RecordPhoto({
+    required this.id,
+    this.localPath,
+    this.contentType,
+    this.sizeBytes,
+    this.checksum,
+  });
+
+  factory RecordPhoto.fromJson(Map<String, dynamic> json) {
+    return RecordPhoto(
+      id: json['id'] as String,
+      localPath: json['localPath'] as String?,
+      contentType: json['contentType'] as String?,
+      sizeBytes: (json['sizeBytes'] as num?)?.toInt(),
+      checksum: json['checksum'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'localPath': localPath,
+      'contentType': contentType,
+      'sizeBytes': sizeBytes,
+      'checksum': checksum,
+    };
+  }
+}
+
 class CatchRecord {
   final String speciesName;
   final double? lengthCm;
   final int? weightG;
 
-  const CatchRecord({
-    required this.speciesName,
-    this.lengthCm,
-    this.weightG,
-  });
+  const CatchRecord({required this.speciesName, this.lengthCm, this.weightG});
 
   factory CatchRecord.fromJson(Map<String, dynamic> json) {
     return CatchRecord(

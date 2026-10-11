@@ -235,9 +235,10 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
           )
           .toList(growable: false),
       'memo': record.memo,
-      // Device-local paths never leave the device. Object Storage support is
-      // introduced separately; this flag keeps that pending work visible.
-      'photoUploadPending': record.photoPaths.isNotEmpty,
+      // Photo files and device-local paths never leave the device. The field
+      // remains only for schema-v1 compatibility and is always false because
+      // this app does not queue photo uploads.
+      'photoUploadPending': false,
       'versionNo': versionNo,
       'clientModifiedAt': Timestamp.fromDate(item.createdAt.toUtc()),
       'createdAt': createdAt ?? FieldValue.serverTimestamp(),

@@ -65,7 +65,7 @@ void main() {
       'lastOutboxId',
     });
     expect(encoded, isNot(contains('photoPaths')));
-    expect(encoded['photoUploadPending'], isTrue);
+    expect(encoded['photoUploadPending'], isFalse);
     expect(encoded['createdAt'], createdAt);
     expect(encoded['startAt'], Timestamp.fromDate(record.startAt.toUtc()));
     expect(encoded['lastOutboxId'], item.id);

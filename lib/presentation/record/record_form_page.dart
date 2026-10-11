@@ -6,6 +6,9 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/validation/fishing_record_validator.dart';
 import '../../data/models/fishing_record.dart';
+import '../../data/photos/record_photo_file_store.dart';
+import '../../data/photos/record_photo_file_store_utils.dart';
+import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../auth/auth_access_guard.dart';
 
@@ -46,8 +49,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final customGenreController = TextEditingController();
 
   final imagePicker = ImagePicker();
-  final photos = <_SelectedPhoto>[];
+  final photoFileStore = RecordPhotoFileStore();
+  final photos = <RecordPhoto>[];
   final catchItems = <_CatchItemInput>[_CatchItemInput()];
+
+  late final String recordId;
+  bool isPickingPhoto = false;
+  int nextPhotoSequence = 0;
 
   DateTime startAt = DateTime.now();
   DateTime endAt = DateTime.now().add(const Duration(hours: 2));
@@ -59,6 +67,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
   @override
   void initState() {
     super.initState();
+
+    recordId =
+        widget.editingRecord?.id ??
+        DateTime.now().microsecondsSinceEpoch.toString();
 
     locationController.text = widget.initialLocation ?? '';
     tideController.text = widget.initialTide ?? '';
@@ -113,9 +125,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       catchItems.add(_CatchItemInput());
     }
 
-    photos.addAll(
-      record.photoPaths.map((photoPath) => _SelectedPhoto(path: photoPath)),
-    );
+    photos.addAll(record.photos);
   }
 
   @override
@@ -264,9 +274,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
         .toList();
 
     final record = FishingRecord(
-      id:
-          widget.editingRecord?.id ??
-          DateTime.now().microsecondsSinceEpoch.toString(),
+      id: recordId,
       location: location,
       startAt: startAt,
       endAt: endAt,
@@ -276,7 +284,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       airTemperature: airTemperatureValue,
       waterTemperature: waterTemperatureValue,
       catches: catches,
-      photoPaths: List.unmodifiable(photos.map((photo) => photo.path)),
+      photos: List<RecordPhoto>.unmodifiable(photos),
       memo: memoController.text.trim().isEmpty
           ? null
           : memoController.text.trim(),
@@ -300,7 +308,15 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(isEditMode ? '출조 기록이 수정되었습니다.' : '출조 기록이 저장되었습니다.'),
+        content: Text(
+          AuthSessionRepository.instance.isPaid
+              ? isEditMode
+                    ? '기록을 기기에 수정했습니다. 사진은 이 기기에만 보관되며 기록 동기화 상태는 업로드 대기열에서 확인할 수 있습니다.'
+                    : '기록을 기기에 저장했습니다. 사진은 이 기기에만 보관되며 기록 동기화 상태는 업로드 대기열에서 확인할 수 있습니다.'
+              : isEditMode
+              ? '출조 기록이 수정되었습니다.'
+              : '출조 기록이 저장되었습니다.',
+        ),
       ),
     );
 
@@ -314,20 +330,124 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> pickPhoto() async {
-    final pickedImage = await imagePicker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
-    );
-
-    if (pickedImage == null) {
+    if (isPickingPhoto) {
+      return;
+    }
+    if (photos.length >= FishingRecordValidator.maxPhotoCount) {
+      showMessage(
+        '사진은 최대 ${FishingRecordValidator.maxPhotoCount}장까지 첨부할 수 있습니다.',
+      );
       return;
     }
 
-    final bytes = kIsWeb ? await pickedImage.readAsBytes() : null;
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('앨범에서 선택'),
+              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            ),
+            if (kIsWeb ||
+                defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS)
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('카메라로 촬영'),
+                onTap: () => Navigator.of(context).pop(ImageSource.camera),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) {
+      return;
+    }
 
     setState(() {
-      photos.add(_SelectedPhoto(path: pickedImage.path, bytes: bytes));
+      isPickingPhoto = true;
     });
+
+    try {
+      final pickedImage = await imagePicker.pickImage(source: source);
+      if (pickedImage == null) {
+        return;
+      }
+
+      final byteLength = await pickedImage.length();
+      if (byteLength < 1) {
+        showMessage('비어 있는 사진 파일은 첨부할 수 없습니다.');
+        return;
+      }
+      if (byteLength > FishingRecordValidator.maxPhotoBytes) {
+        showMessage('사진은 10 MiB 이하 파일만 첨부할 수 있습니다.');
+        return;
+      }
+
+      final bytes = await pickedImage.readAsBytes();
+      final contentType = detectRecordPhotoContentType(bytes);
+      if (contentType == null ||
+          !FishingRecordValidator.allowedPhotoContentTypes.contains(
+            contentType,
+          )) {
+        showMessage('JPEG, PNG, WebP 형식의 사진만 첨부할 수 있습니다.');
+        return;
+      }
+
+      final photoId = _newPhotoId();
+      final stored = await photoFileStore.persistSelection(
+        ownerId: AuthSessionRepository.instance.dataOwnerKey,
+        recordId: recordId,
+        photoId: photoId,
+        bytes: bytes,
+        contentType: contentType,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        photos.add(
+          RecordPhoto(
+            id: photoId,
+            localPath: stored.path,
+            contentType: stored.contentType,
+            sizeBytes: stored.byteLength,
+            checksum: stored.checksum,
+          ),
+        );
+      });
+    } on RecordPhotoTooLargeException {
+      if (mounted) {
+        showMessage('사진은 10 MiB 이하 파일만 첨부할 수 있습니다.');
+      }
+    } on RecordPhotoFileStoreException {
+      if (mounted) {
+        showMessage('사진을 앱 저장소에 복사하지 못했습니다. 다시 시도해 주세요.');
+      }
+    } on Object {
+      if (mounted) {
+        showMessage('사진을 불러오지 못했습니다. 다시 선택해 주세요.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isPickingPhoto = false;
+        });
+      }
+    }
+  }
+
+  String _newPhotoId() {
+    String candidate;
+    do {
+      candidate =
+          'photo_${DateTime.now().microsecondsSinceEpoch}_${nextPhotoSequence++}';
+    } while (photos.any((photo) => photo.id == candidate));
+    return candidate;
   }
 
   void removePhoto(int index) {
@@ -608,9 +728,22 @@ class _RecordFormPageState extends State<RecordFormPage> {
             const SizedBox(height: 8),
 
             OutlinedButton.icon(
-              onPressed: pickPhoto,
-              icon: const Icon(Icons.add_photo_alternate_outlined),
-              label: const Text('사진 추가'),
+              onPressed:
+                  isPickingPhoto ||
+                      photos.length >= FishingRecordValidator.maxPhotoCount
+                  ? null
+                  : pickPhoto,
+              icon: isPickingPhoto
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(
+                isPickingPhoto
+                    ? '사진 저장 중'
+                    : '사진 추가 (${photos.length}/${FishingRecordValidator.maxPhotoCount})',
+              ),
             ),
             const SizedBox(height: 8),
 
@@ -679,7 +812,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
             ),
             const SizedBox(height: 24),
 
-            FilledButton(onPressed: saveRecord, child: const Text('저장')),
+            FilledButton(
+              onPressed: isPickingPhoto ? null : saveRecord,
+              child: const Text('저장'),
+            ),
           ],
         ),
       ),
@@ -829,43 +965,83 @@ class _CatchItemCard extends StatelessWidget {
   }
 }
 
-class _SelectedPhoto {
-  final String path;
-  final Uint8List? bytes;
-
-  const _SelectedPhoto({required this.path, this.bytes});
-}
-
 class _PhotoPreview extends StatelessWidget {
-  final _SelectedPhoto photo;
+  final RecordPhoto photo;
 
   const _PhotoPreview({required this.photo});
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) {
-      if (photo.bytes != null) {
-        return Image.memory(
-          photo.bytes!,
-          width: 96,
-          height: 96,
-          fit: BoxFit.cover,
-        );
-      }
-
-      return Container(
+    final localPath = photo.localPath?.trim();
+    if (!kIsWeb && localPath != null && localPath.isNotEmpty) {
+      return Image.file(
+        File(localPath),
         width: 96,
         height: 96,
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: const Icon(Icons.image_outlined),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _placeholder(
+          context,
+          icon: Icons.broken_image_outlined,
+          label: '사진 오류',
+        ),
+      );
+    }
+    if (kIsWeb && localPath != null && localPath.isNotEmpty) {
+      return FutureBuilder<Uint8List>(
+        future: RecordPhotoFileStore().readBytes(localPath),
+        builder: (context, snapshot) {
+          final bytes = snapshot.data;
+          if (bytes != null) {
+            return Image.memory(
+              bytes,
+              width: 96,
+              height: 96,
+              fit: BoxFit.cover,
+            );
+          }
+          return _placeholder(
+            context,
+            icon: snapshot.hasError
+                ? Icons.broken_image_outlined
+                : Icons.image_outlined,
+            label: snapshot.hasError ? '사진 오류' : null,
+          );
+        },
       );
     }
 
-    return Image.file(
-      File(photo.path),
+    return _placeholder(
+      context,
+      icon: Icons.broken_image_outlined,
+      label: '사진을 불러올 수 없음',
+    );
+  }
+
+  Widget _placeholder(
+    BuildContext context, {
+    required IconData icon,
+    String? label,
+  }) {
+    return Container(
       width: 96,
       height: 96,
-      fit: BoxFit.cover,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon),
+          if (label != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
