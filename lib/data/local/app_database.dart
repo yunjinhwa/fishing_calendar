@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'fishing_calendar.db';
-  static const int databaseVersion = 1;
+  static const int databaseVersion = 2;
 
   static const String localMetadataTable = 'local_metadata';
   static const String fishingRecordsTable = 'fishing_records';
@@ -75,6 +75,7 @@ class AppDatabase {
           await database.execute('PRAGMA foreign_keys = ON');
         },
         onCreate: _createSchema,
+        onUpgrade: _upgradeSchema,
       ),
     );
   }
@@ -124,19 +125,7 @@ class AppDatabase {
       )
     ''');
 
-    batch.execute('''
-      CREATE TABLE $recordPhotosTable (
-        owner_key TEXT NOT NULL,
-        record_id TEXT NOT NULL,
-        display_order INTEGER NOT NULL,
-        photo_path TEXT NOT NULL,
-        PRIMARY KEY (owner_key, record_id, display_order),
-        FOREIGN KEY (owner_key, record_id)
-          REFERENCES $fishingRecordsTable (owner_key, record_id)
-          ON UPDATE CASCADE
-          ON DELETE CASCADE
-      )
-    ''');
+    batch.execute(_createRecordPhotosTableSql(recordPhotosTable));
 
     batch.execute('''
       CREATE TABLE $outboxItemsTable (
@@ -193,6 +182,64 @@ class AppDatabase {
 
     await batch.commit(noResult: true);
   }
+
+  Future<void> _upgradeSchema(
+    sqflite.Database database,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      const legacyPhotosTable = '${recordPhotosTable}_v1';
+
+      await database.execute(
+        'ALTER TABLE $recordPhotosTable RENAME TO $legacyPhotosTable',
+      );
+      await database.execute(_createRecordPhotosTableSql(recordPhotosTable));
+      await database.execute('''
+        INSERT INTO $recordPhotosTable (
+          owner_key,
+          record_id,
+          photo_id,
+          local_path,
+          content_type,
+          file_size,
+          checksum,
+          display_order
+        )
+        SELECT
+          owner_key,
+          record_id,
+          'legacy-' || CAST(display_order AS TEXT),
+          photo_path,
+          NULL,
+          NULL,
+          NULL,
+          display_order
+        FROM $legacyPhotosTable
+      ''');
+      await database.execute('DROP TABLE $legacyPhotosTable');
+    }
+  }
+
+  static String _createRecordPhotosTableSql(String tableName) =>
+      '''
+    CREATE TABLE $tableName (
+      owner_key TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      photo_id TEXT NOT NULL,
+      local_path TEXT NOT NULL,
+      content_type TEXT,
+      file_size INTEGER CHECK (file_size IS NULL OR file_size > 0),
+      checksum TEXT,
+      display_order INTEGER NOT NULL,
+      PRIMARY KEY (owner_key, record_id, photo_id),
+      UNIQUE (owner_key, record_id, display_order),
+      FOREIGN KEY (owner_key, record_id)
+        REFERENCES $fishingRecordsTable (owner_key, record_id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+    )
+  ''';
 
   @visibleForTesting
   Future<void> configureForTesting({

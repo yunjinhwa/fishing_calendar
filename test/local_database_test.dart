@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:fishing_build/data/local/app_database.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
@@ -9,8 +10,10 @@ import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'support/test_database.dart';
 
@@ -106,6 +109,91 @@ void main() {
       ),
       0,
     );
+  });
+
+  test('local photo metadata survives a SQLite reload', () async {
+    await authSession.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'photo-metadata@example.com',
+    );
+    final original = _record(
+      id: 'photo-metadata-record',
+      photos: const <RecordPhoto>[
+        RecordPhoto(
+          id: 'local-photo',
+          localPath: 'local.jpg',
+          contentType: 'image/jpeg',
+          sizeBytes: 1234,
+          checksum: 'local-checksum',
+        ),
+        RecordPhoto(
+          id: 'second-local-photo',
+          localPath: 'second-local.png',
+          contentType: 'image/png',
+          sizeBytes: 5678,
+          checksum: 'cloud-checksum',
+        ),
+      ],
+    );
+
+    await recordRepository.addRecord(original);
+    recordRepository.clearCacheOnlyForTesting();
+    await recordRepository.loadRecords();
+
+    final restored = recordRepository.getAllRecords().single;
+    expect(restored.photos, hasLength(2));
+    expect(restored.photos.first.id, 'local-photo');
+    expect(restored.photos.first.localPath, 'local.jpg');
+    expect(restored.photos.first.contentType, 'image/jpeg');
+    expect(restored.photos.first.sizeBytes, 1234);
+    expect(restored.photos.first.checksum, 'local-checksum');
+    expect(restored.photos.last.id, 'second-local-photo');
+    expect(restored.photos.last.localPath, 'second-local.png');
+    expect(restored.photoPaths, <String>['local.jpg', 'second-local.png']);
+  });
+
+  test('legacy photoPaths JSON receives deterministic photo IDs', () {
+    final json = _record(id: 'legacy-json').toJson()
+      ..remove('photos')
+      ..['photoPaths'] = <String>['first.jpg', 'second.jpg'];
+
+    final restored = FishingRecord.fromJson(json);
+
+    expect(restored.photos.map((photo) => photo.id), <String>[
+      'legacy-0',
+      'legacy-1',
+    ]);
+    expect(restored.photoPaths, <String>['first.jpg', 'second.jpg']);
+    expect(
+      FishingRecord.fromJson(restored.toJson()).photos.first.id,
+      'legacy-0',
+    );
+  });
+
+  test('photo metadata survives a record JSON round trip', () {
+    final original = _record(
+      id: 'photo-json',
+      photos: const <RecordPhoto>[
+        RecordPhoto(
+          id: 'photo-id',
+          localPath: 'photo.jpg',
+          contentType: 'image/jpeg',
+          sizeBytes: 4321,
+          checksum: 'sha256-checksum',
+        ),
+      ],
+    );
+
+    final encoded = original.toJson();
+    final restored = FishingRecord.fromJson(encoded);
+
+    expect(encoded, contains('photos'));
+    expect(encoded, isNot(contains('photoPaths')));
+    expect(restored.photos.single.id, 'photo-id');
+    expect(restored.photos.single.localPath, 'photo.jpg');
+    expect(restored.photos.single.contentType, 'image/jpeg');
+    expect(restored.photos.single.sizeBytes, 4321);
+    expect(restored.photos.single.checksum, 'sha256-checksum');
   });
 
   test('scoped SharedPreferences data migrates once into SQLite', () async {
@@ -232,11 +320,101 @@ void main() {
     final result = await database.rawQuery('PRAGMA foreign_keys');
     expect(Sqflite.firstIntValue(result), 1);
   });
+
+  test('database v1 photo paths migrate losslessly to database v2', () async {
+    sqfliteFfiInit();
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'fishing-calendar-v1-',
+    );
+    final databasePath = path.join(
+      temporaryDirectory.path,
+      'migration-test.db',
+    );
+    addTearDown(() async {
+      await AppDatabase.instance.resetForTesting();
+      if (temporaryDirectory.existsSync()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
+    });
+
+    final legacyDatabase = await databaseFactoryFfiNoIsolate.openDatabase(
+      databasePath,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (database, version) async {
+          await database.execute('''
+            CREATE TABLE ${AppDatabase.fishingRecordsTable} (
+              insertion_order INTEGER PRIMARY KEY AUTOINCREMENT,
+              owner_key TEXT NOT NULL,
+              record_id TEXT NOT NULL,
+              UNIQUE (owner_key, record_id)
+            )
+          ''');
+          await database.execute('''
+            CREATE TABLE ${AppDatabase.recordPhotosTable} (
+              owner_key TEXT NOT NULL,
+              record_id TEXT NOT NULL,
+              display_order INTEGER NOT NULL,
+              photo_path TEXT NOT NULL,
+              PRIMARY KEY (owner_key, record_id, display_order),
+              FOREIGN KEY (owner_key, record_id)
+                REFERENCES ${AppDatabase.fishingRecordsTable}
+                  (owner_key, record_id)
+                ON UPDATE CASCADE
+                ON DELETE CASCADE
+            )
+          ''');
+        },
+      ),
+    );
+    await legacyDatabase.insert(
+      AppDatabase.fishingRecordsTable,
+      <String, Object>{
+        'owner_key': 'member:legacy',
+        'record_id': 'legacy-record',
+      },
+    );
+    await legacyDatabase.insert(AppDatabase.recordPhotosTable, <String, Object>{
+      'owner_key': 'member:legacy',
+      'record_id': 'legacy-record',
+      'display_order': 0,
+      'photo_path': 'legacy-photo.jpg',
+    });
+    await legacyDatabase.close();
+
+    await AppDatabase.instance.configureForTesting(
+      databaseFactory: databaseFactoryFfiNoIsolate,
+      databasePath: databasePath,
+    );
+    final upgradedDatabase = await AppDatabase.instance.database;
+    final rows = await upgradedDatabase.query(AppDatabase.recordPhotosTable);
+    final columns = await upgradedDatabase.rawQuery(
+      'PRAGMA table_info(${AppDatabase.recordPhotosTable})',
+    );
+
+    expect(
+      Sqflite.firstIntValue(
+        await upgradedDatabase.rawQuery('PRAGMA user_version'),
+      ),
+      AppDatabase.databaseVersion,
+    );
+    expect(rows, hasLength(1));
+    expect(rows.single['photo_id'], 'legacy-0');
+    expect(rows.single['local_path'], 'legacy-photo.jpg');
+    expect(rows.single['storage_path'], isNull);
+    expect(rows.single['display_order'], 0);
+    expect(columns.map((column) => column['name']), contains('local_path'));
+    expect(
+      columns.map((column) => column['name']),
+      isNot(contains('photo_path')),
+    );
+  });
 }
 
 FishingRecord _record({
   required String id,
   List<CatchRecord> catches = const <CatchRecord>[],
+  List<RecordPhoto> photos = const <RecordPhoto>[],
   List<String> photoPaths = const <String>[],
 }) {
   return FishingRecord(
@@ -250,6 +428,7 @@ FishingRecord _record({
     airTemperature: 22.5,
     waterTemperature: 19.2,
     catches: catches,
+    photos: photos,
     photoPaths: photoPaths,
     memo: 'SQLite 왕복 테스트',
   );

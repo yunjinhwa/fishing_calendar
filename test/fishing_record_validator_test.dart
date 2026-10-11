@@ -88,6 +88,141 @@ void main() {
       contains('무게는'),
     );
   });
+
+  test('accepts local photo values at configured boundaries', () {
+    final photos = <RecordPhoto>[
+      for (var index = 0; index < FishingRecordValidator.maxPhotoCount; index++)
+        RecordPhoto(
+          id: 'photo_$index',
+          localPath: 'photo-$index.jpg',
+          contentType: 'image/jpeg',
+          sizeBytes: FishingRecordValidator.maxPhotoBytes,
+          checksum: 'a' * 64,
+        ),
+    ];
+
+    expect(FishingRecordValidator.validate(_record(photos: photos)), isNull);
+  });
+
+  test('accepts legacy local photos without generated metadata', () {
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: const <RecordPhoto>[
+            RecordPhoto(id: 'legacy-0', localPath: 'legacy.jpg'),
+          ],
+        ),
+      ),
+      isNull,
+    );
+  });
+
+  test('rejects too many photos and duplicate or unsafe photo IDs', () {
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: List<RecordPhoto>.generate(
+            FishingRecordValidator.maxPhotoCount + 1,
+            (index) => RecordPhoto(id: 'photo_$index', localPath: '$index.jpg'),
+          ),
+        ),
+      ),
+      contains('최대 10장'),
+    );
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: const <RecordPhoto>[
+            RecordPhoto(id: 'duplicate', localPath: 'one.jpg'),
+            RecordPhoto(id: 'duplicate', localPath: 'two.jpg'),
+          ],
+        ),
+      ),
+      contains('중복'),
+    );
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: const <RecordPhoto>[
+            RecordPhoto(id: 'unsafe/id', localPath: 'photo.jpg'),
+          ],
+        ),
+      ),
+      contains('ID 형식'),
+    );
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: <RecordPhoto>[
+            RecordPhoto(
+              id: 'p' * (FishingRecordValidator.maxPhotoIdLength + 1),
+              localPath: 'photo.jpg',
+            ),
+          ],
+        ),
+      ),
+      contains('ID 형식'),
+    );
+  });
+
+  test('rejects invalid photo size, content type, and missing local path', () {
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: <RecordPhoto>[
+            RecordPhoto(
+              id: 'empty',
+              localPath: 'empty.jpg',
+              contentType: 'image/jpeg',
+              sizeBytes: 0,
+              checksum: 'a' * 64,
+            ),
+          ],
+        ),
+      ),
+      contains('10 MiB 이하'),
+    );
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: <RecordPhoto>[
+            RecordPhoto(
+              id: 'too_large',
+              localPath: 'large.jpg',
+              contentType: 'image/jpeg',
+              sizeBytes: FishingRecordValidator.maxPhotoBytes + 1,
+              checksum: 'a' * 64,
+            ),
+          ],
+        ),
+      ),
+      contains('10 MiB 이하'),
+    );
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: <RecordPhoto>[
+            RecordPhoto(
+              id: 'gif',
+              localPath: 'photo.gif',
+              contentType: 'image/gif',
+              sizeBytes: 1,
+              checksum: 'a' * 64,
+            ),
+          ],
+        ),
+      ),
+      contains('JPEG, PNG, WebP'),
+    );
+    expect(
+      FishingRecordValidator.validate(
+        _record(
+          photos: const <RecordPhoto>[RecordPhoto(id: 'missing_local_path')],
+        ),
+      ),
+      contains('파일 경로'),
+    );
+  });
 }
 
 FishingRecord _record({
@@ -99,6 +234,7 @@ FishingRecord _record({
   List<CatchRecord> catches = const <CatchRecord>[
     CatchRecord(speciesName: '우럭', lengthCm: 31, weightG: 820),
   ],
+  List<RecordPhoto> photos = const <RecordPhoto>[],
   String? memo = '테스트 메모',
 }) {
   return FishingRecord(
@@ -112,6 +248,7 @@ FishingRecord _record({
     airTemperature: airTemperature,
     waterTemperature: waterTemperature,
     catches: catches,
+    photos: photos,
     memo: memo,
   );
 }

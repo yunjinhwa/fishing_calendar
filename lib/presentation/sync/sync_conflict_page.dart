@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/conflict_item.dart';
+import '../../data/models/outbox_item.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/conflict_memory_repository.dart';
+import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 import 'conflict_detail_page.dart';
@@ -84,6 +86,13 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
     final syncService = RecordSyncService.instance;
     final isSyncing = syncService.isSyncing || _isManualSyncPending;
     final syncStatus = _syncStatusFor(syncService, unresolvedCount);
+    final outboxItems = OutboxRepository.instance.getAllItems();
+    final unfinishedOutboxCount = outboxItems
+        .where((item) => item.status != OutboxStatus.succeeded)
+        .length;
+    final failedOutboxCount = outboxItems
+        .where((item) => item.status == OutboxStatus.failed)
+        .length;
 
     return PaidFeatureGate(
       title: '동기화/충돌 관리',
@@ -134,6 +143,37 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
                       ),
                     ],
                   ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              Card(
+                child: ListTile(
+                  leading: Icon(
+                    failedOutboxCount > 0
+                        ? Icons.error_outline
+                        : Icons.cloud_upload_outlined,
+                    color: failedOutboxCount > 0
+                        ? Theme.of(context).colorScheme.error
+                        : null,
+                  ),
+                  title: const Text('업로드 대기열'),
+                  subtitle: Text(
+                    unfinishedOutboxCount == 0
+                        ? '서버 반영을 기다리는 변경이 없습니다.'
+                        : failedOutboxCount == 0
+                        ? '미완료 $unfinishedOutboxCount건'
+                        : '미완료 $unfinishedOutboxCount건 · 실패 $failedOutboxCount건',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const OutboxPage()),
+                    );
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  },
                 ),
               ),
               const SizedBox(height: 16),

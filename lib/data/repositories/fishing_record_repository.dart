@@ -142,8 +142,8 @@ class FishingRecordRepository extends ChangeNotifier {
 
   /// Replaces the current owner's cache with an authoritative remote snapshot.
   ///
-  /// Photos are still device-local in this release, so matching local paths
-  /// are preserved while all server-backed record fields are replaced.
+  /// Photos are device-local, so the current device's files are preserved
+  /// while server-backed record fields are replaced.
   Future<bool> replaceWithRemoteSnapshot(
     List<FishingRecord> remoteRecords, {
     String? ownerKey,
@@ -154,29 +154,10 @@ class FishingRecordRepository extends ChangeNotifier {
         record.id: record,
     };
     final resolvedRecords = remoteRecords
-        .map((remoteRecord) {
-          final localRecord = localById[remoteRecord.id];
-          if (remoteRecord.photoPaths.isNotEmpty ||
-              localRecord == null ||
-              localRecord.photoPaths.isEmpty) {
-            return remoteRecord;
-          }
-
-          return FishingRecord(
-            id: remoteRecord.id,
-            location: remoteRecord.location,
-            startAt: remoteRecord.startAt,
-            endAt: remoteRecord.endAt,
-            genreName: remoteRecord.genreName,
-            tide: remoteRecord.tide,
-            weather: remoteRecord.weather,
-            airTemperature: remoteRecord.airTemperature,
-            waterTemperature: remoteRecord.waterTemperature,
-            catches: remoteRecord.catches,
-            photoPaths: localRecord.photoPaths,
-            memo: remoteRecord.memo,
-          );
-        })
+        .map(
+          (remoteRecord) =>
+              _preserveLocalPhotos(remoteRecord, localById[remoteRecord.id]),
+        )
         .toList(growable: false);
 
     var replaced = false;
@@ -209,6 +190,30 @@ class FishingRecordRepository extends ChangeNotifier {
       await reloadOwner(resolvedOwnerKey);
     }
     return replaced;
+  }
+
+  FishingRecord _preserveLocalPhotos(
+    FishingRecord remoteRecord,
+    FishingRecord? localRecord,
+  ) {
+    if (localRecord == null || localRecord.photos.isEmpty) {
+      return remoteRecord;
+    }
+
+    return FishingRecord(
+      id: remoteRecord.id,
+      location: remoteRecord.location,
+      startAt: remoteRecord.startAt,
+      endAt: remoteRecord.endAt,
+      genreName: remoteRecord.genreName,
+      tide: remoteRecord.tide,
+      weather: remoteRecord.weather,
+      airTemperature: remoteRecord.airTemperature,
+      waterTemperature: remoteRecord.waterTemperature,
+      catches: remoteRecord.catches,
+      photos: localRecord.photos,
+      memo: remoteRecord.memo,
+    );
   }
 
   Future<void> clear() async {

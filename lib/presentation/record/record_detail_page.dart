@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
 import '../../data/models/fishing_record.dart';
+import '../../data/photos/record_photo_file_store.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../auth/auth_access_guard.dart';
@@ -208,22 +209,22 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
             _SectionTitle(title: '사진'),
             const SizedBox(height: 8),
 
-            if (record.photoPaths.isEmpty)
+            if (record.photos.isEmpty)
               const _EmptyInfoCard(message: '첨부된 사진이 없습니다.')
             else
               SizedBox(
                 height: 120,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  itemCount: record.photoPaths.length,
+                  itemCount: record.photos.length,
                   separatorBuilder: (context, index) =>
                       const SizedBox(width: 8),
                   itemBuilder: (context, index) {
-                    final photoPath = record.photoPaths[index];
+                    final photo = record.photos[index];
 
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: _RecordPhotoPreview(photoPath: photoPath),
+                      child: _RecordPhotoPreview(photo: photo),
                     );
                   },
                 ),
@@ -353,40 +354,83 @@ class _EmptyInfoCard extends StatelessWidget {
 }
 
 class _RecordPhotoPreview extends StatelessWidget {
-  final String photoPath;
+  final RecordPhoto photo;
 
-  const _RecordPhotoPreview({required this.photoPath});
+  const _RecordPhotoPreview({required this.photo});
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) {
-      return Container(
+    final localPath = photo.localPath?.trim();
+    if (!kIsWeb && localPath != null && localPath.isNotEmpty) {
+      return Image.file(
+        File(localPath),
         width: 120,
         height: 120,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _placeholder(
+          context,
+          icon: Icons.broken_image_outlined,
+          label: '사진을 불러올 수 없음',
         ),
-        child: const Center(child: Icon(Icons.image_outlined)),
+      );
+    }
+    if (kIsWeb && localPath != null && localPath.isNotEmpty) {
+      return FutureBuilder<Uint8List>(
+        future: RecordPhotoFileStore().readBytes(localPath),
+        builder: (context, snapshot) {
+          final bytes = snapshot.data;
+          if (bytes != null) {
+            return Image.memory(
+              bytes,
+              width: 120,
+              height: 120,
+              fit: BoxFit.cover,
+            );
+          }
+          return _placeholder(
+            context,
+            icon: snapshot.hasError
+                ? Icons.broken_image_outlined
+                : Icons.image_outlined,
+            label: snapshot.hasError ? '사진을 불러올 수 없음' : null,
+          );
+        },
       );
     }
 
-    return Image.file(
-      File(photoPath),
+    return _placeholder(
+      context,
+      icon: Icons.broken_image_outlined,
+      label: '사진을 불러올 수 없음',
+    );
+  }
+
+  Widget _placeholder(
+    BuildContext context, {
+    required IconData icon,
+    String? label,
+  }) {
+    return Container(
       width: 120,
       height: 120,
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) {
-        return Container(
-          width: 120,
-          height: 120,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Center(child: Icon(Icons.broken_image_outlined)),
-        );
-      },
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon),
+          if (label != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -66,15 +66,23 @@ class LocalDataStore {
           );
     }
 
-    final photosByRecord = <String, List<String>>{};
+    final photosByRecord = <String, List<RecordPhoto>>{};
     for (final row in photoRows) {
       final key = _recordKey(
         row['owner_key']! as String,
         row['record_id']! as String,
       );
       photosByRecord
-          .putIfAbsent(key, () => <String>[])
-          .add(row['photo_path']! as String);
+          .putIfAbsent(key, () => <RecordPhoto>[])
+          .add(
+            RecordPhoto(
+              id: row['photo_id']! as String,
+              localPath: row['local_path'] as String?,
+              contentType: row['content_type'] as String?,
+              sizeBytes: (row['file_size'] as num?)?.toInt(),
+              checksum: row['checksum'] as String?,
+            ),
+          );
     }
 
     final recordsByOwner = <String, List<FishingRecord>>{};
@@ -96,7 +104,7 @@ class LocalDataStore {
               airTemperature: (row['air_temperature'] as num?)?.toDouble(),
               waterTemperature: (row['water_temperature'] as num?)?.toDouble(),
               catches: catchesByRecord[key] ?? const <CatchRecord>[],
-              photoPaths: photosByRecord[key] ?? const <String>[],
+              photos: photosByRecord[key] ?? const <RecordPhoto>[],
               memo: row['memo'] as String?,
             ),
           );
@@ -162,12 +170,17 @@ class LocalDataStore {
       });
     }
 
-    for (var index = 0; index < record.photoPaths.length; index++) {
+    for (var index = 0; index < record.photos.length; index++) {
+      final photo = record.photos[index];
       await executor.insert(AppDatabase.recordPhotosTable, <String, Object?>{
         'owner_key': ownerKey,
         'record_id': record.id,
+        'photo_id': photo.id,
+        'local_path': photo.localPath,
+        'content_type': photo.contentType,
+        'file_size': photo.sizeBytes,
+        'checksum': photo.checksum,
         'display_order': index,
-        'photo_path': record.photoPaths[index],
       });
     }
   }

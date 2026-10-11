@@ -9,6 +9,7 @@ import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/remote/record_sync_gateway.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
+import 'package:fishing_build/presentation/calendar/daily_record_list_page.dart';
 import 'package:fishing_build/presentation/sync/outbox_page.dart';
 import 'package:fishing_build/presentation/sync/sync_conflict_page.dart';
 import 'package:flutter/material.dart';
@@ -463,6 +464,43 @@ void main() {
 
     expect(find.text('아직 서버 동기화 전입니다.'), findsOneWidget);
     expect(find.text('모든 데이터가 최신 상태입니다.'), findsNothing);
+  });
+
+  testWidgets('record list shows failed record sync state', (tester) async {
+    await _signInAsPaid(authSession, 'record-status@example.com');
+    final record = _record('failed-record-status');
+    await RecordMutationService.instance.addRecord(record);
+    final item = outboxRepository.getAllItems().single;
+    await outboxRepository.updateItemStatus(
+      itemId: item.id,
+      status: OutboxStatus.failed,
+      errorMessage: '기록을 서버에 반영하지 못했습니다.',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DailyRecordListPage(selectedDate: DateTime(2026, 9, 22)),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('기록 동기화 실패'), findsOneWidget);
+  });
+
+  testWidgets('sync screen links directly to the upload queue', (tester) async {
+    await _signInAsPaid(authSession, 'outbox-link@example.com');
+    await RecordMutationService.instance.addRecord(_record('outbox-link'));
+
+    await tester.pumpWidget(const MaterialApp(home: SyncConflictPage()));
+    await tester.pump();
+
+    expect(find.text('업로드 대기열'), findsOneWidget);
+    expect(find.text('미완료 1건'), findsOneWidget);
+
+    await tester.tap(find.text('업로드 대기열'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(OutboxPage), findsOneWidget);
   });
 
   testWidgets('completed outbox items cannot be cleared during first sync', (

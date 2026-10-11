@@ -329,7 +329,7 @@ class _EmptyOutboxView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '오프라인 상태에서 생성, 수정, 삭제한 요청이 이곳에 표시됩니다.',
+              '유료 회원의 기록 변경이 먼저 기기에 저장된 뒤 서버 반영 상태가 이곳에 표시됩니다.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
