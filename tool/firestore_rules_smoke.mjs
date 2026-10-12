@@ -12,6 +12,7 @@ const authBase = `http://${authHost}/identitytoolkit.googleapis.com/v1`;
 const firestoreBase =
   `http://${firestoreHost}/v1/projects/${projectId}/databases/(default)/documents`;
 const runId = Date.now();
+const fingerprint = 'a'.repeat(64);
 
 async function createUser(label) {
   const response = await fetch(`${authBase}/accounts:signUp?key=fake-api-key`, {
@@ -25,7 +26,9 @@ async function createUser(label) {
   });
   const body = await response.json();
   if (!response.ok) {
-    throw new Error(`Auth signup failed (${response.status}): ${JSON.stringify(body)}`);
+    throw new Error(
+      `Auth signup failed (${response.status}): ${JSON.stringify(body)}`,
+    );
   }
   return {uid: body.localId, token: body.idToken};
 }
@@ -57,18 +60,20 @@ function timestampValue(value) {
   return {timestampValue: value};
 }
 
-function recordFields(
+function activeRecordFields({
   uid,
   recordId,
-  outboxId = 'rules-create',
-  overrides = {},
-) {
+  outboxId,
+  versionNo,
+  createdAt,
+  location = '규칙 테스트 방파제',
+}) {
   return {
     schemaVersion: integerValue(1),
     ownerUid: stringValue(uid),
     recordId: stringValue(recordId),
     recordStatus: stringValue('ACTIVE'),
-    location: stringValue('규칙 테스트 방파제'),
+    location: stringValue(location),
     startAt: timestampValue('2026-09-22T00:00:00Z'),
     endAt: timestampValue('2026-09-22T02:00:00Z'),
     genreName: stringValue('바다낚시'),
@@ -93,137 +98,131 @@ function recordFields(
     },
     memo: stringValue('Firestore 규칙 smoke test'),
     photoUploadPending: {booleanValue: false},
-    versionNo: integerValue(1),
+    versionNo: integerValue(versionNo),
     clientModifiedAt: timestampValue('2026-09-22T00:00:00Z'),
+    ...(createdAt === undefined ? {} : {createdAt}),
     lastOutboxId: stringValue(outboxId),
-    ...overrides,
   };
 }
 
-function receiptFields(uid, outboxId, recordId, operationType, versionNo) {
+function deletedRecordFields({
+  uid,
+  recordId,
+  outboxId,
+  versionNo,
+  createdAt,
+}) {
   return {
+    schemaVersion: integerValue(1),
+    ownerUid: stringValue(uid),
+    recordId: stringValue(recordId),
+    recordStatus: stringValue('DELETED'),
+    versionNo: integerValue(versionNo),
+    clientModifiedAt: timestampValue('2026-09-22T03:00:00Z'),
+    createdAt,
+    lastOutboxId: stringValue(outboxId),
+  };
+}
+
+function receiptFields({
+  uid,
+  outboxId,
+  recordId,
+  operationType,
+  baseVersionNo,
+  resultingVersionNo,
+  mutationFingerprint = fingerprint,
+  legacy = false,
+}) {
+  if (legacy) {
+    return {
+      ownerUid: stringValue(uid),
+      outboxId: stringValue(outboxId),
+      recordId: stringValue(recordId),
+      operationType: stringValue(operationType),
+      resultingVersionNo: integerValue(resultingVersionNo),
+    };
+  }
+  return {
+    schemaVersion: integerValue(2),
     ownerUid: stringValue(uid),
     outboxId: stringValue(outboxId),
     recordId: stringValue(recordId),
     operationType: stringValue(operationType),
-    resultingVersionNo: integerValue(versionNo),
+    baseVersionNo: integerValue(baseVersionNo),
+    resultingVersionNo: integerValue(resultingVersionNo),
+    mutationFingerprint: stringValue(mutationFingerprint),
   };
 }
 
-function createCommit(
+function mutationCommit({
   uid,
   recordId,
-  outboxId = 'rules-create',
-  recordOverrides = {},
-) {
+  outboxId,
+  operationType,
+  baseVersionNo,
+  resultingVersionNo,
+  createdAt,
+  recordStatus = 'ACTIVE',
+  location,
+  includeRecord = true,
+  includeReceipt = true,
+  mutationFingerprint,
+  legacyReceipt = false,
+}) {
   const recordName =
     `projects/${projectId}/databases/(default)/documents/users/${uid}/records/${recordId}`;
   const receiptName =
     `projects/${projectId}/databases/(default)/documents/users/${uid}/sync_receipts/${outboxId}`;
-  return {
-    writes: [
-      {
-        update: {
-          name: recordName,
-          fields: recordFields(uid, recordId, outboxId, recordOverrides),
-        },
-        updateTransforms: [
-          {fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME'},
-          {fieldPath: 'serverUpdatedAt', setToServerValue: 'REQUEST_TIME'},
-        ],
+  const fields = recordStatus === 'DELETED'
+    ? deletedRecordFields({
+        uid,
+        recordId,
+        outboxId,
+        versionNo: resultingVersionNo,
+        createdAt,
+      })
+    : activeRecordFields({
+        uid,
+        recordId,
+        outboxId,
+        versionNo: resultingVersionNo,
+        createdAt,
+        location,
+      });
+  const writes = [];
+  if (includeRecord) {
+    writes.push({
+      update: {name: recordName, fields},
+      updateTransforms: [
+        ...(createdAt === undefined
+          ? [{fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME'}]
+          : []),
+        {fieldPath: 'serverUpdatedAt', setToServerValue: 'REQUEST_TIME'},
+      ],
+    });
+  }
+  if (includeReceipt) {
+    writes.push({
+      update: {
+        name: receiptName,
+        fields: receiptFields({
+          uid,
+          outboxId,
+          recordId,
+          operationType,
+          baseVersionNo,
+          resultingVersionNo,
+          mutationFingerprint,
+          legacy: legacyReceipt,
+        }),
       },
-      {
-        update: {
-          name: receiptName,
-          fields: receiptFields(uid, outboxId, recordId, 'create', 1),
-        },
-        updateTransforms: [
-          {fieldPath: 'processedAt', setToServerValue: 'REQUEST_TIME'},
-        ],
-      },
-    ],
-  };
-}
-
-function recordOnlyCommit(uid, recordId) {
-  const recordName =
-    `projects/${projectId}/databases/(default)/documents/users/${uid}/records/${recordId}`;
-  return {
-    writes: [
-      {
-        update: {
-          name: recordName,
-          fields: recordFields(uid, recordId, 'record-only-outbox'),
-        },
-        updateTransforms: [
-          {fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME'},
-          {fieldPath: 'serverUpdatedAt', setToServerValue: 'REQUEST_TIME'},
-        ],
-      },
-    ],
-  };
-}
-
-function receiptOnlyCommit(uid, recordId) {
-  const receiptName =
-    `projects/${projectId}/databases/(default)/documents/users/${uid}/sync_receipts/receipt-only-outbox`;
-  return {
-    writes: [
-      {
-        update: {
-          name: receiptName,
-          fields: receiptFields(
-            uid,
-            'receipt-only-outbox',
-            recordId,
-            'create',
-            1,
-          ),
-        },
-        updateTransforms: [
-          {fieldPath: 'processedAt', setToServerValue: 'REQUEST_TIME'},
-        ],
-      },
-    ],
-  };
-}
-
-function tombstoneCommit(uid, recordId, createdAt) {
-  const recordName =
-    `projects/${projectId}/databases/(default)/documents/users/${uid}/records/${recordId}`;
-  const receiptName =
-    `projects/${projectId}/databases/(default)/documents/users/${uid}/sync_receipts/rules-delete`;
-  return {
-    writes: [
-      {
-        update: {
-          name: recordName,
-          fields: {
-            schemaVersion: integerValue(1),
-            ownerUid: stringValue(uid),
-            recordId: stringValue(recordId),
-            recordStatus: stringValue('DELETED'),
-            versionNo: integerValue(2),
-            clientModifiedAt: timestampValue('2026-09-22T03:00:00Z'),
-            createdAt,
-            lastOutboxId: stringValue('rules-delete'),
-          },
-        },
-        updateTransforms: [
-          {fieldPath: 'serverUpdatedAt', setToServerValue: 'REQUEST_TIME'},
-        ],
-      },
-      {
-        update: {
-          name: receiptName,
-          fields: receiptFields(uid, 'rules-delete', recordId, 'delete', 2),
-        },
-        updateTransforms: [
-          {fieldPath: 'processedAt', setToServerValue: 'REQUEST_TIME'},
-        ],
-      },
-    ],
-  };
+      updateTransforms: [
+        {fieldPath: 'processedAt', setToServerValue: 'REQUEST_TIME'},
+      ],
+    });
+  }
+  return {writes};
 }
 
 async function expectStatus(label, response, expectedStatus) {
@@ -235,75 +234,156 @@ async function expectStatus(label, response, expectedStatus) {
   }
 }
 
+async function commit(label, token, body, expectedStatus) {
+  await expectStatus(
+    label,
+    await request(':commit', {token, method: 'POST', body}),
+    expectedStatus,
+  );
+}
+
 const owner = await createUser('owner');
 const intruder = await createUser('intruder');
 const recordId = 'rules-record';
 
-await expectStatus(
+await commit(
   'record without matching receipt denied',
-  await request(':commit', {
-    token: owner.token,
-    method: 'POST',
-    body: recordOnlyCommit(owner.uid, 'record-without-receipt'),
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'record-without-receipt',
+    outboxId: 'record-only',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+    includeReceipt: false,
   }),
   403,
 );
 
-await expectStatus(
+await commit(
   'receipt without matching record denied',
-  await request(':commit', {
-    token: owner.token,
-    method: 'POST',
-    body: receiptOnlyCommit(owner.uid, 'record-without-receipt'),
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'receipt-without-record',
+    outboxId: 'receipt-only',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+    includeRecord: false,
   }),
   403,
 );
 
-await expectStatus(
+await commit(
+  'update operation cannot create a record',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'wrong-create-operation',
+    outboxId: 'wrong-create-operation',
+    operationType: 'update',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+  }),
+  403,
+);
+
+await commit(
+  'resulting version must equal base plus one',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'bad-result-version',
+    outboxId: 'bad-result-version',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 2,
+  }),
+  403,
+);
+
+await commit(
+  'fingerprint must be a sha256 hex string',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'bad-fingerprint',
+    outboxId: 'bad-fingerprint',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+    mutationFingerprint: 'invalid',
+  }),
+  403,
+);
+
+await commit(
   'owner atomic create',
-  await request(':commit', {
-    token: owner.token,
-    method: 'POST',
-    body: createCommit(owner.uid, recordId),
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId,
+    outboxId: 'rules-create',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
   }),
   200,
 );
 
-await expectStatus(
+await commit(
+  'legacy v1 receipt remains writable during app rollout',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'legacy-receipt-create',
+    outboxId: 'legacy-receipt-create',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+    legacyReceipt: true,
+  }),
+  200,
+);
+
+await commit(
   '200 character Korean location accepted',
-  await request(':commit', {
-    token: owner.token,
-    method: 'POST',
-    body: createCommit(
-      owner.uid,
-      'location-boundary-valid',
-      'location-boundary-valid',
-      {location: stringValue('가'.repeat(200))},
-    ),
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'location-boundary-valid',
+    outboxId: 'location-boundary-valid',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+    location: '가'.repeat(200),
   }),
   200,
 );
 
-await expectStatus(
+await commit(
   '201 character Korean location denied',
-  await request(':commit', {
-    token: owner.token,
-    method: 'POST',
-    body: createCommit(
-      owner.uid,
-      'location-boundary-invalid',
-      'location-boundary-invalid',
-      {location: stringValue('가'.repeat(201))},
-    ),
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'location-boundary-invalid',
+    outboxId: 'location-boundary-invalid',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+    location: '가'.repeat(201),
   }),
   403,
 );
 
-const ownerRead = await request(`/users/${owner.uid}/records/${recordId}`, {
+let ownerRead = await request(`/users/${owner.uid}/records/${recordId}`, {
   token: owner.token,
 });
 await expectStatus('owner get', ownerRead, 200);
-const ownerDocument = await ownerRead.json();
+let ownerDocument = await ownerRead.json();
+const createdAt = ownerDocument.fields.createdAt;
 
 await expectStatus(
   'intruder get denied',
@@ -312,19 +392,68 @@ await expectStatus(
   }),
   403,
 );
-
 await expectStatus(
   'intruder list denied',
   await request(`/users/${owner.uid}/records`, {token: intruder.token}),
   403,
 );
-
-await expectStatus(
+await commit(
   'intruder write denied',
-  await request(':commit', {
-    token: intruder.token,
-    method: 'POST',
-    body: createCommit(owner.uid, 'intruder-record'),
+  intruder.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId: 'intruder-record',
+    outboxId: 'intruder-record',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+  }),
+  403,
+);
+
+await commit(
+  'valid update from current base',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId,
+    outboxId: 'rules-update',
+    operationType: 'update',
+    baseVersionNo: 1,
+    resultingVersionNo: 2,
+    createdAt,
+    location: '수정된 방파제',
+  }),
+  200,
+);
+
+await commit(
+  'stale update denied',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId,
+    outboxId: 'rules-stale-update',
+    operationType: 'update',
+    baseVersionNo: 1,
+    resultingVersionNo: 2,
+    createdAt,
+    location: '오래된 변경',
+  }),
+  403,
+);
+
+await commit(
+  'create operation cannot update a record',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId,
+    outboxId: 'rules-wrong-update-operation',
+    operationType: 'create',
+    baseVersionNo: 2,
+    resultingVersionNo: 3,
+    createdAt,
   }),
   403,
 );
@@ -338,16 +467,50 @@ await expectStatus(
   403,
 );
 
-await expectStatus(
-  'owner tombstone and receipt update',
-  await request(':commit', {
-    token: owner.token,
-    method: 'POST',
-    body: tombstoneCommit(
-      owner.uid,
-      recordId,
-      ownerDocument.fields.createdAt,
-    ),
+await commit(
+  'valid tombstone from current base',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId,
+    outboxId: 'rules-delete',
+    operationType: 'delete',
+    baseVersionNo: 2,
+    resultingVersionNo: 3,
+    createdAt,
+    recordStatus: 'DELETED',
+  }),
+  200,
+);
+
+await commit(
+  'stale delete denied',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId,
+    outboxId: 'rules-stale-delete',
+    operationType: 'delete',
+    baseVersionNo: 2,
+    resultingVersionNo: 3,
+    createdAt,
+    recordStatus: 'DELETED',
+  }),
+  403,
+);
+
+await commit(
+  'valid update can restore a tombstone',
+  owner.token,
+  mutationCommit({
+    uid: owner.uid,
+    recordId,
+    outboxId: 'rules-restore',
+    operationType: 'update',
+    baseVersionNo: 3,
+    resultingVersionNo: 4,
+    createdAt,
+    location: '복원된 방파제',
   }),
   200,
 );

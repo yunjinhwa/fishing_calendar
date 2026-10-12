@@ -8,6 +8,8 @@ import '../local/local_data_migration_service.dart';
 import '../local/local_data_store.dart';
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
+import '../models/record_sync_metadata.dart';
+import '../remote/record_sync_gateway.dart';
 import 'auth_session_repository.dart';
 
 class FishingRecordRepository extends ChangeNotifier {
@@ -145,7 +147,7 @@ class FishingRecordRepository extends ChangeNotifier {
   /// Photos are device-local, so the current device's files are preserved
   /// while server-backed record fields are replaced.
   Future<bool> replaceWithRemoteSnapshot(
-    List<FishingRecord> remoteRecords, {
+    RemoteRecordSnapshot snapshot, {
     String? ownerKey,
   }) async {
     final resolvedOwnerKey = ownerKey ?? _ownerKey;
@@ -153,7 +155,7 @@ class FishingRecordRepository extends ChangeNotifier {
       for (final record in getAllRecordsForOwner(resolvedOwnerKey))
         record.id: record,
     };
-    final resolvedRecords = remoteRecords
+    final resolvedRecords = snapshot.activeRecords
         .map(
           (remoteRecord) =>
               _preserveLocalPhotos(remoteRecord, localById[remoteRecord.id]),
@@ -184,6 +186,18 @@ class FishingRecordRepository extends ChangeNotifier {
           record: record,
         );
       }
+      await _store.replaceRecordSyncMetadata(
+        transaction,
+        ownerKey: resolvedOwnerKey,
+        items: snapshot.revisions.map(
+          (revision) => RecordSyncMetadata(
+            recordId: revision.recordId,
+            serverVersionNo: revision.versionNo,
+            optimisticVersionNo: revision.versionNo,
+            remoteStatus: revision.status,
+          ),
+        ),
+      );
       replaced = true;
     });
     if (replaced) {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/validation/auth_input_validator.dart';
 import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
+import '../../data/repositories/conflict_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_mutation_service.dart';
@@ -112,6 +113,7 @@ class _SignupPageState extends State<SignupPage> {
 
       await FishingRecordRepository.instance.loadRecords();
       await OutboxRepository.instance.loadItems();
+      await ConflictRepository.instance.loadItems();
       await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
 
       if (!mounted) return;

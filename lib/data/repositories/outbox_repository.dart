@@ -113,7 +113,6 @@ class OutboxRepository {
     if (item == null) {
       return;
     }
-
     await replaceItemForOwner(
       ownerKey,
       item.copyWith(
@@ -135,6 +134,9 @@ class OutboxRepository {
   }) async {
     final item = _findItem(itemId, ownerKey: ownerKey);
     if (item == null) {
+      return;
+    }
+    if (item.status == OutboxStatus.conflicted) {
       return;
     }
 

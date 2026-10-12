@@ -1,6 +1,6 @@
 enum OutboxOperationType { create, update, delete }
 
-enum OutboxStatus { pending, sending, succeeded, failed }
+enum OutboxStatus { pending, sending, succeeded, failed, conflicted }
 
 class OutboxItem {
   final String id;
@@ -13,6 +13,7 @@ class OutboxItem {
   final String? errorMessage;
   final int retryCount;
   final bool isMigration;
+  final int? baseVersionNo;
   final Map<String, dynamic>? payload;
 
   const OutboxItem({
@@ -26,8 +27,9 @@ class OutboxItem {
     this.errorMessage,
     this.retryCount = 0,
     this.isMigration = false,
+    this.baseVersionNo,
     this.payload,
-  });
+  }) : assert(baseVersionNo == null || baseVersionNo >= 0);
 
   factory OutboxItem.fromJson(Map<String, dynamic> json) {
     return OutboxItem(
@@ -45,6 +47,7 @@ class OutboxItem {
       errorMessage: json['errorMessage'] as String?,
       retryCount: json['retryCount'] as int? ?? 0,
       isMigration: json['isMigration'] as bool? ?? false,
+      baseVersionNo: (json['baseVersionNo'] as num?)?.toInt(),
       payload: json['payload'] == null
           ? null
           : Map<String, dynamic>.from(json['payload'] as Map),
@@ -63,6 +66,7 @@ class OutboxItem {
       'errorMessage': errorMessage,
       'retryCount': retryCount,
       'isMigration': isMigration,
+      'baseVersionNo': baseVersionNo,
       'payload': payload,
     };
   }
@@ -72,6 +76,9 @@ class OutboxItem {
     DateTime? lastTriedAt,
     String? errorMessage,
     int? retryCount,
+    int? baseVersionNo,
+    bool clearBaseVersionNo = false,
+    Map<String, dynamic>? payload,
     bool clearErrorMessage = false,
   }) {
     return OutboxItem(
@@ -87,7 +94,10 @@ class OutboxItem {
           : errorMessage ?? this.errorMessage,
       retryCount: retryCount ?? this.retryCount,
       isMigration: isMigration,
-      payload: payload,
+      baseVersionNo: clearBaseVersionNo
+          ? null
+          : baseVersionNo ?? this.baseVersionNo,
+      payload: payload ?? this.payload,
     );
   }
 
@@ -112,6 +122,8 @@ class OutboxItem {
         return '업로드 완료';
       case OutboxStatus.failed:
         return '업로드 실패';
+      case OutboxStatus.conflicted:
+        return '충돌 해결 필요';
     }
   }
 }
