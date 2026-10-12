@@ -1,12 +1,17 @@
 import 'dart:async';
 
+import 'package:fishing_build/data/models/conflict_item.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/outbox_item.dart';
+import 'package:fishing_build/data/models/record_sync_metadata.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
+import 'package:fishing_build/data/repositories/conflict_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/remote/record_sync_gateway.dart';
+import 'package:fishing_build/data/services/conflict_resolution_service.dart';
+import 'package:fishing_build/data/services/plan_policy_service.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/presentation/calendar/daily_record_list_page.dart';
@@ -23,6 +28,7 @@ void main() {
   final authSession = AuthSessionRepository.instance;
   final recordRepository = FishingRecordRepository.instance;
   final outboxRepository = OutboxRepository.instance;
+  final conflictRepository = ConflictRepository.instance;
   final syncService = RecordSyncService.instance;
 
   setUp(() async {
@@ -32,6 +38,7 @@ void main() {
     authSession.clearMemoryOnlyForTesting();
     recordRepository.clearCacheOnlyForTesting();
     outboxRepository.clearCacheOnlyForTesting();
+    conflictRepository.clearCacheOnlyForTesting();
   });
 
   test('pushes create, update, and delete in durable outbox order', () async {
@@ -48,6 +55,10 @@ void main() {
         .getAllItems()
         .map((item) => item.id)
         .toList();
+    expect(
+      outboxRepository.getAllItems().map((item) => item.baseVersionNo).toList(),
+      <int?>[0, 1, 2],
+    );
     final gateway = FakeRecordSyncGateway();
     syncService.configureGateway(gateway);
 
@@ -64,6 +75,350 @@ void main() {
       isTrue,
     );
     expect(recordRepository.getAllRecords(), isEmpty);
+  });
+
+  test(
+    'detects a stale update and persists the conflict across a reload',
+    () async {
+      await _signInAsPaid(authSession, 'conflict@example.com');
+      final uid = authSession.memberId!;
+      final gateway = FakeRecordSyncGateway();
+      syncService.configureGateway(gateway);
+
+      final original = _record(
+        'conflict-record',
+        location: '최초 위치',
+        photoPaths: const <String>['C:/device/conflict.jpg'],
+      );
+      await RecordMutationService.instance.addRecord(original);
+      expect((await syncService.syncNow()).isSuccess, isTrue);
+      expect(gateway.version(uid, original.id), 1);
+
+      gateway.seedActive(uid, _record(original.id, location: '다른 기기 위치'));
+      await RecordMutationService.instance.updateRecord(
+        _record(
+          original.id,
+          location: '내 기기 위치',
+          photoPaths: original.photoPaths,
+        ),
+      );
+
+      final result = await syncService.syncNow();
+
+      expect(result.isSuccess, isFalse);
+      expect(result.errorMessage, contains('충돌'));
+      expect(gateway.version(uid, original.id), 2);
+      expect(gateway.record(uid, original.id)?.location, '다른 기기 위치');
+      expect(
+        outboxRepository.getAllItems().where(
+          (item) => item.status == OutboxStatus.conflicted,
+        ),
+        hasLength(1),
+      );
+      expect(conflictRepository.getPendingItems(), hasLength(1));
+      final conflict = conflictRepository.getPendingItems().single;
+      expect(conflict.baseVersionNo, 1);
+      expect(conflict.remoteVersionNo, 2);
+      expect(conflict.localRecord?.location, '내 기기 위치');
+      expect(conflict.remoteRecord?.location, '다른 기기 위치');
+
+      conflictRepository.clearCacheOnlyForTesting();
+      await conflictRepository.reloadOwner(authSession.dataOwnerKey);
+
+      expect(conflictRepository.getPendingItems(), hasLength(1));
+      expect(
+        conflictRepository.getPendingItems().single.localRecord?.photoPaths,
+        original.photoPaths,
+      );
+    },
+  );
+
+  test(
+    'server choice applies the latest remote revision and keeps local photos',
+    () async {
+      await _signInAsPaid(authSession, 'use-theirs@example.com');
+      final uid = authSession.memberId!;
+      final gateway = FakeRecordSyncGateway();
+      syncService.configureGateway(gateway);
+      final original = _record(
+        'use-theirs-record',
+        location: '최초 위치',
+        photoPaths: const <String>['C:/device/theirs.jpg'],
+      );
+      await RecordMutationService.instance.addRecord(original);
+      expect((await syncService.syncNow()).isSuccess, isTrue);
+
+      gateway.seedActive(uid, _record(original.id, location: '서버 충돌 값'));
+      await RecordMutationService.instance.updateRecord(
+        _record(
+          original.id,
+          location: '내 충돌 값',
+          photoPaths: original.photoPaths,
+        ),
+      );
+      expect((await syncService.syncNow()).isSuccess, isFalse);
+      final conflict = conflictRepository.getPendingItems().single;
+
+      gateway.seedActive(uid, _record(original.id, location: '해결 직전 최신 서버 값'));
+      await ConflictResolutionService.instance.useTheirs(conflict);
+
+      final resolved = recordRepository.getRecordById(original.id)!;
+      expect(resolved.location, '해결 직전 최신 서버 값');
+      expect(resolved.photoPaths, original.photoPaths);
+      expect(gateway.version(uid, original.id), 3);
+      expect(conflictRepository.getPendingItems(), isEmpty);
+      expect(
+        conflictRepository.getAllItems().single.resolutionType,
+        ConflictResolutionType.useTheirs,
+      );
+      expect(
+        outboxRepository.getAllItems().where(
+          (item) => item.status != OutboxStatus.succeeded,
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test('my choice creates a new mutation from the remote version', () async {
+    await _signInAsPaid(authSession, 'use-mine@example.com');
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway();
+    syncService.configureGateway(gateway);
+    final original = _record('use-mine-record', location: '최초 위치');
+    await RecordMutationService.instance.addRecord(original);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    gateway.seedActive(uid, _record(original.id, location: '서버 충돌 값'));
+    await RecordMutationService.instance.updateRecord(
+      _record(original.id, location: '적용할 내 값'),
+    );
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+    final conflict = conflictRepository.getPendingItems().single;
+
+    final pushStarted = Completer<void>();
+    final releasePush = Completer<void>();
+    gateway
+      ..pushStarted = pushStarted
+      ..pushGate = releasePush.future;
+    await ConflictResolutionService.instance.useMine(conflict);
+    await pushStarted.future;
+
+    final resolutionItem = outboxRepository.getAllItems().singleWhere(
+      (item) => item.id.startsWith('resolve-'),
+    );
+    expect(resolutionItem.baseVersionNo, 2);
+    expect(resolutionItem.operationType, OutboxOperationType.update);
+    expect(
+      conflictRepository.getPendingItems().single.status,
+      ConflictStatus.resolving,
+    );
+
+    releasePush.complete();
+    final result = await syncService.syncNow();
+
+    expect(result.isSuccess, isTrue);
+    expect(gateway.version(uid, original.id), 3);
+    expect(gateway.record(uid, original.id)?.location, '적용할 내 값');
+    expect(conflictRepository.getPendingItems(), isEmpty);
+    expect(
+      conflictRepository.getAllItems().single.resolutionType,
+      ConflictResolutionType.useMine,
+    );
+  });
+
+  test('my choice uses a newer local edit made after the conflict', () async {
+    await _signInAsPaid(authSession, 'latest-local@example.com');
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway();
+    syncService.configureGateway(gateway);
+    final original = _record('latest-local-record');
+    await RecordMutationService.instance.addRecord(original);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    gateway.seedActive(uid, _record(original.id, location: '서버 충돌 값'));
+    await RecordMutationService.instance.updateRecord(
+      _record(original.id, location: '충돌 당시 내 값'),
+    );
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+    final conflict = conflictRepository.getPendingItems().single;
+    await RecordMutationService.instance.updateRecord(
+      _record(original.id, location: '충돌 후 최신 내 값'),
+    );
+
+    await ConflictResolutionService.instance.useMine(conflict);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    expect(gateway.record(uid, original.id)?.location, '충돌 후 최신 내 값');
+    expect(
+      recordRepository.getRecordById(original.id)?.location,
+      '충돌 후 최신 내 값',
+    );
+  });
+
+  test('manual merge queues the selected field values', () async {
+    await _signInAsPaid(authSession, 'manual-merge@example.com');
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway();
+    syncService.configureGateway(gateway);
+    final original = _record(
+      'manual-merge-record',
+      location: '최초 위치',
+      photoPaths: const <String>['C:/device/merge.jpg'],
+    );
+    await RecordMutationService.instance.addRecord(original);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    gateway.seedActive(uid, _record(original.id, location: '서버에서 선택할 위치'));
+    await RecordMutationService.instance.updateRecord(
+      _record(
+        original.id,
+        location: '내 기기 위치',
+        photoPaths: original.photoPaths,
+      ),
+    );
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+    final conflict = conflictRepository.getPendingItems().single;
+    final merged = conflict.buildMergedRecord(<String>{
+      ConflictFieldKey.location,
+    });
+    expect(merged.location, '서버에서 선택할 위치');
+    expect(merged.photoPaths, original.photoPaths);
+
+    await ConflictResolutionService.instance.useMerged(conflict, merged);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    expect(gateway.version(uid, original.id), 3);
+    expect(gateway.record(uid, original.id)?.location, '서버에서 선택할 위치');
+    expect(
+      conflictRepository.getAllItems().single.resolutionType,
+      ConflictResolutionType.manualMerge,
+    );
+  });
+
+  test('a server change during resolution creates a fresh conflict', () async {
+    await _signInAsPaid(authSession, 'resolution-race@example.com');
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway();
+    syncService.configureGateway(gateway);
+    final original = _record('resolution-race-record');
+    await RecordMutationService.instance.addRecord(original);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    gateway.seedActive(uid, _record(original.id, location: '서버 버전 2'));
+    await RecordMutationService.instance.updateRecord(
+      _record(original.id, location: '적용할 내 값'),
+    );
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+    final firstConflict = conflictRepository.getPendingItems().single;
+
+    final pushStarted = Completer<void>();
+    final releasePush = Completer<void>();
+    gateway
+      ..pushStarted = pushStarted
+      ..pushGate = releasePush.future;
+    await ConflictResolutionService.instance.useMine(firstConflict);
+    await pushStarted.future;
+    gateway.seedActive(uid, _record(original.id, location: '서버 버전 3'));
+    releasePush.complete();
+    final result = await syncService.syncNow();
+
+    expect(result.isSuccess, isFalse);
+    expect(gateway.version(uid, original.id), 3);
+    expect(conflictRepository.getPendingItems(), hasLength(1));
+    expect(conflictRepository.getAllItems(), hasLength(2));
+    final nextConflict = conflictRepository.getPendingItems().single;
+    expect(nextConflict.remoteVersionNo, 3);
+    expect(nextConflict.localRecord?.location, '적용할 내 값');
+  });
+
+  test('a local delete conflicts with a newer remote update', () async {
+    await _signInAsPaid(authSession, 'delete-conflict@example.com');
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway();
+    syncService.configureGateway(gateway);
+    final original = _record(
+      'delete-conflict-record',
+      photoPaths: const <String>['C:/device/delete.jpg'],
+    );
+    await RecordMutationService.instance.addRecord(original);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    gateway.seedActive(uid, _record(original.id, location: '삭제보다 최신인 서버 값'));
+    await RecordMutationService.instance.deleteRecord(original.id);
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+
+    final conflict = conflictRepository.getPendingItems().single;
+    expect(conflict.localDeleted, isTrue);
+    expect(conflict.remoteDeleted, isFalse);
+    expect(recordRepository.getRecordById(original.id), isNull);
+
+    await ConflictResolutionService.instance.useTheirs(conflict);
+
+    expect(
+      recordRepository.getRecordById(original.id)?.location,
+      '삭제보다 최신인 서버 값',
+    );
+    expect(
+      recordRepository.getRecordById(original.id)?.photoPaths,
+      original.photoPaths,
+    );
+  });
+
+  test('my update can restore a record deleted on the server', () async {
+    await _signInAsPaid(authSession, 'restore-conflict@example.com');
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway();
+    syncService.configureGateway(gateway);
+    final original = _record('restore-conflict-record');
+    await RecordMutationService.instance.addRecord(original);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    gateway.seedDeleted(uid, original.id);
+    await RecordMutationService.instance.updateRecord(
+      _record(original.id, location: '복원할 내 값'),
+    );
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+    final conflict = conflictRepository.getPendingItems().single;
+    expect(conflict.remoteDeleted, isTrue);
+    expect(conflict.localDeleted, isFalse);
+
+    await ConflictResolutionService.instance.useMine(conflict);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+
+    expect(gateway.status(uid, original.id), RemoteRecordStatus.active);
+    expect(gateway.version(uid, original.id), 3);
+    expect(gateway.record(uid, original.id)?.location, '복원할 내 값');
+  });
+
+  test('resolving a migration conflict can finish the paid upgrade', () async {
+    await authSession.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'migration-conflict@example.com',
+    );
+    final record = _record('migration-conflict-record', location: '로컬 이전 값');
+    await RecordMutationService.instance.addRecord(record);
+    await PlanPolicyService.instance.changePlan(UserPlan.paid);
+    expect(authSession.isPlanMigrationPending, isTrue);
+    expect(outboxRepository.getAllItems().single.isMigration, isTrue);
+
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway()
+      ..seedActive(uid, _record(record.id, location: '기존 서버 값'));
+    syncService.configureGateway(gateway);
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+    final conflict = conflictRepository.getPendingItems().single;
+
+    await ConflictResolutionService.instance.useTheirs(conflict);
+
+    expect(authSession.isPlanMigrationPending, isFalse);
+    expect(authSession.canUseCloudSync, isTrue);
+    expect(recordRepository.getRecordById(record.id)?.location, '기존 서버 값');
+    expect(
+      outboxRepository.getAllItems().single.status,
+      OutboxStatus.succeeded,
+    );
+    expect(outboxRepository.getAllItems().single.isMigration, isTrue);
   });
 
   test('stops at the first failed mutation and retries it later', () async {
@@ -244,7 +599,16 @@ void main() {
       );
 
       final replaced = await recordRepository.replaceWithRemoteSnapshot(
-        <FishingRecord>[_record('remote-only')],
+        RemoteRecordSnapshot(
+          revisions: <RemoteRecordRevision>[
+            RemoteRecordRevision(
+              recordId: 'remote-only',
+              versionNo: 1,
+              status: RemoteRecordStatus.active,
+              record: _record('remote-only'),
+            ),
+          ],
+        ),
       );
 
       expect(replaced, isFalse);
@@ -464,6 +828,33 @@ void main() {
 
     expect(find.text('아직 서버 동기화 전입니다.'), findsOneWidget);
     expect(find.text('모든 데이터가 최신 상태입니다.'), findsNothing);
+  });
+
+  testWidgets('sync screen opens the real conflict comparison', (tester) async {
+    await _signInAsPaid(authSession, 'conflict-screen@example.com');
+    final uid = authSession.memberId!;
+    final gateway = FakeRecordSyncGateway();
+    syncService.configureGateway(gateway);
+    final record = _record('conflict-screen-record', location: '내 화면 값');
+    await RecordMutationService.instance.addRecord(record);
+    expect((await syncService.syncNow()).isSuccess, isTrue);
+    gateway.seedActive(uid, _record(record.id, location: '서버 화면 값'));
+    await RecordMutationService.instance.updateRecord(record);
+    expect((await syncService.syncNow()).isSuccess, isFalse);
+
+    await tester.pumpWidget(const MaterialApp(home: SyncConflictPage()));
+    await tester.pump();
+
+    expect(find.text('해결이 필요한 충돌이 있습니다.'), findsOneWidget);
+    expect(find.textContaining('해결 필요'), findsOneWidget);
+    await tester.tap(find.text(record.summaryTitle));
+    await tester.pumpAndSettle();
+
+    expect(find.text('충돌 상세'), findsOneWidget);
+    expect(find.text('변경 내용 비교'), findsOneWidget);
+    expect(find.text('내 변경 적용'), findsOneWidget);
+    expect(find.text('서버 변경 적용'), findsOneWidget);
+    expect(find.text('필드별로 선택하여 병합'), findsOneWidget);
   });
 
   testWidgets('record list shows failed record sync state', (tester) async {

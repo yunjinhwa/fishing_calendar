@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/conflict_item.dart';
 import '../../data/models/outbox_item.dart';
 import '../../data/repositories/auth_session_repository.dart';
-import '../../data/repositories/conflict_memory_repository.dart';
+import '../../data/repositories/conflict_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
@@ -24,12 +24,14 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
   void initState() {
     super.initState();
     AuthSessionRepository.instance.addListener(_handlePlanChange);
+    ConflictRepository.instance.addListener(_handleConflictChange);
     RecordSyncService.instance.addListener(_handleSyncChange);
   }
 
   @override
   void dispose() {
     AuthSessionRepository.instance.removeListener(_handlePlanChange);
+    ConflictRepository.instance.removeListener(_handleConflictChange);
     RecordSyncService.instance.removeListener(_handleSyncChange);
     super.dispose();
   }
@@ -43,6 +45,12 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
   }
 
   void _handleSyncChange() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleConflictChange() {
     if (mounted) {
       setState(() {});
     }
@@ -81,8 +89,8 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
 
   @override
   Widget build(BuildContext context) {
-    final conflicts = ConflictMemoryRepository.instance.getUnresolvedItems();
-    final unresolvedCount = ConflictMemoryRepository.instance.unresolvedCount;
+    final conflicts = ConflictRepository.instance.getPendingItems();
+    final unresolvedCount = ConflictRepository.instance.unresolvedCount;
     final syncService = RecordSyncService.instance;
     final isSyncing = syncService.isSyncing || _isManualSyncPending;
     final syncStatus = _syncStatusFor(syncService, unresolvedCount);
@@ -92,6 +100,9 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
         .length;
     final failedOutboxCount = outboxItems
         .where((item) => item.status == OutboxStatus.failed)
+        .length;
+    final conflictedOutboxCount = outboxItems
+        .where((item) => item.status == OutboxStatus.conflicted)
         .length;
 
     return PaidFeatureGate(
@@ -150,10 +161,12 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
               Card(
                 child: ListTile(
                   leading: Icon(
-                    failedOutboxCount > 0
+                    conflictedOutboxCount > 0
+                        ? Icons.sync_problem_outlined
+                        : failedOutboxCount > 0
                         ? Icons.error_outline
                         : Icons.cloud_upload_outlined,
-                    color: failedOutboxCount > 0
+                    color: conflictedOutboxCount > 0 || failedOutboxCount > 0
                         ? Theme.of(context).colorScheme.error
                         : null,
                   ),
@@ -161,9 +174,9 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
                   subtitle: Text(
                     unfinishedOutboxCount == 0
                         ? '서버 반영을 기다리는 변경이 없습니다.'
-                        : failedOutboxCount == 0
-                        ? '미완료 $unfinishedOutboxCount건'
-                        : '미완료 $unfinishedOutboxCount건 · 실패 $failedOutboxCount건',
+                        : '미완료 $unfinishedOutboxCount건'
+                              '${failedOutboxCount == 0 ? '' : ' · 실패 $failedOutboxCount건'}'
+                              '${conflictedOutboxCount == 0 ? '' : ' · 충돌 $conflictedOutboxCount건'}',
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () async {
@@ -234,6 +247,14 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
         icon: Icons.sync,
         title: '서버 기록을 동기화하고 있습니다.',
         detail: '미해결 충돌 $unresolvedCount건',
+      );
+    }
+
+    if (unresolvedCount > 0) {
+      return _SyncStatusPresentation(
+        icon: Icons.sync_problem_outlined,
+        title: '해결이 필요한 충돌이 있습니다.',
+        detail: '충돌 $unresolvedCount건 · 항목을 열어 적용할 값을 선택하세요.',
       );
     }
 
@@ -314,18 +335,18 @@ class _ConflictCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isResolved = conflict.status == ConflictStatus.resolved;
+    final icon = switch (conflict.status) {
+      ConflictStatus.unresolved => Icons.warning_amber_outlined,
+      ConflictStatus.resolving => Icons.sync_outlined,
+      ConflictStatus.resolved => Icons.check_circle_outline,
+    };
+    final color = conflict.status == ConflictStatus.unresolved
+        ? Theme.of(context).colorScheme.error
+        : Theme.of(context).colorScheme.primary;
 
     return Card(
       child: ListTile(
-        leading: Icon(
-          isResolved
-              ? Icons.check_circle_outline
-              : Icons.warning_amber_outlined,
-          color: isResolved
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).colorScheme.error,
-        ),
+        leading: Icon(icon, color: color),
         title: Text(conflict.recordTitle),
         subtitle: Text(
           '${conflict.location}\n'

@@ -6,8 +6,10 @@ import 'package:fishing_build/data/auth/nickname_policy.dart';
 import 'package:fishing_build/data/local/app_database.dart';
 import 'package:fishing_build/data/local/data_owner_key.dart';
 import 'package:fishing_build/data/local/local_data_store.dart';
+import 'package:fishing_build/data/models/conflict_item.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/outbox_item.dart';
+import 'package:fishing_build/data/models/record_sync_metadata.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
@@ -600,6 +602,72 @@ void main() {
     await recordRepository.loadRecords();
 
     expect(recordRepository.getAllRecords().single.id, 'repeat-record');
+  });
+
+  test('identity migration moves sync metadata and conflicts', () async {
+    const email = 'sync-identity@example.com';
+    await authSession.setSessionForTesting(
+      plan: UserPlan.paid,
+      email: email,
+      nickname: '동기화회원',
+      password: 'Password1',
+    );
+    final sourceOwner = authSession.dataOwnerKey;
+    final record = _record('sync-identity-record');
+    await RecordMutationService.instance.addRecord(record);
+    final outboxItem = outboxRepository.getAllItems().single;
+    await AppDatabase.instance.transaction((transaction) {
+      return LocalDataStore.instance.insertConflict(
+        transaction,
+        conflict: ConflictItem(
+          id: 'sync-identity-conflict',
+          ownerKey: sourceOwner,
+          recordId: record.id,
+          outboxId: outboxItem.id,
+          localOperationType: OutboxOperationType.create,
+          baseVersionNo: 0,
+          remoteVersionNo: 0,
+          remoteStatus: RemoteRecordStatus.missing,
+          localRecord: record,
+          remoteRecord: null,
+          occurredAt: DateTime(2026, 9, 28),
+          status: ConflictStatus.unresolved,
+        ),
+      );
+    });
+    await authSession.logout();
+
+    final gateway = FakeAuthGateway();
+    authSession.configureAuthGateway(gateway);
+    expect(
+      await authSession.signIn(email: email, password: 'Password1'),
+      AuthSignInResult.success,
+    );
+    final targetOwner = authSession.dataOwnerKey;
+
+    expect(targetOwner, isNot(sourceOwner));
+    expect(
+      await LocalDataStore.instance.readRecordSyncMetadata(
+        targetOwner,
+        record.id,
+      ),
+      isNotNull,
+    );
+    expect(
+      await LocalDataStore.instance.readConflictsForOwner(targetOwner),
+      hasLength(1),
+    );
+    expect(
+      await LocalDataStore.instance.readRecordSyncMetadata(
+        sourceOwner,
+        record.id,
+      ),
+      isNull,
+    );
+    expect(
+      await LocalDataStore.instance.readConflictsForOwner(sourceOwner),
+      isEmpty,
+    );
   });
 
   test('owner-key collisions roll back without mixing account data', () async {

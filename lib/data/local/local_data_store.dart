@@ -2,8 +2,10 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../models/conflict_item.dart';
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
+import '../models/record_sync_metadata.dart';
 import 'app_database.dart';
 
 class LocalDataStore {
@@ -244,6 +246,7 @@ class LocalDataStore {
               errorMessage: row['error_message'] as String?,
               retryCount: (row['retry_count']! as num).toInt(),
               isMigration: (row['is_migration']! as num).toInt() == 1,
+              baseVersionNo: (row['base_version_no'] as num?)?.toInt(),
               payload: payloadJson == null
                   ? null
                   : Map<String, dynamic>.from(jsonDecode(payloadJson) as Map),
@@ -285,6 +288,7 @@ class LocalDataStore {
       'error_message': item.errorMessage,
       'retry_count': item.retryCount,
       'is_migration': item.isMigration ? 1 : 0,
+      'base_version_no': item.baseVersionNo,
       'payload_json': item.payload == null ? null : jsonEncode(item.payload),
     };
     if (insertionOrder != null) {
@@ -313,6 +317,197 @@ class LocalDataStore {
     );
   }
 
+  Future<void> deleteUnfinishedOutboxItemsForRecord(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required String recordId,
+  }) {
+    return deleteOutboxItems(
+      executor,
+      ownerKey: ownerKey,
+      where: 'record_id = ? AND status != ?',
+      whereArgs: <Object?>[recordId, OutboxStatus.succeeded.name],
+    );
+  }
+
+  Future<void> markOutboxItemsConflicted(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required String recordId,
+    required DateTime triedAt,
+    required String message,
+  }) async {
+    await executor.update(
+      AppDatabase.outboxItemsTable,
+      <String, Object?>{
+        'status': OutboxStatus.conflicted.name,
+        'last_tried_at': triedAt.toIso8601String(),
+        'error_message': message,
+      },
+      where: 'owner_key = ? AND record_id = ? AND status != ?',
+      whereArgs: <Object?>[ownerKey, recordId, OutboxStatus.succeeded.name],
+    );
+  }
+
+  Future<RecordSyncMetadata?> readRecordSyncMetadata(
+    String ownerKey,
+    String recordId,
+  ) async {
+    final database = await AppDatabase.instance.database;
+    final rows = await database.query(
+      AppDatabase.recordSyncStatesTable,
+      where: 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, recordId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : _syncMetadataFromRow(rows.single);
+  }
+
+  Future<int> reserveNextRecordVersion(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required String recordId,
+  }) async {
+    final rows = await executor.query(
+      AppDatabase.recordSyncStatesTable,
+      where: 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, recordId],
+      limit: 1,
+    );
+    final existing = rows.isEmpty ? null : _syncMetadataFromRow(rows.single);
+    final baseVersionNo = existing?.optimisticVersionNo ?? 0;
+    await writeRecordSyncMetadata(
+      executor,
+      ownerKey: ownerKey,
+      metadata: RecordSyncMetadata(
+        recordId: recordId,
+        serverVersionNo: existing?.serverVersionNo ?? 0,
+        optimisticVersionNo: baseVersionNo + 1,
+        remoteStatus: existing?.remoteStatus ?? RemoteRecordStatus.missing,
+      ),
+      resetOptimisticVersion: true,
+    );
+    return baseVersionNo;
+  }
+
+  Future<void> writeRecordSyncMetadata(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required RecordSyncMetadata metadata,
+    bool resetOptimisticVersion = false,
+  }) async {
+    var optimisticVersionNo = metadata.optimisticVersionNo;
+    if (!resetOptimisticVersion) {
+      final rows = await executor.query(
+        AppDatabase.recordSyncStatesTable,
+        columns: const <String>['optimistic_version_no'],
+        where: 'owner_key = ? AND record_id = ?',
+        whereArgs: <Object?>[ownerKey, metadata.recordId],
+        limit: 1,
+      );
+      final existingOptimistic = rows.isEmpty
+          ? 0
+          : (rows.single['optimistic_version_no']! as num).toInt();
+      if (existingOptimistic > optimisticVersionNo) {
+        optimisticVersionNo = existingOptimistic;
+      }
+    }
+    if (optimisticVersionNo < metadata.serverVersionNo) {
+      optimisticVersionNo = metadata.serverVersionNo;
+    }
+
+    await executor.insert(
+      AppDatabase.recordSyncStatesTable,
+      <String, Object>{
+        'owner_key': ownerKey,
+        'record_id': metadata.recordId,
+        'server_version_no': metadata.serverVersionNo,
+        'optimistic_version_no': optimisticVersionNo,
+        'remote_status': metadata.remoteStatus.name,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> replaceRecordSyncMetadata(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required Iterable<RecordSyncMetadata> items,
+  }) async {
+    await executor.delete(
+      AppDatabase.recordSyncStatesTable,
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[ownerKey],
+    );
+    for (final item in items) {
+      await writeRecordSyncMetadata(
+        executor,
+        ownerKey: ownerKey,
+        metadata: item,
+        resetOptimisticVersion: true,
+      );
+    }
+  }
+
+  Future<List<ConflictItem>> readConflictsForOwner(String ownerKey) async {
+    final database = await AppDatabase.instance.database;
+    final rows = await database.query(
+      AppDatabase.recordConflictsTable,
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[ownerKey],
+      orderBy: 'detected_at DESC',
+    );
+    return rows.map(_conflictFromRow).toList(growable: false);
+  }
+
+  Future<void> insertConflict(
+    DatabaseExecutor executor, {
+    required ConflictItem conflict,
+    bool replace = false,
+  }) async {
+    await executor.insert(
+      AppDatabase.recordConflictsTable,
+      _conflictRow(conflict),
+      conflictAlgorithm: replace
+          ? ConflictAlgorithm.replace
+          : ConflictAlgorithm.abort,
+    );
+  }
+
+  Future<void> updateConflict(
+    DatabaseExecutor executor, {
+    required ConflictItem conflict,
+  }) => insertConflict(executor, conflict: conflict, replace: true);
+
+  Future<void> completeResolvingConflictForOutbox(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required String outboxId,
+    required DateTime resolvedAt,
+  }) async {
+    await executor.update(
+      AppDatabase.recordConflictsTable,
+      <String, Object?>{
+        'status': ConflictStatus.resolved.name,
+        'resolved_at': resolvedAt.toIso8601String(),
+      },
+      where: 'owner_key = ? AND resolution_outbox_id = ? AND status = ?',
+      whereArgs: <Object?>[ownerKey, outboxId, ConflictStatus.resolving.name],
+    );
+  }
+
+  Future<void> deleteAllConflicts(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+  }) async {
+    await executor.delete(
+      AppDatabase.recordConflictsTable,
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[ownerKey],
+    );
+  }
+
   Future<String?> readMetadata(DatabaseExecutor executor, String key) async {
     final rows = await executor.query(
       AppDatabase.localMetadataTable,
@@ -338,4 +533,75 @@ class LocalDataStore {
 
   String _recordKey(String ownerKey, String recordId) =>
       '${ownerKey.length}:$ownerKey$recordId';
+
+  RecordSyncMetadata _syncMetadataFromRow(Map<String, Object?> row) {
+    return RecordSyncMetadata(
+      recordId: row['record_id']! as String,
+      serverVersionNo: (row['server_version_no']! as num).toInt(),
+      optimisticVersionNo: (row['optimistic_version_no']! as num).toInt(),
+      remoteStatus: RemoteRecordStatus.values.byName(
+        row['remote_status']! as String,
+      ),
+    );
+  }
+
+  ConflictItem _conflictFromRow(Map<String, Object?> row) {
+    final localPayload = row['local_payload_json'] as String?;
+    final remotePayload = row['remote_payload_json'] as String?;
+    return ConflictItem(
+      id: row['conflict_id']! as String,
+      ownerKey: row['owner_key']! as String,
+      recordId: row['record_id']! as String,
+      outboxId: row['outbox_id']! as String,
+      localOperationType: OutboxOperationType.values.byName(
+        row['operation_type']! as String,
+      ),
+      baseVersionNo: (row['base_version_no'] as num?)?.toInt(),
+      remoteVersionNo: (row['remote_version_no']! as num).toInt(),
+      remoteStatus: RemoteRecordStatus.values.byName(
+        row['remote_status']! as String,
+      ),
+      localRecord: localPayload == null
+          ? null
+          : FishingRecord.fromJson(
+              Map<String, dynamic>.from(jsonDecode(localPayload) as Map),
+            ),
+      remoteRecord: remotePayload == null
+          ? null
+          : FishingRecord.fromJson(
+              Map<String, dynamic>.from(jsonDecode(remotePayload) as Map),
+            ),
+      occurredAt: DateTime.parse(row['detected_at']! as String),
+      status: ConflictStatus.values.byName(row['status']! as String),
+      resolutionType: row['resolution_type'] == null
+          ? null
+          : ConflictResolutionType.values.byName(
+              row['resolution_type']! as String,
+            ),
+      resolutionOutboxId: row['resolution_outbox_id'] as String?,
+      resolvedAt: row['resolved_at'] == null
+          ? null
+          : DateTime.parse(row['resolved_at']! as String),
+    );
+  }
+
+  Map<String, Object?> _conflictRow(ConflictItem conflict) {
+    return <String, Object?>{
+      'owner_key': conflict.ownerKey,
+      'conflict_id': conflict.id,
+      'record_id': conflict.recordId,
+      'outbox_id': conflict.outboxId,
+      'operation_type': conflict.localOperationType.name,
+      'base_version_no': conflict.baseVersionNo,
+      'remote_version_no': conflict.remoteVersionNo,
+      'remote_status': conflict.remoteStatus.name,
+      'local_payload_json': conflict.localPayloadJson,
+      'remote_payload_json': conflict.remotePayloadJson,
+      'status': conflict.status.name,
+      'resolution_type': conflict.resolutionType?.name,
+      'resolution_outbox_id': conflict.resolutionOutboxId,
+      'detected_at': conflict.occurredAt.toIso8601String(),
+      'resolved_at': conflict.resolvedAt?.toIso8601String(),
+    };
+  }
 }

@@ -20,6 +20,8 @@ class LocalIdentityMigrationResult {
   final String targetOwnerKey;
   final int migratedRecordCount;
   final int migratedOutboxCount;
+  final int migratedSyncStateCount;
+  final int migratedConflictCount;
 
   const LocalIdentityMigrationResult({
     required this.status,
@@ -27,9 +29,15 @@ class LocalIdentityMigrationResult {
     required this.targetOwnerKey,
     required this.migratedRecordCount,
     required this.migratedOutboxCount,
+    this.migratedSyncStateCount = 0,
+    this.migratedConflictCount = 0,
   });
 
-  int get migratedItemCount => migratedRecordCount + migratedOutboxCount;
+  int get migratedItemCount =>
+      migratedRecordCount +
+      migratedOutboxCount +
+      migratedSyncStateCount +
+      migratedConflictCount;
 }
 
 sealed class LocalIdentityMigrationConflict implements Exception {
@@ -168,12 +176,42 @@ class LocalIdentityMigrationService {
       sourceOwnerKey: sourceOwnerKey,
       targetOwnerKey: targetOwnerKey,
     );
-    if (recordCollisions.isNotEmpty || outboxCollisions.isNotEmpty) {
+    final syncStateCollisions = await _readCollidingIds(
+      transaction,
+      table: AppDatabase.recordSyncStatesTable,
+      idColumn: 'record_id',
+      sourceOwnerKey: sourceOwnerKey,
+      targetOwnerKey: targetOwnerKey,
+    );
+    final conflictIdCollisions = await _readCollidingIds(
+      transaction,
+      table: AppDatabase.recordConflictsTable,
+      idColumn: 'conflict_id',
+      sourceOwnerKey: sourceOwnerKey,
+      targetOwnerKey: targetOwnerKey,
+    );
+    final conflictOutboxCollisions = await _readCollidingIds(
+      transaction,
+      table: AppDatabase.recordConflictsTable,
+      idColumn: 'outbox_id',
+      sourceOwnerKey: sourceOwnerKey,
+      targetOwnerKey: targetOwnerKey,
+    );
+    final allRecordCollisions = <String>{
+      ...recordCollisions,
+      ...syncStateCollisions,
+    }.toList()..sort();
+    final allOutboxCollisions = <String>{
+      ...outboxCollisions,
+      ...conflictIdCollisions,
+      ...conflictOutboxCollisions,
+    }.toList()..sort();
+    if (allRecordCollisions.isNotEmpty || allOutboxCollisions.isNotEmpty) {
       throw LocalIdentityDataConflict(
         sourceOwnerKey: sourceOwnerKey,
         targetOwnerKey: targetOwnerKey,
-        recordIds: recordCollisions,
-        outboxIds: outboxCollisions,
+        recordIds: allRecordCollisions,
+        outboxIds: allOutboxCollisions,
       );
     }
 
@@ -193,6 +231,22 @@ class LocalIdentityMigrationService {
       ''',
       <Object?>[targetOwnerKey, firebaseUid, sourceOwnerKey],
     );
+    final migratedSyncStateCount = await transaction.rawUpdate(
+      '''
+      UPDATE ${AppDatabase.recordSyncStatesTable}
+      SET owner_key = ?
+      WHERE owner_key = ?
+      ''',
+      <Object?>[targetOwnerKey, sourceOwnerKey],
+    );
+    final migratedConflictCount = await transaction.rawUpdate(
+      '''
+      UPDATE ${AppDatabase.recordConflictsTable}
+      SET owner_key = ?
+      WHERE owner_key = ?
+      ''',
+      <Object?>[targetOwnerKey, sourceOwnerKey],
+    );
 
     await _store.writeMetadata(
       transaction,
@@ -205,7 +259,11 @@ class LocalIdentityMigrationService {
       }),
     );
 
-    final status = migratedRecordCount > 0 || migratedOutboxCount > 0
+    final status =
+        migratedRecordCount > 0 ||
+            migratedOutboxCount > 0 ||
+            migratedSyncStateCount > 0 ||
+            migratedConflictCount > 0
         ? LocalIdentityMigrationStatus.migrated
         : existingClaim == null
         ? LocalIdentityMigrationStatus.claimedWithoutData
@@ -217,6 +275,8 @@ class LocalIdentityMigrationService {
       targetOwnerKey: targetOwnerKey,
       migratedRecordCount: migratedRecordCount,
       migratedOutboxCount: migratedOutboxCount,
+      migratedSyncStateCount: migratedSyncStateCount,
+      migratedConflictCount: migratedConflictCount,
     );
   }
 

@@ -127,6 +127,9 @@ class _DailyRecordListPageState extends State<DailyRecordListPage> {
         )
         .toList(growable: false);
 
+    if (recordItems.any((item) => item.status == OutboxStatus.conflicted)) {
+      return '기록 동기화 충돌 · 해결 필요';
+    }
     if (recordItems.any((item) => item.status == OutboxStatus.failed)) {
       return '기록 동기화 실패';
     }

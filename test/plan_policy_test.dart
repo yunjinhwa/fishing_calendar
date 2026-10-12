@@ -6,7 +6,7 @@ import 'package:fishing_build/data/models/outbox_item.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/models/user_plan_policy.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
-import 'package:fishing_build/data/repositories/conflict_memory_repository.dart';
+import 'package:fishing_build/data/repositories/conflict_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/plan_policy_service.dart';
@@ -30,7 +30,7 @@ import 'support/fake_record_sync_gateway.dart';
 void main() {
   final authSession = AuthSessionRepository.instance;
   final outboxRepository = OutboxRepository.instance;
-  final conflictRepository = ConflictMemoryRepository.instance;
+  final conflictRepository = ConflictRepository.instance;
   final recordRepository = FishingRecordRepository.instance;
 
   setUp(() async {
@@ -39,7 +39,7 @@ void main() {
     await resetTestDatabase();
     authSession.clearMemoryOnlyForTesting();
     outboxRepository.clearCacheOnlyForTesting();
-    conflictRepository.clearAll();
+    conflictRepository.clearCacheOnlyForTesting();
     recordRepository.clearCacheOnlyForTesting();
   });
 
@@ -422,6 +422,54 @@ void main() {
 
       expect(authSession.isPlanMigrationPending, isFalse);
       expect(authSession.canUseCloudSync, isTrue);
+    },
+  );
+
+  test(
+    'a second upgrade queues free-plan edits after an earlier migration',
+    () async {
+      await authSession.setSessionForTesting(
+        plan: UserPlan.free,
+        email: 'second-migration@example.com',
+      );
+      final original = _createRecord(
+        'second-migration-record',
+        location: 'first location',
+      );
+      await RecordMutationService.instance.addRecord(original);
+      await PlanPolicyService.instance.changePlan(UserPlan.paid);
+
+      final gateway = FakeRecordSyncGateway();
+      RecordSyncService.instance.configureGateway(gateway);
+      final firstSync = await RecordSyncService.instance.syncNow();
+      expect(firstSync.isSuccess, isTrue);
+      expect(gateway.version(authSession.memberId!, original.id), 1);
+      expect(authSession.isPlanMigrationPending, isFalse);
+
+      expect(
+        await PlanPolicyService.instance.changePlan(UserPlan.free),
+        PlanChangeResult.changed,
+      );
+      await RecordMutationService.instance.updateRecord(
+        _createRecord(original.id, location: 'second location'),
+      );
+      expect(outboxRepository.getAllItems(), isEmpty);
+
+      expect(
+        await PlanPolicyService.instance.changePlan(UserPlan.paid),
+        PlanChangeResult.changed,
+      );
+
+      final migrationItems = outboxRepository
+          .getAllItems()
+          .where((item) => item.isMigration)
+          .toList(growable: false);
+      expect(migrationItems, hasLength(1));
+      expect(migrationItems.single.operationType, OutboxOperationType.update);
+      expect(migrationItems.single.status, OutboxStatus.pending);
+      expect(migrationItems.single.baseVersionNo, 1);
+      expect(migrationItems.single.payload?['location'], 'second location');
+      expect(authSession.isPlanMigrationPending, isTrue);
     },
   );
 

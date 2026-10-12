@@ -131,6 +131,11 @@ class _OutboxPageState extends State<OutboxPage> {
     final syncService = RecordSyncService.instance;
     final canStartQueueAction =
         !syncService.isSyncing && !_isLocalActionInProgress;
+    final hasSendableItems = items.any(
+      (item) =>
+          item.status == OutboxStatus.pending ||
+          item.status == OutboxStatus.failed,
+    );
     final hasClearableItems = items.any(
       (item) =>
           item.status == OutboxStatus.succeeded &&
@@ -147,9 +152,7 @@ class _OutboxPageState extends State<OutboxPage> {
           title: const Text('업로드 대기열'),
           actions: [
             IconButton(
-              onPressed:
-                  canStartQueueAction &&
-                      items.any((item) => item.status != OutboxStatus.succeeded)
+              onPressed: canStartQueueAction && hasSendableItems
                   ? _syncAllPendingItems
                   : null,
               icon: syncService.isSyncing
@@ -221,7 +224,11 @@ class _OutboxItemCard extends StatelessWidget {
               children: [
                 Icon(
                   _statusIcon(item.status),
-                  color: Theme.of(context).colorScheme.primary,
+                  color:
+                      item.status == OutboxStatus.failed ||
+                          item.status == OutboxStatus.conflicted
+                      ? Theme.of(context).colorScheme.error
+                      : Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -254,6 +261,14 @@ class _OutboxItemCard extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 '실패 사유: ${item.errorMessage}',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+
+            if (item.status == OutboxStatus.conflicted) ...[
+              const SizedBox(height: 8),
+              Text(
+                '동기화·충돌 관리에서 서버 기록과 비교한 뒤 해결 방식을 선택하세요.',
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ],
@@ -293,6 +308,8 @@ class _OutboxItemCard extends StatelessWidget {
         return Icons.check_circle_outline;
       case OutboxStatus.failed:
         return Icons.error_outline;
+      case OutboxStatus.conflicted:
+        return Icons.sync_problem_outlined;
     }
   }
 

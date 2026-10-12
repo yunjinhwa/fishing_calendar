@@ -10,13 +10,15 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'fishing_calendar.db';
-  static const int databaseVersion = 2;
+  static const int databaseVersion = 3;
 
   static const String localMetadataTable = 'local_metadata';
   static const String fishingRecordsTable = 'fishing_records';
   static const String recordCatchesTable = 'record_catches';
   static const String recordPhotosTable = 'record_photos';
   static const String outboxItemsTable = 'outbox_items';
+  static const String recordSyncStatesTable = 'record_sync_states';
+  static const String recordConflictsTable = 'record_conflicts';
 
   static const String legacyRecordsPreferencesMigrationKey =
       'records_shared_preferences_to_sqlite_v1';
@@ -127,27 +129,9 @@ class AppDatabase {
 
     batch.execute(_createRecordPhotosTableSql(recordPhotosTable));
 
-    batch.execute('''
-      CREATE TABLE $outboxItemsTable (
-        insertion_order INTEGER PRIMARY KEY AUTOINCREMENT,
-        owner_key TEXT NOT NULL,
-        outbox_id TEXT NOT NULL,
-        user_id TEXT,
-        record_id TEXT NOT NULL,
-        operation_type TEXT NOT NULL
-          CHECK (operation_type IN ('create', 'update', 'delete')),
-        status TEXT NOT NULL
-          CHECK (status IN ('pending', 'sending', 'succeeded', 'failed')),
-        created_at TEXT NOT NULL,
-        last_tried_at TEXT,
-        error_message TEXT,
-        retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
-        is_migration INTEGER NOT NULL DEFAULT 0
-          CHECK (is_migration IN (0, 1)),
-        payload_json TEXT,
-        UNIQUE (owner_key, outbox_id)
-      )
-    ''');
+    batch.execute(_createOutboxItemsTableSql(outboxItemsTable));
+    batch.execute(_createRecordSyncStatesTableSql(recordSyncStatesTable));
+    batch.execute(_createRecordConflictsTableSql(recordConflictsTable));
 
     batch.execute('''
       CREATE INDEX idx_fishing_records_owner_start
@@ -167,6 +151,11 @@ class AppDatabase {
     batch.execute('''
       CREATE INDEX idx_outbox_owner_record
       ON $outboxItemsTable (owner_key, record_id)
+    ''');
+
+    batch.execute('''
+      CREATE INDEX idx_conflicts_owner_status_detected
+      ON $recordConflictsTable (owner_key, status, detected_at)
     ''');
 
     for (final migrationKey in <String>[
@@ -219,6 +208,80 @@ class AppDatabase {
       ''');
       await database.execute('DROP TABLE $legacyPhotosTable');
     }
+
+    if (oldVersion < 3) {
+      const legacyOutboxTable = '${outboxItemsTable}_v2';
+      final outboxTableExists = (await database.rawQuery(
+        '''
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        LIMIT 1
+        ''',
+        <Object?>[outboxItemsTable],
+      )).isNotEmpty;
+      if (outboxTableExists) {
+        await database.execute(
+          'ALTER TABLE $outboxItemsTable RENAME TO $legacyOutboxTable',
+        );
+        await database.execute(_createOutboxItemsTableSql(outboxItemsTable));
+        await database.execute('''
+        INSERT INTO $outboxItemsTable (
+          insertion_order,
+          owner_key,
+          outbox_id,
+          user_id,
+          record_id,
+          operation_type,
+          status,
+          created_at,
+          last_tried_at,
+          error_message,
+          retry_count,
+          is_migration,
+          base_version_no,
+          payload_json
+        )
+        SELECT
+          insertion_order,
+          owner_key,
+          outbox_id,
+          user_id,
+          record_id,
+          operation_type,
+          status,
+          created_at,
+          last_tried_at,
+          error_message,
+          retry_count,
+          is_migration,
+          NULL,
+          payload_json
+        FROM $legacyOutboxTable
+      ''');
+        await database.execute('DROP TABLE $legacyOutboxTable');
+      } else {
+        await database.execute(_createOutboxItemsTableSql(outboxItemsTable));
+      }
+      await database.execute('''
+        CREATE INDEX idx_outbox_owner_status_order
+        ON $outboxItemsTable (owner_key, status, insertion_order)
+      ''');
+      await database.execute('''
+        CREATE INDEX idx_outbox_owner_record
+        ON $outboxItemsTable (owner_key, record_id)
+      ''');
+      await database.execute(
+        _createRecordSyncStatesTableSql(recordSyncStatesTable),
+      );
+      await database.execute(
+        _createRecordConflictsTableSql(recordConflictsTable),
+      );
+      await database.execute('''
+        CREATE INDEX idx_conflicts_owner_status_detected
+        ON $recordConflictsTable (owner_key, status, detected_at)
+      ''');
+    }
   }
 
   static String _createRecordPhotosTableSql(String tableName) =>
@@ -238,6 +301,78 @@ class AppDatabase {
         REFERENCES $fishingRecordsTable (owner_key, record_id)
         ON UPDATE CASCADE
         ON DELETE CASCADE
+    )
+  ''';
+
+  static String _createOutboxItemsTableSql(String tableName) =>
+      '''
+    CREATE TABLE $tableName (
+      insertion_order INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_key TEXT NOT NULL,
+      outbox_id TEXT NOT NULL,
+      user_id TEXT,
+      record_id TEXT NOT NULL,
+      operation_type TEXT NOT NULL
+        CHECK (operation_type IN ('create', 'update', 'delete')),
+      status TEXT NOT NULL
+        CHECK (status IN (
+          'pending', 'sending', 'succeeded', 'failed', 'conflicted'
+        )),
+      created_at TEXT NOT NULL,
+      last_tried_at TEXT,
+      error_message TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+      is_migration INTEGER NOT NULL DEFAULT 0
+        CHECK (is_migration IN (0, 1)),
+      base_version_no INTEGER
+        CHECK (base_version_no IS NULL OR base_version_no >= 0),
+      payload_json TEXT,
+      UNIQUE (owner_key, outbox_id)
+    )
+  ''';
+
+  static String _createRecordSyncStatesTableSql(String tableName) =>
+      '''
+    CREATE TABLE $tableName (
+      owner_key TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      server_version_no INTEGER NOT NULL CHECK (server_version_no >= 0),
+      optimistic_version_no INTEGER NOT NULL
+        CHECK (optimistic_version_no >= server_version_no),
+      remote_status TEXT NOT NULL
+        CHECK (remote_status IN ('missing', 'active', 'deleted')),
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (owner_key, record_id)
+    )
+  ''';
+
+  static String _createRecordConflictsTableSql(String tableName) =>
+      '''
+    CREATE TABLE $tableName (
+      owner_key TEXT NOT NULL,
+      conflict_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      outbox_id TEXT NOT NULL,
+      operation_type TEXT NOT NULL
+        CHECK (operation_type IN ('create', 'update', 'delete')),
+      base_version_no INTEGER
+        CHECK (base_version_no IS NULL OR base_version_no >= 0),
+      remote_version_no INTEGER NOT NULL CHECK (remote_version_no >= 0),
+      remote_status TEXT NOT NULL
+        CHECK (remote_status IN ('missing', 'active', 'deleted')),
+      local_payload_json TEXT,
+      remote_payload_json TEXT,
+      status TEXT NOT NULL
+        CHECK (status IN ('unresolved', 'resolving', 'resolved')),
+      resolution_type TEXT
+        CHECK (resolution_type IS NULL OR resolution_type IN (
+          'useMine', 'useTheirs', 'manualMerge'
+        )),
+      resolution_outbox_id TEXT,
+      detected_at TEXT NOT NULL,
+      resolved_at TEXT,
+      PRIMARY KEY (owner_key, conflict_id),
+      UNIQUE (owner_key, outbox_id)
     )
   ''';
 

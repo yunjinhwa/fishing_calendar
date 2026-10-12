@@ -4,9 +4,13 @@ import 'package:flutter/foundation.dart';
 
 import '../local/app_database.dart';
 import '../local/local_data_store.dart';
+import '../models/conflict_item.dart';
+import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
+import '../models/record_sync_metadata.dart';
 import '../remote/record_sync_gateway.dart';
 import '../repositories/auth_session_repository.dart';
+import '../repositories/conflict_repository.dart';
 import '../repositories/fishing_record_repository.dart';
 import '../repositories/outbox_repository.dart';
 import 'network_status_service.dart';
@@ -52,12 +56,14 @@ class RecordSyncService extends ChangeNotifier {
     AuthSessionRepository? authSession,
     FishingRecordRepository? recordRepository,
     OutboxRepository? outboxRepository,
+    ConflictRepository? conflictRepository,
     NetworkStatusService? networkStatusService,
     LocalDataStore? localDataStore,
     DateTime Function()? now,
   }) : _authSession = authSession ?? AuthSessionRepository.instance,
        _recordRepository = recordRepository ?? FishingRecordRepository.instance,
        _outboxRepository = outboxRepository ?? OutboxRepository.instance,
+       _conflictRepository = conflictRepository ?? ConflictRepository.instance,
        _networkStatusService =
            networkStatusService ?? NetworkStatusService.instance,
        _localDataStore = localDataStore ?? LocalDataStore.instance,
@@ -65,11 +71,12 @@ class RecordSyncService extends ChangeNotifier {
 
   static final RecordSyncService instance = RecordSyncService();
 
-  static const String _syncMarkerPrefix = 'firestore_record_sync_v1';
+  static const String _syncMarkerPrefix = 'firestore_record_sync_v2';
 
   final AuthSessionRepository _authSession;
   final FishingRecordRepository _recordRepository;
   final OutboxRepository _outboxRepository;
+  final ConflictRepository _conflictRepository;
   final NetworkStatusService _networkStatusService;
   final LocalDataStore _localDataStore;
   final DateTime Function() _now;
@@ -104,6 +111,29 @@ class RecordSyncService extends ChangeNotifier {
     }
     _gateway = gateway;
     notifyListeners();
+  }
+
+  Future<RemoteRecordRevision?> fetchLatestRevision(String recordId) async {
+    final gateway = _gateway;
+    final uid = _authSession.memberId;
+    final ownerKey = _authSession.dataOwnerKey;
+    if (gateway == null) {
+      throw StateError('Firebase가 연결된 빌드에서 충돌을 해결할 수 있습니다.');
+    }
+    if (!_authSession.isPaid || uid == null) {
+      throw StateError('유료 회원으로 로그인한 뒤 충돌을 해결할 수 있습니다.');
+    }
+    if (_networkStatusService.isDisconnected) {
+      throw StateError('인터넷에 연결한 뒤 상대 변경을 적용할 수 있습니다.');
+    }
+    final revision = await gateway.fetchRecordRevision(
+      uid: uid,
+      recordId: recordId,
+    );
+    if (!_isCurrentSession(uid, ownerKey)) {
+      throw StateError('계정이 변경되어 충돌 해결을 중단했습니다.');
+    }
+    return revision;
   }
 
   void initialize() {
@@ -197,6 +227,13 @@ class RecordSyncService extends ChangeNotifier {
             return _skip(RecordSyncSkipReason.sessionChanged);
           }
 
+          if (queuedItem.status == OutboxStatus.conflicted) {
+            return _fail(
+              pushedCount: pushedCount,
+              failedCount: 1,
+              message: '해결이 필요한 동기화 충돌이 있습니다.',
+            );
+          }
           if (queuedItem.status == OutboxStatus.failed) {
             await _outboxRepository.retryItemForOwner(
               ownerKey: ownerKey,
@@ -214,8 +251,25 @@ class RecordSyncService extends ChangeNotifier {
             return _skip(RecordSyncSkipReason.sessionChanged);
           }
 
+          late final RecordPushResult pushResult;
           try {
-            await gateway.pushOutboxItem(uid: uid, item: queuedItem);
+            pushResult = await gateway.pushOutboxItem(
+              uid: uid,
+              item: queuedItem,
+            );
+          } on RecordVersionConflictException catch (error) {
+            if (_isCurrentSession(uid, ownerKey)) {
+              await _recordConflict(
+                ownerKey: ownerKey,
+                blockingItem: queuedItem,
+                error: error,
+              );
+            }
+            return _fail(
+              pushedCount: pushedCount,
+              failedCount: 1,
+              message: error.message,
+            );
           } on Object catch (error) {
             final message = _messageFor(error);
             if (_isCurrentSession(uid, ownerKey)) {
@@ -236,10 +290,10 @@ class RecordSyncService extends ChangeNotifier {
           if (!_isCurrentSession(uid, ownerKey)) {
             return _skip(RecordSyncSkipReason.sessionChanged);
           }
-          await _outboxRepository.updateItemStatusForOwner(
+          await _completeSuccessfulPush(
             ownerKey: ownerKey,
-            itemId: queuedItem.id,
-            status: OutboxStatus.succeeded,
+            item: queuedItem,
+            result: pushResult,
           );
           pushedCount += 1;
           notifyListeners();
@@ -272,7 +326,7 @@ class RecordSyncService extends ChangeNotifier {
         }
 
         final replaced = await _recordRepository.replaceWithRemoteSnapshot(
-          serverSnapshot.activeRecords,
+          serverSnapshot,
           ownerKey: ownerKey,
         );
         if (!replaced) {
@@ -312,6 +366,131 @@ class RecordSyncService extends ChangeNotifier {
     }
   }
 
+  Future<void> _completeSuccessfulPush({
+    required String ownerKey,
+    required OutboxItem item,
+    required RecordPushResult result,
+  }) async {
+    final allItems = _outboxRepository.getAllItemsForOwner(ownerKey);
+    final itemIndex = allItems.indexWhere(
+      (candidate) => candidate.id == item.id,
+    );
+    final persistedItem = itemIndex >= 0 ? allItems[itemIndex] : item;
+    var optimisticVersionNo = result.versionNo;
+    final laterLegacyItems = <OutboxItem>[];
+    if (itemIndex >= 0) {
+      var nextBaseVersion = result.versionNo;
+      for (final candidate in allItems.skip(itemIndex + 1)) {
+        if (candidate.recordId != item.recordId ||
+            candidate.status == OutboxStatus.succeeded) {
+          continue;
+        }
+        if (candidate.baseVersionNo == null) {
+          laterLegacyItems.add(
+            candidate.copyWith(baseVersionNo: nextBaseVersion),
+          );
+          nextBaseVersion += 1;
+        } else if (candidate.baseVersionNo! >= nextBaseVersion) {
+          nextBaseVersion = candidate.baseVersionNo! + 1;
+        }
+      }
+      optimisticVersionNo = nextBaseVersion;
+    }
+
+    await AppDatabase.instance.transaction((transaction) async {
+      await _localDataStore.insertOutboxItem(
+        transaction,
+        ownerKey: ownerKey,
+        item: persistedItem.copyWith(
+          status: OutboxStatus.succeeded,
+          lastTriedAt: _now(),
+          clearErrorMessage: true,
+        ),
+        replace: true,
+      );
+      for (final legacyItem in laterLegacyItems) {
+        await _localDataStore.insertOutboxItem(
+          transaction,
+          ownerKey: ownerKey,
+          item: legacyItem,
+          replace: true,
+        );
+      }
+      await _localDataStore.writeRecordSyncMetadata(
+        transaction,
+        ownerKey: ownerKey,
+        metadata: RecordSyncMetadata(
+          recordId: item.recordId,
+          serverVersionNo: result.versionNo,
+          optimisticVersionNo: optimisticVersionNo,
+          remoteStatus: result.status,
+        ),
+      );
+      await _localDataStore.completeResolvingConflictForOutbox(
+        transaction,
+        ownerKey: ownerKey,
+        outboxId: item.id,
+        resolvedAt: _now(),
+      );
+    });
+    await _outboxRepository.reloadOwner(ownerKey);
+    await _conflictRepository.reloadOwner(ownerKey);
+  }
+
+  Future<void> _recordConflict({
+    required String ownerKey,
+    required OutboxItem blockingItem,
+    required RecordVersionConflictException error,
+  }) async {
+    final localIntent = _latestUnfinishedItemForRecord(
+      ownerKey,
+      blockingItem.recordId,
+    );
+    FishingRecord? localRecord;
+    final payload = localIntent.payload;
+    if (payload != null) {
+      try {
+        localRecord = FishingRecord.fromJson(payload);
+      } on Object {
+        localRecord = null;
+      }
+    }
+    if (localIntent.operationType != OutboxOperationType.delete) {
+      localRecord =
+          _recordRepository.getRecordById(localIntent.recordId) ?? localRecord;
+    }
+
+    final now = _now();
+    final conflict = ConflictItem(
+      id: 'conflict-${now.microsecondsSinceEpoch}-${blockingItem.recordId}',
+      ownerKey: ownerKey,
+      recordId: blockingItem.recordId,
+      outboxId: blockingItem.id,
+      localOperationType: localIntent.operationType,
+      baseVersionNo: error.baseVersionNo,
+      remoteVersionNo: error.remoteVersionNo,
+      remoteStatus: error.remoteStatus,
+      localRecord: localRecord,
+      remoteRecord: error.remoteRecord,
+      occurredAt: now,
+      status: ConflictStatus.unresolved,
+    );
+    await _conflictRepository.recordDetectedConflict(conflict);
+    await _outboxRepository.reloadOwner(ownerKey);
+  }
+
+  OutboxItem _latestUnfinishedItemForRecord(String ownerKey, String recordId) {
+    final matches = _outboxRepository
+        .getAllItemsForOwner(ownerKey)
+        .where(
+          (item) =>
+              item.recordId == recordId &&
+              item.status != OutboxStatus.succeeded,
+        )
+        .toList(growable: false);
+    return matches.isEmpty ? _firstUnfinishedItem(ownerKey)! : matches.last;
+  }
+
   Future<void> _prepareFirstRealSync({
     required String uid,
     required String ownerKey,
@@ -347,6 +526,7 @@ class RecordSyncService extends ChangeNotifier {
           status: OutboxStatus.pending,
           createdAt: now,
           isMigration: true,
+          baseVersionNo: 0,
           payload: record.toJson(),
         ),
       );
@@ -356,6 +536,18 @@ class RecordSyncService extends ChangeNotifier {
     // switch during this await can stop the sync, but can never move one
     // account's replay/bootstrap items into another account's SQLite partition.
     await AppDatabase.instance.transaction((transaction) async {
+      for (final revision in serverSnapshot.revisions) {
+        await _localDataStore.writeRecordSyncMetadata(
+          transaction,
+          ownerKey: ownerKey,
+          metadata: RecordSyncMetadata(
+            recordId: revision.recordId,
+            serverVersionNo: revision.versionNo,
+            optimisticVersionNo: revision.versionNo,
+            remoteStatus: revision.status,
+          ),
+        );
+      }
       for (final item in existingItems) {
         if (item.status != OutboxStatus.succeeded) {
           continue;
@@ -371,6 +563,17 @@ class RecordSyncService extends ChangeNotifier {
         );
       }
       for (final item in bootstrapItems) {
+        await _localDataStore.writeRecordSyncMetadata(
+          transaction,
+          ownerKey: ownerKey,
+          metadata: RecordSyncMetadata(
+            recordId: item.recordId,
+            serverVersionNo: 0,
+            optimisticVersionNo: 1,
+            remoteStatus: RemoteRecordStatus.missing,
+          ),
+          resetOptimisticVersion: true,
+        );
         await _localDataStore.insertOutboxItem(
           transaction,
           ownerKey: ownerKey,

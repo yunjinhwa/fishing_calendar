@@ -1,9 +1,13 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/validation/fishing_record_validator.dart';
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
+import '../models/record_sync_metadata.dart';
 import 'record_sync_gateway.dart';
 
 class FirestoreRecordSyncGateway implements RecordSyncGateway {
@@ -17,7 +21,7 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
   final FirebaseFirestore _database;
 
   @override
-  Future<void> pushOutboxItem({
+  Future<RecordPushResult> pushOutboxItem({
     required String uid,
     required OutboxItem item,
   }) async {
@@ -27,25 +31,47 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
 
     final recordReference = _records(uid).doc(item.recordId);
     final receiptReference = _receipts(uid).doc(item.id);
+    final localRecord = item.operationType == OutboxOperationType.delete
+        ? null
+        : _decodeLocalPayload(item.payload, item.recordId);
+    RecordPushResult? result;
 
     try {
       await _database.runTransaction<void>((transaction) async {
         final receiptSnapshot = await transaction.get(receiptReference);
         if (receiptSnapshot.exists) {
-          _validateExistingReceipt(
+          result = _validateExistingReceipt(
             receiptSnapshot.data(),
             uid: uid,
             item: item,
+            record: localRecord,
           );
           return;
         }
 
         final recordSnapshot = await transaction.get(recordReference);
         final currentData = recordSnapshot.data();
-        final currentVersion = currentData?['versionNo'];
-        final nextVersion = currentVersion is num
-            ? currentVersion.toInt() + 1
-            : 1;
+        final currentRevision = currentData == null
+            ? null
+            : _decodeRevision(
+                uid: uid,
+                recordId: item.recordId,
+                data: currentData,
+              );
+        final currentVersion = currentRevision?.versionNo ?? 0;
+        final baseVersion = item.baseVersionNo;
+        if (baseVersion == null && currentRevision != null ||
+            baseVersion != null && baseVersion != currentVersion) {
+          throw RecordVersionConflictException(
+            recordId: item.recordId,
+            baseVersionNo: baseVersion,
+            remoteVersionNo: currentVersion,
+            remoteStatus: currentRevision?.status ?? RemoteRecordStatus.missing,
+            remoteRecord: currentRevision?.record,
+          );
+        }
+        final effectiveBaseVersion = baseVersion ?? 0;
+        final nextVersion = effectiveBaseVersion + 1;
         final createdAt = currentData?['createdAt'];
 
         if (item.operationType == OutboxOperationType.delete) {
@@ -63,21 +89,12 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
             'lastOutboxId': item.id,
           });
         } else {
-          final payload = item.payload;
-          if (payload == null) {
-            throw const RecordSyncGatewayException(
-              code: 'missing-payload',
-              message: '업로드할 기록 데이터가 없습니다.',
-            );
-          }
-
-          final record = _decodeLocalPayload(payload, item.recordId);
           transaction.set(
             recordReference,
             _encodeActiveRecord(
               uid: uid,
               item: item,
-              record: record,
+              record: localRecord!,
               versionNo: nextVersion,
               createdAt: createdAt is Timestamp ? createdAt : null,
             ),
@@ -85,14 +102,28 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
         }
 
         transaction.set(receiptReference, <String, Object?>{
+          'schemaVersion': 2,
           'ownerUid': uid,
           'outboxId': item.id,
           'recordId': item.recordId,
           'operationType': item.operationType.name,
+          'baseVersionNo': effectiveBaseVersion,
           'resultingVersionNo': nextVersion,
+          'mutationFingerprint': _mutationFingerprint(
+            item: item,
+            baseVersionNo: effectiveBaseVersion,
+            record: localRecord,
+          ),
           'processedAt': FieldValue.serverTimestamp(),
         });
+        result = RecordPushResult(
+          versionNo: nextVersion,
+          status: item.operationType == OutboxOperationType.delete
+              ? RemoteRecordStatus.deleted
+              : RemoteRecordStatus.active,
+        );
       });
+      return result!;
     } on RecordSyncGatewayException {
       rethrow;
     } on FirebaseException catch (error, stackTrace) {
@@ -115,43 +146,30 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
       final querySnapshot = await _records(
         uid,
       ).get(const GetOptions(source: Source.server));
-      final activeRecords = <FishingRecord>[];
-      final knownRecordIds = <String>{};
+      final revisions = <RemoteRecordRevision>[];
 
       for (final document in querySnapshot.docs) {
-        final data = document.data();
-        final recordId = data['recordId'];
-        final ownerUid = data['ownerUid'];
-        final status = data['recordStatus'];
-        if (recordId is! String ||
-            recordId != document.id ||
-            ownerUid != uid ||
-            (status != activeStatus && status != deletedStatus)) {
-          throw const RecordSyncGatewayException(
-            code: 'invalid-server-data',
-            message: '서버 기록 형식이 올바르지 않습니다.',
-          );
-        }
-        _validateCloudEnvelope(
-          data,
-          uid: uid,
-          recordId: recordId,
-          status: status as String,
+        revisions.add(
+          _decodeRevision(
+            data: document.data(),
+            uid: uid,
+            recordId: document.id,
+          ),
         );
-
-        knownRecordIds.add(recordId);
-        if (status == deletedStatus) {
-          continue;
-        }
-        activeRecords.add(_decodeCloudRecord(data));
       }
 
-      activeRecords.sort(
-        (left, right) => left.startAt.compareTo(right.startAt),
-      );
+      revisions.sort((left, right) {
+        final leftStart = left.record?.startAt;
+        final rightStart = right.record?.startAt;
+        if (leftStart == null && rightStart == null) {
+          return left.recordId.compareTo(right.recordId);
+        }
+        if (leftStart == null) return 1;
+        if (rightStart == null) return -1;
+        return leftStart.compareTo(rightStart);
+      });
       return RemoteRecordSnapshot(
-        activeRecords: List<FishingRecord>.unmodifiable(activeRecords),
-        knownRecordIds: Set<String>.unmodifiable(knownRecordIds),
+        revisions: List<RemoteRecordRevision>.unmodifiable(revisions),
       );
     } on RecordSyncGatewayException {
       rethrow;
@@ -167,6 +185,69 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
     }
   }
 
+  @override
+  Future<RemoteRecordRevision?> fetchRecordRevision({
+    required String uid,
+    required String recordId,
+  }) async {
+    _validateDocumentId(uid, fieldName: 'uid');
+    _validateDocumentId(recordId, fieldName: 'recordId');
+    try {
+      final snapshot = await _records(
+        uid,
+      ).doc(recordId).get(const GetOptions(source: Source.server));
+      final data = snapshot.data();
+      if (data == null) {
+        return null;
+      }
+      return _decodeRevision(data: data, uid: uid, recordId: recordId);
+    } on RecordSyncGatewayException {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirebaseFailure(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'read-failed',
+        message: '서버 기록을 불러오지 못했습니다.',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  RemoteRecordRevision _decodeRevision({
+    required String uid,
+    required String recordId,
+    required Map<String, dynamic> data,
+  }) {
+    final storedRecordId = data['recordId'];
+    final ownerUid = data['ownerUid'];
+    final status = data['recordStatus'];
+    if (storedRecordId is! String ||
+        storedRecordId != recordId ||
+        ownerUid != uid ||
+        (status != activeStatus && status != deletedStatus)) {
+      throw const RecordSyncGatewayException(
+        code: 'invalid-server-data',
+        message: '서버 기록 형식이 올바르지 않습니다.',
+      );
+    }
+    _validateCloudEnvelope(
+      data,
+      uid: uid,
+      recordId: recordId,
+      status: status as String,
+    );
+    return RemoteRecordRevision(
+      recordId: recordId,
+      versionNo: data['versionNo']! as int,
+      status: status == activeStatus
+          ? RemoteRecordStatus.active
+          : RemoteRecordStatus.deleted,
+      record: status == activeStatus ? _decodeCloudRecord(data) : null,
+    );
+  }
+
   CollectionReference<Map<String, dynamic>> _records(String uid) =>
       _database.collection('users').doc(uid).collection('records');
 
@@ -174,10 +255,16 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
       _database.collection('users').doc(uid).collection('sync_receipts');
 
   FishingRecord _decodeLocalPayload(
-    Map<String, dynamic> payload,
+    Map<String, dynamic>? payload,
     String expectedRecordId,
   ) {
     try {
+      if (payload == null) {
+        throw const RecordSyncGatewayException(
+          code: 'missing-payload',
+          message: '업로드할 기록 데이터가 없습니다.',
+        );
+      }
       final record = FishingRecord.fromJson(payload);
       if (record.id != expectedRecordId) {
         throw const RecordSyncGatewayException(
@@ -324,12 +411,48 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
     }
   }
 
-  static void _validateExistingReceipt(
+  static String _mutationFingerprint({
+    required OutboxItem item,
+    required int baseVersionNo,
+    required FishingRecord? record,
+  }) {
+    final mutation = <String, Object?>{
+      'recordId': item.recordId,
+      'operationType': item.operationType.name,
+      'baseVersionNo': baseVersionNo,
+      'record': record == null
+          ? null
+          : <String, Object?>{
+              'location': record.location,
+              'startAt': record.startAt.toUtc().toIso8601String(),
+              'endAt': record.endAt.toUtc().toIso8601String(),
+              'genreName': record.genreName,
+              'tide': record.tide,
+              'weather': record.weather,
+              'airTemperature': record.airTemperature,
+              'waterTemperature': record.waterTemperature,
+              'catches': record.catches
+                  .map(
+                    (item) => <String, Object?>{
+                      'speciesName': item.speciesName,
+                      'lengthCm': item.lengthCm,
+                      'weightG': item.weightG,
+                    },
+                  )
+                  .toList(growable: false),
+              'memo': record.memo,
+            },
+    };
+    return sha256.convert(utf8.encode(jsonEncode(mutation))).toString();
+  }
+
+  static RecordPushResult _validateExistingReceipt(
     Map<String, dynamic>? data, {
     required String uid,
     required OutboxItem item,
+    required FishingRecord? record,
   }) {
-    const expectedKeys = <String>{
+    const v1Keys = <String>{
       'ownerUid',
       'outboxId',
       'recordId',
@@ -337,9 +460,40 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
       'resultingVersionNo',
       'processedAt',
     };
+    const v2Keys = <String>{
+      'schemaVersion',
+      'ownerUid',
+      'outboxId',
+      'recordId',
+      'operationType',
+      'baseVersionNo',
+      'resultingVersionNo',
+      'mutationFingerprint',
+      'processedAt',
+    };
     final version = data?['resultingVersionNo'];
+    final isV1 = data != null && _hasExactKeys(data, v1Keys);
+    final isV2 = data != null && _hasExactKeys(data, v2Keys);
+    var validV2 = true;
+    if (isV2) {
+      final receiptBaseVersion = data['baseVersionNo'];
+      validV2 =
+          data['schemaVersion'] == 2 &&
+          receiptBaseVersion is int &&
+          receiptBaseVersion >= 0 &&
+          version == receiptBaseVersion + 1 &&
+          (item.baseVersionNo == null ||
+              item.baseVersionNo == receiptBaseVersion) &&
+          data['mutationFingerprint'] ==
+              _mutationFingerprint(
+                item: item,
+                baseVersionNo: receiptBaseVersion,
+                record: record,
+              );
+    }
     if (data == null ||
-        !_hasExactKeys(data, expectedKeys) ||
+        (!isV1 && !isV2) ||
+        !validV2 ||
         data['ownerUid'] != uid ||
         data['outboxId'] != item.id ||
         data['recordId'] != item.recordId ||
@@ -352,6 +506,12 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
         message: '같은 동기화 요청 ID에 다른 서버 처리 내역이 있습니다.',
       );
     }
+    return RecordPushResult(
+      versionNo: version,
+      status: item.operationType == OutboxOperationType.delete
+          ? RemoteRecordStatus.deleted
+          : RemoteRecordStatus.active,
+    );
   }
 
   static void _validateCloudEnvelope(
@@ -423,11 +583,34 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
   }
 
   @visibleForTesting
-  static void validateExistingReceiptForTesting(
+  static RecordPushResult validateExistingReceiptForTesting(
     Map<String, dynamic>? data, {
     required String uid,
     required OutboxItem item,
-  }) => _validateExistingReceipt(data, uid: uid, item: item);
+  }) => _validateExistingReceipt(
+    data,
+    uid: uid,
+    item: item,
+    record: item.operationType == OutboxOperationType.delete
+        ? null
+        : _decodePayloadForTesting(item),
+  );
+
+  @visibleForTesting
+  static String mutationFingerprintForTesting(OutboxItem item) {
+    return _mutationFingerprint(
+      item: item,
+      baseVersionNo: item.baseVersionNo ?? 0,
+      record: item.operationType == OutboxOperationType.delete
+          ? null
+          : _decodePayloadForTesting(item),
+    );
+  }
+
+  static FishingRecord? _decodePayloadForTesting(OutboxItem item) {
+    final payload = item.payload;
+    return payload == null ? null : FishingRecord.fromJson(payload);
+  }
 
   RecordSyncGatewayException _mapFirebaseFailure(
     FirebaseException error,

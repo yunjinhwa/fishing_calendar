@@ -153,4 +153,69 @@ void main() {
       ),
     );
   });
+
+  test('v2 receipt pins the base version and mutation fingerprint', () {
+    final record = FishingRecord(
+      id: 'receipt-v2-record',
+      location: '원본 위치',
+      startAt: DateTime.utc(2026, 9, 28, 8),
+      endAt: DateTime.utc(2026, 9, 28, 10),
+      genreName: '바다낚시',
+    );
+    final item = OutboxItem(
+      id: 'receipt-v2-outbox',
+      userId: 'receipt-v2-user',
+      recordId: record.id,
+      operationType: OutboxOperationType.update,
+      status: OutboxStatus.pending,
+      createdAt: DateTime.utc(2026, 9, 28),
+      baseVersionNo: 4,
+      payload: record.toJson(),
+    );
+    final receipt = <String, dynamic>{
+      'schemaVersion': 2,
+      'ownerUid': 'receipt-v2-user',
+      'outboxId': item.id,
+      'recordId': item.recordId,
+      'operationType': item.operationType.name,
+      'baseVersionNo': 4,
+      'resultingVersionNo': 5,
+      'mutationFingerprint':
+          FirestoreRecordSyncGateway.mutationFingerprintForTesting(item),
+      'processedAt': Timestamp.fromDate(DateTime.utc(2026, 9, 28)),
+    };
+
+    final result = FirestoreRecordSyncGateway.validateExistingReceiptForTesting(
+      receipt,
+      uid: 'receipt-v2-user',
+      item: item,
+    );
+    expect(result.versionNo, 5);
+
+    expect(
+      () => FirestoreRecordSyncGateway.validateExistingReceiptForTesting(
+        <String, dynamic>{...receipt, 'baseVersionNo': 3},
+        uid: 'receipt-v2-user',
+        item: item,
+      ),
+      throwsA(
+        isA<RecordSyncGatewayException>().having(
+          (error) => error.code,
+          'code',
+          'idempotency-conflict',
+        ),
+      ),
+    );
+    expect(
+      () => FirestoreRecordSyncGateway.validateExistingReceiptForTesting(
+        <String, dynamic>{
+          ...receipt,
+          'mutationFingerprint': List<String>.filled(64, '0').join(),
+        },
+        uid: 'receipt-v2-user',
+        item: item,
+      ),
+      throwsA(isA<RecordSyncGatewayException>()),
+    );
+  });
 }

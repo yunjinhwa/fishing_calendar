@@ -409,6 +409,107 @@ void main() {
       isNot(contains('photo_path')),
     );
   });
+
+  test('database v2 outbox migrates to conflict-aware schema', () async {
+    sqfliteFfiInit();
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'fishing-calendar-v2-',
+    );
+    final databasePath = path.join(
+      temporaryDirectory.path,
+      'outbox-migration-test.db',
+    );
+    addTearDown(() async {
+      await AppDatabase.instance.resetForTesting();
+      if (temporaryDirectory.existsSync()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
+    });
+
+    final legacyDatabase = await databaseFactoryFfiNoIsolate.openDatabase(
+      databasePath,
+      options: OpenDatabaseOptions(
+        version: 2,
+        onCreate: (database, version) async {
+          await database.execute('''
+            CREATE TABLE ${AppDatabase.outboxItemsTable} (
+              insertion_order INTEGER PRIMARY KEY AUTOINCREMENT,
+              owner_key TEXT NOT NULL,
+              outbox_id TEXT NOT NULL,
+              user_id TEXT,
+              record_id TEXT NOT NULL,
+              operation_type TEXT NOT NULL,
+              status TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              last_tried_at TEXT,
+              error_message TEXT,
+              retry_count INTEGER NOT NULL DEFAULT 0,
+              is_migration INTEGER NOT NULL DEFAULT 0,
+              payload_json TEXT,
+              UNIQUE (owner_key, outbox_id)
+            )
+          ''');
+        },
+      ),
+    );
+    await legacyDatabase.insert(AppDatabase.outboxItemsTable, <String, Object?>{
+      'owner_key': 'member:legacy-v2',
+      'outbox_id': 'legacy-outbox',
+      'user_id': 'legacy-v2',
+      'record_id': 'legacy-record',
+      'operation_type': 'update',
+      'status': 'pending',
+      'created_at': DateTime(2026, 9, 1).toIso8601String(),
+      'retry_count': 2,
+      'is_migration': 0,
+      'payload_json': jsonEncode(<String, Object?>{'id': 'legacy-record'}),
+    });
+    await legacyDatabase.close();
+
+    await AppDatabase.instance.configureForTesting(
+      databaseFactory: databaseFactoryFfiNoIsolate,
+      databasePath: databasePath,
+    );
+    final upgradedDatabase = await AppDatabase.instance.database;
+    final rows = await upgradedDatabase.query(AppDatabase.outboxItemsTable);
+    final outboxColumns = await upgradedDatabase.rawQuery(
+      'PRAGMA table_info(${AppDatabase.outboxItemsTable})',
+    );
+    final tables = await upgradedDatabase.rawQuery('''
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table'
+      ''');
+
+    expect(rows, hasLength(1));
+    expect(rows.single['outbox_id'], 'legacy-outbox');
+    expect(rows.single['retry_count'], 2);
+    expect(rows.single['base_version_no'], isNull);
+    expect(
+      outboxColumns.map((column) => column['name']),
+      contains('base_version_no'),
+    );
+    expect(
+      tables.map((table) => table['name']),
+      containsAll(<String>[
+        AppDatabase.recordSyncStatesTable,
+        AppDatabase.recordConflictsTable,
+      ]),
+    );
+
+    await upgradedDatabase
+        .insert(AppDatabase.outboxItemsTable, <String, Object?>{
+          'owner_key': 'member:legacy-v2',
+          'outbox_id': 'conflicted-outbox',
+          'record_id': 'legacy-record',
+          'operation_type': 'update',
+          'status': 'conflicted',
+          'created_at': DateTime(2026, 9, 2).toIso8601String(),
+          'retry_count': 0,
+          'is_migration': 0,
+          'base_version_no': 4,
+        });
+  });
 }
 
 FishingRecord _record({

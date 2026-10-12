@@ -47,63 +47,123 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
-    function recordHasMatchingReceipt(data, uid, recordId) {
-      return existsAfter(
-          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId))
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
-        ).data.ownerUid == uid
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
-        ).data.outboxId == data.lastOutboxId
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
-        ).data.recordId == recordId
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
-        ).data.resultingVersionNo == data.versionNo
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
-        ).data.processedAt == request.time
-        && (
-          (data.recordStatus == 'DELETED'
-            && getAfter(
-              /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
-            ).data.operationType == 'delete')
-          || (data.recordStatus == 'ACTIVE'
-            && getAfter(
-              /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
-            ).data.operationType in ['create', 'update'])
+    function validSyncReceiptV1Shape(data, uid, outboxId) {
+      return data.keys().hasOnly([
+          'ownerUid', 'outboxId', 'recordId', 'operationType',
+          'resultingVersionNo', 'processedAt'
+        ])
+        && data.ownerUid == uid
+        && data.outboxId == outboxId
+        && data.recordId is string
+        && data.recordId.matches('^[^/]{1,200}$')
+        && data.outboxId is string
+        && data.outboxId.matches('^[^/]{1,300}$')
+        && data.operationType in ['create', 'update', 'delete']
+        && data.resultingVersionNo is int
+        && data.resultingVersionNo >= 1
+        && data.processedAt == request.time;
+    }
+
+    function validSyncReceiptV2Shape(data, uid, outboxId) {
+      return data.keys().hasOnly([
+          'schemaVersion', 'ownerUid', 'outboxId', 'recordId',
+          'operationType', 'baseVersionNo', 'resultingVersionNo',
+          'mutationFingerprint', 'processedAt'
+        ])
+        && data.schemaVersion == 2
+        && data.ownerUid == uid
+        && data.outboxId == outboxId
+        && data.recordId is string
+        && data.recordId.matches('^[^/]{1,200}$')
+        && data.outboxId is string
+        && data.outboxId.matches('^[^/]{1,300}$')
+        && data.operationType in ['create', 'update', 'delete']
+        && data.baseVersionNo is int
+        && data.baseVersionNo >= 0
+        && data.resultingVersionNo is int
+        && data.resultingVersionNo == data.baseVersionNo + 1
+        && data.mutationFingerprint is string
+        && data.mutationFingerprint.matches('^[0-9a-f]{64}$')
+        && data.processedAt == request.time;
+    }
+
+    function validSyncReceiptShape(data, uid, outboxId) {
+      return validSyncReceiptV1Shape(data, uid, outboxId)
+        || validSyncReceiptV2Shape(data, uid, outboxId);
+    }
+
+    function receiptMatchesBase(data, uid, outboxId, baseVersionNo) {
+      return (
+          validSyncReceiptV1Shape(data, uid, outboxId)
+          && data.resultingVersionNo == baseVersionNo + 1
+        )
+        || (
+          validSyncReceiptV2Shape(data, uid, outboxId)
+          && data.baseVersionNo == baseVersionNo
         );
     }
 
-    function receiptHasMatchingRecord(data, uid, outboxId) {
+    function recordHasMatchingReceipt(
+      data,
+      uid,
+      recordId,
+      operationType,
+      baseVersionNo
+    ) {
+      let receipt = getAfter(
+        /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId)
+      ).data;
       return existsAfter(
-          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId))
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
-        ).data.ownerUid == uid
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
-        ).data.recordId == data.recordId
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
-        ).data.lastOutboxId == outboxId
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
-        ).data.versionNo == data.resultingVersionNo
-        && getAfter(
-          /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
-        ).data.serverUpdatedAt == request.time
+          /databases/$(database)/documents/users/$(uid)/sync_receipts/$(data.lastOutboxId))
+        && validSyncReceiptShape(receipt, uid, data.lastOutboxId)
+        && receipt.recordId == recordId
+        && receipt.operationType == operationType
+        && receiptMatchesBase(
+          receipt,
+          uid,
+          data.lastOutboxId,
+          baseVersionNo
+        )
+        && receipt.resultingVersionNo == data.versionNo;
+    }
+
+    function receiptHasMatchingRecord(data, uid, outboxId) {
+      let recordPath =
+        /databases/$(database)/documents/users/$(uid)/records/$(data.recordId);
+      let nextRecord = getAfter(recordPath).data;
+      return existsAfter(recordPath)
+        && nextRecord.ownerUid == uid
+        && nextRecord.recordId == data.recordId
+        && nextRecord.lastOutboxId == outboxId
+        && nextRecord.versionNo == data.resultingVersionNo
+        && nextRecord.serverUpdatedAt == request.time
         && (
-          (data.operationType == 'delete'
-            && getAfter(
-              /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
-            ).data.recordStatus == 'DELETED')
-          || (data.operationType in ['create', 'update']
-            && getAfter(
-              /databases/$(database)/documents/users/$(uid)/records/$(data.recordId)
-            ).data.recordStatus == 'ACTIVE')
+          (data.operationType == 'create'
+            && !exists(recordPath)
+            && receiptMatchesBase(data, uid, outboxId, 0)
+            && nextRecord.recordStatus == 'ACTIVE')
+          || (data.operationType == 'update'
+            && exists(recordPath)
+            && get(recordPath).data.ownerUid == uid
+            && get(recordPath).data.recordId == data.recordId
+            && receiptMatchesBase(
+              data,
+              uid,
+              outboxId,
+              get(recordPath).data.versionNo
+            )
+            && nextRecord.recordStatus == 'ACTIVE')
+          || (data.operationType == 'delete'
+            && exists(recordPath)
+            && get(recordPath).data.ownerUid == uid
+            && get(recordPath).data.recordId == data.recordId
+            && receiptMatchesBase(
+              data,
+              uid,
+              outboxId,
+              get(recordPath).data.versionNo
+            )
+            && nextRecord.recordStatus == 'DELETED')
         );
     }
 
@@ -119,8 +179,7 @@ service cloud.firestore {
         && data.createdAt is timestamp
         && data.serverUpdatedAt == request.time
         && data.lastOutboxId is string
-        && data.lastOutboxId.matches('^[^/]{1,300}$')
-        && recordHasMatchingReceipt(data, uid, recordId);
+        && data.lastOutboxId.matches('^[^/]{1,300}$');
     }
 
     function validActiveRecord(data, uid, recordId) {
@@ -170,20 +229,7 @@ service cloud.firestore {
     }
 
     function validSyncReceipt(data, uid, outboxId) {
-      return data.keys().hasOnly([
-          'ownerUid', 'outboxId', 'recordId', 'operationType',
-          'resultingVersionNo', 'processedAt'
-        ])
-        && data.ownerUid == uid
-        && data.outboxId == outboxId
-        && data.recordId is string
-        && data.recordId.matches('^[^/]{1,200}$')
-        && data.outboxId is string
-        && data.outboxId.matches('^[^/]{1,300}$')
-        && data.operationType in ['create', 'update', 'delete']
-        && data.resultingVersionNo is int
-        && data.resultingVersionNo >= 1
-        && data.processedAt == request.time
+      return validSyncReceiptShape(data, uid, outboxId)
         && receiptHasMatchingRecord(data, uid, outboxId);
     }
 
@@ -249,16 +295,41 @@ service cloud.firestore {
       allow get, list: if ownsUserData(uid);
 
       allow create: if ownsUserData(uid)
-        && validRecord(request.resource.data, uid, recordId)
+        && validActiveRecord(request.resource.data, uid, recordId)
         && request.resource.data.versionNo == 1
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && recordHasMatchingReceipt(
+          request.resource.data,
+          uid,
+          recordId,
+          'create',
+          0
+        );
 
       allow update: if ownsUserData(uid)
         && resource.data.ownerUid == uid
         && resource.data.recordId == recordId
         && validRecord(request.resource.data, uid, recordId)
         && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.versionNo == resource.data.versionNo + 1;
+        && request.resource.data.versionNo == resource.data.versionNo + 1
+        && (
+          (request.resource.data.recordStatus == 'ACTIVE'
+            && recordHasMatchingReceipt(
+              request.resource.data,
+              uid,
+              recordId,
+              'update',
+              resource.data.versionNo
+            ))
+          || (request.resource.data.recordStatus == 'DELETED'
+            && recordHasMatchingReceipt(
+              request.resource.data,
+              uid,
+              recordId,
+              'delete',
+              resource.data.versionNo
+            ))
+        );
 
       // Deletes are represented by validated tombstones so another device can
       // observe them during its next complete snapshot pull.

@@ -24,23 +24,33 @@ class RecordMutationService {
     _ensureRecordAccess();
     _ensureValidRecord(record);
     final ownerKey = _authSession.dataOwnerKey;
-    final outboxItem = _createOutboxIfNeeded(
-      record.id,
-      OutboxOperationType.create,
-      payload: record.toJson(),
-    );
+    OutboxItem? outboxItem;
 
     await AppDatabase.instance.transaction((transaction) async {
+      if (_authSession.canUseOutbox) {
+        final baseVersionNo = await _store.reserveNextRecordVersion(
+          transaction,
+          ownerKey: ownerKey,
+          recordId: record.id,
+        );
+        outboxItem = _createOutbox(
+          record.id,
+          OutboxOperationType.create,
+          baseVersionNo: baseVersionNo,
+          payload: record.toJson(),
+        );
+      }
       await _store.insertRecord(
         transaction,
         ownerKey: ownerKey,
         record: record,
       );
-      if (outboxItem != null) {
+      final queuedItem = outboxItem;
+      if (queuedItem != null) {
         await _store.insertOutboxItem(
           transaction,
           ownerKey: ownerKey,
-          item: outboxItem,
+          item: queuedItem,
         );
       }
     });
@@ -55,24 +65,34 @@ class RecordMutationService {
     }
 
     final ownerKey = _authSession.dataOwnerKey;
-    final outboxItem = _createOutboxIfNeeded(
-      record.id,
-      OutboxOperationType.update,
-      payload: record.toJson(),
-    );
+    OutboxItem? outboxItem;
 
     await AppDatabase.instance.transaction((transaction) async {
+      if (_authSession.canUseOutbox) {
+        final baseVersionNo = await _store.reserveNextRecordVersion(
+          transaction,
+          ownerKey: ownerKey,
+          recordId: record.id,
+        );
+        outboxItem = _createOutbox(
+          record.id,
+          OutboxOperationType.update,
+          baseVersionNo: baseVersionNo,
+          payload: record.toJson(),
+        );
+      }
       await _store.insertRecord(
         transaction,
         ownerKey: ownerKey,
         record: record,
         replace: true,
       );
-      if (outboxItem != null) {
+      final queuedItem = outboxItem;
+      if (queuedItem != null) {
         await _store.insertOutboxItem(
           transaction,
           ownerKey: ownerKey,
-          item: outboxItem,
+          item: queuedItem,
         );
       }
     });
@@ -87,23 +107,33 @@ class RecordMutationService {
     }
 
     final ownerKey = _authSession.dataOwnerKey;
-    final outboxItem = _createOutboxIfNeeded(
-      recordId,
-      OutboxOperationType.delete,
-      payload: record.toJson(),
-    );
+    OutboxItem? outboxItem;
 
     await AppDatabase.instance.transaction((transaction) async {
+      if (_authSession.canUseOutbox) {
+        final baseVersionNo = await _store.reserveNextRecordVersion(
+          transaction,
+          ownerKey: ownerKey,
+          recordId: recordId,
+        );
+        outboxItem = _createOutbox(
+          recordId,
+          OutboxOperationType.delete,
+          baseVersionNo: baseVersionNo,
+          payload: record.toJson(),
+        );
+      }
       await _store.deleteRecord(
         transaction,
         ownerKey: ownerKey,
         recordId: recordId,
       );
-      if (outboxItem != null) {
+      final queuedItem = outboxItem;
+      if (queuedItem != null) {
         await _store.insertOutboxItem(
           transaction,
           ownerKey: ownerKey,
-          item: outboxItem,
+          item: queuedItem,
         );
       }
     });
@@ -162,15 +192,12 @@ class RecordMutationService {
     }
   }
 
-  OutboxItem? _createOutboxIfNeeded(
+  OutboxItem _createOutbox(
     String recordId,
     OutboxOperationType operationType, {
+    required int baseVersionNo,
     required Map<String, dynamic> payload,
   }) {
-    if (!_authSession.canUseOutbox) {
-      return null;
-    }
-
     final now = DateTime.now();
     return OutboxItem(
       id: 'outbox-${now.microsecondsSinceEpoch}-$recordId',
@@ -182,6 +209,7 @@ class RecordMutationService {
       isMigration:
           _authSession.isPlanMigrationPending &&
           operationType == OutboxOperationType.create,
+      baseVersionNo: baseVersionNo,
       payload: payload,
     );
   }

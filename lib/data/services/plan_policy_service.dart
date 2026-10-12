@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../local/app_database.dart';
+import '../local/local_data_store.dart';
 import '../models/outbox_item.dart';
 import '../models/user_plan.dart';
 import '../repositories/auth_session_repository.dart';
@@ -16,6 +18,7 @@ class PlanPolicyService {
   final _authSession = AuthSessionRepository.instance;
   final _recordRepository = FishingRecordRepository.instance;
   final _outboxRepository = OutboxRepository.instance;
+  final _store = LocalDataStore.instance;
 
   Future<PlanChangeResult> changePlan(UserPlan nextPlan) async {
     if (!_authSession.isMember) {
@@ -85,7 +88,6 @@ class PlanPolicyService {
         (item) =>
             item.isMigration &&
             item.recordId == record.id &&
-            item.operationType == OutboxOperationType.create &&
             item.status == OutboxStatus.succeeded,
       ),
     );
@@ -108,38 +110,70 @@ class PlanPolicyService {
   Future<void> _queueMissingMigrationItems() async {
     for (final record in _recordRepository.getAllRecords()) {
       final payload = record.toJson();
-      final existingItems = _outboxRepository.getAllItems().where(
-        (item) =>
-            item.recordId == record.id &&
-            item.operationType == OutboxOperationType.create &&
-            item.isMigration,
-      );
-      final existingItem = existingItems.firstOrNull;
+      final existingItems = _outboxRepository
+          .getAllItems()
+          .where((item) => item.recordId == record.id && item.isMigration)
+          .toList(growable: false);
+      final existingItem = existingItems.isEmpty ? null : existingItems.last;
 
+      if (existingItem?.status == OutboxStatus.conflicted) {
+        continue;
+      }
       if (existingItem != null &&
           jsonEncode(existingItem.payload) == jsonEncode(payload)) {
         continue;
       }
 
       final now = DateTime.now();
-      final migrationItem = OutboxItem(
-        id:
-            existingItem?.id ??
-            'migration-${now.microsecondsSinceEpoch}-${record.id}',
-        userId: _authSession.memberId,
-        recordId: record.id,
-        operationType: OutboxOperationType.create,
-        status: OutboxStatus.pending,
-        createdAt: existingItem?.createdAt ?? now,
-        retryCount: existingItem?.retryCount ?? 0,
-        isMigration: true,
-        payload: payload,
-      );
-
-      if (existingItem == null) {
-        await _outboxRepository.addItem(migrationItem);
+      if (existingItem == null ||
+          existingItem.status == OutboxStatus.succeeded) {
+        final ownerKey = _authSession.dataOwnerKey;
+        final syncMetadata = await _store.readRecordSyncMetadata(
+          ownerKey,
+          record.id,
+        );
+        final operationType =
+            existingItem != null || (syncMetadata?.serverVersionNo ?? 0) > 0
+            ? OutboxOperationType.update
+            : OutboxOperationType.create;
+        await AppDatabase.instance.transaction((transaction) async {
+          final baseVersionNo = await _store.reserveNextRecordVersion(
+            transaction,
+            ownerKey: ownerKey,
+            recordId: record.id,
+          );
+          await _store.insertOutboxItem(
+            transaction,
+            ownerKey: ownerKey,
+            item: OutboxItem(
+              id: 'migration-${now.microsecondsSinceEpoch}-${record.id}',
+              userId: _authSession.memberId,
+              recordId: record.id,
+              operationType: operationType,
+              status: OutboxStatus.pending,
+              createdAt: now,
+              isMigration: true,
+              baseVersionNo: baseVersionNo,
+              payload: payload,
+            ),
+          );
+        });
+        await _outboxRepository.reloadOwner(ownerKey);
       } else {
-        await _outboxRepository.replaceItem(migrationItem);
+        await _outboxRepository.replaceItem(
+          OutboxItem(
+            id: existingItem.id,
+            userId: _authSession.memberId,
+            recordId: record.id,
+            operationType: existingItem.operationType,
+            status: OutboxStatus.pending,
+            createdAt: existingItem.createdAt,
+            retryCount: existingItem.retryCount,
+            isMigration: true,
+            baseVersionNo: existingItem.baseVersionNo,
+            payload: payload,
+          ),
+        );
       }
     }
   }
