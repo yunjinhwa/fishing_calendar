@@ -2,11 +2,14 @@ import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
 import 'package:firebase_auth/firebase_auth.dart' as firebase;
 import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 
+import '../models/plan_entitlement.dart';
+import '../models/user_plan.dart';
 import 'auth_gateway.dart';
 import 'nickname_policy.dart';
 
 class FirebaseAuthGateway implements AuthGateway {
   static const String _nicknameClaimsCollection = 'nickname_claims';
+  static const String _planEntitlementsCollection = 'plan_entitlements';
   static const String _userProfilesCollection = 'user_profiles';
 
   final firebase.FirebaseAuth _auth;
@@ -146,6 +149,76 @@ class FirebaseAuthGateway implements AuthGateway {
         );
       }
       return NicknamePolicy.displayValue(nickname);
+    } on AuthFailure {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirestoreError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  @override
+  Future<PlanEntitlementSnapshot> getPlanEntitlement(String uid) async {
+    if (uid.trim().isEmpty) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidProfile,
+        message: '플랜 정보를 조회할 계정을 확인할 수 없습니다.',
+      );
+    }
+
+    try {
+      final snapshot = await _firestore
+          .collection(_planEntitlementsCollection)
+          .doc(uid)
+          .get(
+            const firestore.GetOptions(source: firestore.Source.serverAndCache),
+          );
+      if (!snapshot.exists) {
+        return PlanEntitlementSnapshot(
+          entitlement: null,
+          isFromCache: snapshot.metadata.isFromCache,
+        );
+      }
+
+      final data = snapshot.data();
+      final plan = switch (data?['planType']) {
+        'FREE' => UserPlan.free,
+        'PAID' => UserPlan.paid,
+        _ => null,
+      };
+      final rawStatus = data?['status'];
+      final status = PlanEntitlementStatus.fromWireValue(
+        rawStatus is String ? rawStatus : null,
+      );
+      final rawExpiresAt = data?['expiresAt'];
+      if (plan == null ||
+          status == null ||
+          (rawExpiresAt != null && rawExpiresAt is! firestore.Timestamp)) {
+        throw const AuthFailure(
+          code: AuthFailureCode.invalidProfile,
+          message: '저장된 플랜 정보를 확인할 수 없습니다.',
+        );
+      }
+
+      final rawUpdatedAt = data?['updatedAt'];
+      final source = data?['source'];
+      return PlanEntitlementSnapshot(
+        entitlement: PlanEntitlement(
+          plan: plan,
+          status: status,
+          expiresAt: rawExpiresAt is firestore.Timestamp
+              ? rawExpiresAt.toDate()
+              : null,
+          updatedAt: rawUpdatedAt is firestore.Timestamp
+              ? rawUpdatedAt.toDate()
+              : null,
+          source: source is String && source.trim().isNotEmpty
+              ? source.trim()
+              : null,
+        ),
+        isFromCache: snapshot.metadata.isFromCache,
+      );
     } on AuthFailure {
       rethrow;
     } on FirebaseException catch (error, stackTrace) {
@@ -427,7 +500,7 @@ class FirebaseAuthGateway implements AuthGateway {
     };
     return AuthFailure(
       code: code,
-      message: error.message ?? '닉네임 저장소 요청에 실패했습니다.',
+      message: error.message ?? 'Firestore 요청에 실패했습니다.',
       providerCode: 'firestore/${error.code}',
       cause: error,
       causeStackTrace: stackTrace,

@@ -150,8 +150,15 @@ class RecordSyncService extends ChangeNotifier {
     final restored = connected && !_wasConnected;
     _wasConnected = connected;
     if (restored) {
-      unawaited(syncNow(scheduleFollowUpIfBusy: true));
+      unawaited(_refreshPlanThenSync());
     }
+  }
+
+  Future<void> _refreshPlanThenSync() async {
+    if (_authSession.isMember && _authSession.canRefreshServerPlan) {
+      await PlanPolicyService.instance.refreshServerPlan();
+    }
+    await syncNow(scheduleFollowUpIfBusy: true);
   }
 
   Future<RecordSyncResult> syncNow({bool scheduleFollowUpIfBusy = false}) {

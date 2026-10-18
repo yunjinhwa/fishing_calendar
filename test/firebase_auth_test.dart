@@ -9,11 +9,13 @@ import 'package:fishing_build/data/local/local_data_store.dart';
 import 'package:fishing_build/data/models/conflict_item.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/outbox_item.dart';
+import 'package:fishing_build/data/models/plan_entitlement.dart';
 import 'package:fishing_build/data/models/record_sync_metadata.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
+import 'package:fishing_build/data/services/plan_policy_service.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:fishing_build/presentation/auth/login_page.dart';
 import 'package:flutter/material.dart';
@@ -439,7 +441,8 @@ void main() {
       await RecordMutationService.instance.addRecord(_record('legacy-record'));
       await authSession.logout();
 
-      final gateway = FakeAuthGateway();
+      final gateway = FakeAuthGateway()
+        ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
       authSession.configureAuthGateway(gateway);
       final result = await authSession.signIn(
         email: 'LEGACY@example.com',
@@ -815,6 +818,274 @@ void main() {
       expect(authSession.hasActiveSession, isFalse);
     },
   );
+
+  test('Firebase sessions use the active server entitlement', () async {
+    final gateway = FakeAuthGateway()
+      ..seedAccount(
+        uid: 'paid-uid',
+        email: 'paid-server@example.com',
+        password: 'Password1',
+        displayName: '서버유료회원',
+      )
+      ..seedEntitlement(uid: 'paid-uid', plan: UserPlan.paid);
+    authSession.configureAuthGateway(gateway);
+
+    expect(
+      await authSession.signIn(
+        email: 'paid-server@example.com',
+        password: 'Password1',
+      ),
+      AuthSignInResult.success,
+    );
+
+    expect(authSession.isPaid, isTrue);
+    expect(authSession.planEntitlementSource, PlanEntitlementSource.server);
+    expect(authSession.isPlanMigrationPending, isTrue);
+  });
+
+  test('missing, expired, and suspended entitlements are free', () async {
+    final cases = <(String, PlanEntitlement?)>[
+      ('missing', null),
+      (
+        'expired',
+        PlanEntitlement(
+          plan: UserPlan.paid,
+          status: PlanEntitlementStatus.active,
+          expiresAt: DateTime.utc(2020),
+        ),
+      ),
+      (
+        'suspended',
+        const PlanEntitlement(
+          plan: UserPlan.paid,
+          status: PlanEntitlementStatus.suspended,
+        ),
+      ),
+    ];
+
+    for (final entry in cases) {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      authSession.resetAuthGatewayForTesting();
+      final uid = '${entry.$1}-uid';
+      final gateway = FakeAuthGateway()
+        ..seedAccount(
+          uid: uid,
+          email: '${entry.$1}@example.com',
+          password: 'Password1',
+          displayName: '${entry.$1}회원',
+        );
+      final entitlement = entry.$2;
+      if (entitlement != null) {
+        gateway.seedEntitlement(
+          uid: uid,
+          plan: entitlement.plan,
+          status: entitlement.status,
+          expiresAt: entitlement.expiresAt,
+          source: entitlement.source,
+        );
+      }
+      authSession.configureAuthGateway(gateway);
+
+      expect(
+        await authSession.signIn(
+          email: '${entry.$1}@example.com',
+          password: 'Password1',
+        ),
+        AuthSignInResult.success,
+      );
+      expect(authSession.isFree, isTrue, reason: entry.$1);
+      await authSession.logout();
+    }
+  });
+
+  test('offline restore uses only a previously verified entitlement', () async {
+    final gateway = FakeAuthGateway()
+      ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
+    authSession.configureAuthGateway(gateway);
+    await authSession.registerAsFree(
+      email: 'cached-plan@example.com',
+      password: 'Password1',
+      nickname: '캐시회원',
+    );
+    expect(authSession.isPaid, isTrue);
+
+    gateway.entitlementLookupFailure = const AuthFailure(
+      code: AuthFailureCode.networkUnavailable,
+      message: 'offline',
+    );
+    authSession.clearMemoryOnlyForTesting();
+    await authSession.loadSession();
+
+    expect(authSession.isPaid, isTrue);
+    expect(
+      authSession.planEntitlementSource,
+      PlanEntitlementSource.deviceCache,
+    );
+  });
+
+  test('offline first lookup falls back to free', () async {
+    final gateway = FakeAuthGateway()
+      ..seedAccount(
+        uid: 'offline-new-uid',
+        email: 'offline-new@example.com',
+        password: 'Password1',
+        displayName: '오프라인신규',
+      )
+      ..entitlementLookupFailure = const AuthFailure(
+        code: AuthFailureCode.networkUnavailable,
+        message: 'offline',
+      );
+    authSession.configureAuthGateway(gateway);
+
+    expect(
+      await authSession.signIn(
+        email: 'offline-new@example.com',
+        password: 'Password1',
+      ),
+      AuthSignInResult.success,
+    );
+
+    expect(authSession.isFree, isTrue);
+    expect(
+      authSession.planEntitlementSource,
+      PlanEntitlementSource.defaultFree,
+    );
+  });
+
+  test('server downgrade preserves unfinished outbox items', () async {
+    final gateway = FakeAuthGateway()
+      ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
+    authSession.configureAuthGateway(gateway);
+    await authSession.registerAsFree(
+      email: 'downgrade-server@example.com',
+      password: 'Password1',
+      nickname: '강등회원',
+    );
+    await recordRepository.loadRecords();
+    await outboxRepository.loadItems();
+    await PlanPolicyService.instance.resumePendingMigration();
+    expect(authSession.isPlanMigrationPending, isFalse);
+    await RecordMutationService.instance.addRecord(
+      _record('server-downgrade-record'),
+    );
+    expect(outboxRepository.hasUnfinishedItems, isTrue);
+
+    gateway.seedEntitlement(uid: 'uid-1', plan: UserPlan.free);
+    await PlanPolicyService.instance.refreshServerPlan();
+
+    expect(authSession.isFree, isTrue);
+    expect(outboxRepository.hasUnfinishedItems, isTrue);
+    expect(
+      outboxRepository.getAllItems().single.recordId,
+      'server-downgrade-record',
+    );
+  });
+
+  test(
+    'concurrent server plan refreshes share one entitlement lookup',
+    () async {
+      final gateway = FakeAuthGateway()
+        ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
+      authSession.configureAuthGateway(gateway);
+      await authSession.registerAsFree(
+        email: 'single-flight-plan@example.com',
+        password: 'Password1',
+        nickname: 'Single Flight',
+      );
+      expect(gateway.entitlementLookupCount, 1);
+
+      gateway.entitlementLookupStarted = Completer<void>();
+      gateway.entitlementLookupGate = Completer<void>();
+      final first = PlanPolicyService.instance.refreshServerPlan();
+      final second = PlanPolicyService.instance.refreshServerPlan();
+      await gateway.entitlementLookupStarted!.future;
+
+      expect(identical(first, second), isTrue);
+      expect(gateway.entitlementLookupCount, 2);
+
+      gateway.entitlementLookupGate!.complete();
+      await Future.wait(<Future<PlanEntitlementRefreshResult>>[first, second]);
+      expect(gateway.entitlementLookupCount, 2);
+    },
+  );
+
+  test(
+    'a late entitlement response cannot restore a signed-out session',
+    () async {
+      final gateway = FakeAuthGateway()
+        ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
+      authSession.configureAuthGateway(gateway);
+      await authSession.registerAsFree(
+        email: 'late-plan@example.com',
+        password: 'Password1',
+        nickname: 'Late Plan',
+      );
+
+      gateway.entitlementLookupStarted = Completer<void>();
+      gateway.entitlementLookupGate = Completer<void>();
+      final refresh = authSession.refreshServerPlan();
+      await gateway.entitlementLookupStarted!.future;
+      await authSession.logout();
+      gateway.entitlementLookupGate!.complete();
+      await refresh;
+
+      expect(authSession.hasActiveSession, isFalse);
+      expect(authSession.plan, UserPlan.guest);
+      expect(
+        authSession.planEntitlementSource,
+        PlanEntitlementSource.localDevelopment,
+      );
+    },
+  );
+
+  test(
+    're-upgrade reuses a pending mutation with the latest free-plan edit',
+    () async {
+      final gateway = FakeAuthGateway()
+        ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
+      authSession.configureAuthGateway(gateway);
+      await authSession.registerAsFree(
+        email: 're-upgrade@example.com',
+        password: 'Password1',
+        nickname: 'Re Upgrade',
+      );
+      await recordRepository.loadRecords();
+      await outboxRepository.loadItems();
+      await PlanPolicyService.instance.resumePendingMigration();
+
+      const recordId = 're-upgrade-record';
+      await RecordMutationService.instance.addRecord(
+        _record(recordId, location: 'paid edit'),
+      );
+      expect(outboxRepository.getAllItems(), hasLength(1));
+
+      gateway.seedEntitlement(uid: 'uid-1', plan: UserPlan.free);
+      await PlanPolicyService.instance.refreshServerPlan();
+      await RecordMutationService.instance.updateRecord(
+        _record(recordId, location: 'latest free edit'),
+      );
+
+      recordRepository.clearCacheOnlyForTesting();
+      outboxRepository.clearCacheOnlyForTesting();
+      await recordRepository.loadRecords();
+      await outboxRepository.loadItems();
+      await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
+      expect(
+        recordRepository.getRecordById(recordId)?.location,
+        'latest free edit',
+      );
+
+      gateway.seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
+      await PlanPolicyService.instance.refreshServerPlan();
+
+      final items = outboxRepository.getAllItems();
+      expect(items, hasLength(1));
+      expect(items.single.isMigration, isTrue);
+      expect(items.single.status, OutboxStatus.pending);
+      expect(items.single.payload?['location'], 'latest free edit');
+      expect(authSession.isPlanMigrationPending, isTrue);
+    },
+  );
 }
 
 FishingRecord _record(String id, {String location = '부산'}) {
@@ -835,6 +1106,8 @@ class FakeAuthGateway implements AuthGateway {
   final Map<String, _FakeAccount> _accounts = <String, _FakeAccount>{};
   final Map<String, String> _nicknameByUid = <String, String>{};
   final Map<String, String> _uidByNicknameKey = <String, String>{};
+  final Map<String, PlanEntitlement> _entitlementByUid =
+      <String, PlanEntitlement>{};
   final StreamController<AuthUser?> _changes =
       StreamController<AuthUser?>.broadcast(sync: true);
 
@@ -847,6 +1120,11 @@ class FakeAuthGateway implements AuthGateway {
   Completer<void>? registrationGate;
   Completer<void>? registrationStarted;
   AuthFailure? nicknameLookupFailure;
+  AuthFailure? entitlementLookupFailure;
+  bool entitlementFromCache = false;
+  int entitlementLookupCount = 0;
+  Completer<void>? entitlementLookupStarted;
+  Completer<void>? entitlementLookupGate;
 
   @override
   AuthGatewayAvailability get availability => AuthGatewayAvailability.available;
@@ -886,6 +1164,22 @@ class FakeAuthGateway implements AuthGateway {
 
   bool hasAccount(String email) =>
       _accounts.containsKey(email.trim().toLowerCase());
+
+  void seedEntitlement({
+    required String uid,
+    required UserPlan plan,
+    PlanEntitlementStatus status = PlanEntitlementStatus.active,
+    DateTime? expiresAt,
+    String? source = 'TEST',
+  }) {
+    _entitlementByUid[uid] = PlanEntitlement(
+      plan: plan,
+      status: status,
+      expiresAt: expiresAt,
+      updatedAt: DateTime(2026, 10, 12),
+      source: source,
+    );
+  }
 
   @override
   Future<AuthUser?> restoreUser() async {
@@ -974,6 +1268,24 @@ class FakeAuthGateway implements AuthGateway {
       throw failure;
     }
     return _nicknameByUid[uid];
+  }
+
+  @override
+  Future<PlanEntitlementSnapshot> getPlanEntitlement(String uid) async {
+    entitlementLookupCount += 1;
+    final started = entitlementLookupStarted;
+    if (started != null && !started.isCompleted) {
+      started.complete();
+    }
+    await entitlementLookupGate?.future;
+    final failure = entitlementLookupFailure;
+    if (failure != null) {
+      throw failure;
+    }
+    return PlanEntitlementSnapshot(
+      entitlement: _entitlementByUid[uid],
+      isFromCache: entitlementFromCache,
+    );
   }
 
   @override

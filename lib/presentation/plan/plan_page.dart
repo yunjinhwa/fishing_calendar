@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/models/plan_entitlement.dart';
 import '../../data/models/user_plan.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/plan_policy_service.dart';
@@ -16,6 +17,47 @@ class PlanPage extends StatefulWidget {
 
 class _PlanPageState extends State<PlanPage> {
   bool isChanging = false;
+
+  Future<void> refreshServerPlan() async {
+    setState(() {
+      isChanging = true;
+    });
+
+    try {
+      final result = await PlanPolicyService.instance.refreshServerPlan();
+      if (result.currentPlan == UserPlan.paid) {
+        unawaited(
+          RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        isChanging = false;
+      });
+      final message = switch (result.source) {
+        PlanEntitlementSource.server => '서버에서 계정 플랜을 확인했습니다.',
+        PlanEntitlementSource.firestoreCache ||
+        PlanEntitlementSource.deviceCache => '오프라인 캐시의 플랜 정보를 적용했습니다.',
+        PlanEntitlementSource.defaultFree => '서버 플랜을 확인하지 못해 무료 회원 권한을 적용했습니다.',
+        PlanEntitlementSource.localDevelopment => '현재 기기의 개발용 플랜을 확인했습니다.',
+      };
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        isChanging = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('계정 플랜을 확인하지 못했습니다. 다시 시도하세요.')),
+      );
+    }
+  }
 
   Future<void> changePlan(UserPlan nextPlan) async {
     final authSession = AuthSessionRepository.instance;
@@ -162,6 +204,25 @@ class _PlanPageState extends State<PlanPage> {
                     ),
                   ),
                 ),
+                if (authSession.usesServerPlan) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    child: ListTile(
+                      leading: Icon(
+                        authSession.planEntitlementSource ==
+                                PlanEntitlementSource.server
+                            ? Icons.verified_user_outlined
+                            : Icons.cloud_off_outlined,
+                      ),
+                      title: const Text('계정 단위 플랜'),
+                      subtitle: Text(
+                        _serverPlanStatusText(
+                          authSession.planEntitlementSource,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 Text(
                   '현재 이용 범위',
@@ -217,7 +278,16 @@ class _PlanPageState extends State<PlanPage> {
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
-                  child: isPaid
+                  child: authSession.usesServerPlan
+                      ? FilledButton.icon(
+                          onPressed:
+                              isChanging || !authSession.canRefreshServerPlan
+                              ? null
+                              : refreshServerPlan,
+                          icon: const Icon(Icons.refresh),
+                          label: Text(isChanging ? '확인 중...' : '서버 플랜 새로고침'),
+                        )
+                      : isPaid
                       ? OutlinedButton(
                           onPressed: isChanging
                               ? null
@@ -237,6 +307,16 @@ class _PlanPageState extends State<PlanPage> {
         );
       },
     );
+  }
+
+  String _serverPlanStatusText(PlanEntitlementSource source) {
+    return switch (source) {
+      PlanEntitlementSource.server => '서버에서 확인한 플랜을 모든 기기에 적용합니다.',
+      PlanEntitlementSource.firestoreCache ||
+      PlanEntitlementSource.deviceCache => '현재 오프라인 캐시를 사용 중이며 연결되면 다시 확인합니다.',
+      PlanEntitlementSource.defaultFree => '서버 상태를 확인하지 못해 무료 회원 권한으로 제한했습니다.',
+      PlanEntitlementSource.localDevelopment => '서버 플랜 확인을 준비 중입니다.',
+    };
   }
 }
 

@@ -141,7 +141,12 @@ class RecordMutationService {
   }
 
   Future<void> reconcileOutboxWithLocalRecords() async {
-    if (!_authSession.isMember) {
+    // A server downgrade can leave cloud mutations queued while the account
+    // continues editing its local-only copy. During that free-plan period the
+    // local database is authoritative; replaying an older outbox payload would
+    // overwrite those newer edits. Reconciliation resumes after the server
+    // grants paid sync access again.
+    if (!_authSession.isPaid) {
       return;
     }
 

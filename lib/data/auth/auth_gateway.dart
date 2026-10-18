@@ -1,3 +1,5 @@
+import '../models/plan_entitlement.dart';
+
 enum AuthGatewayAvailability { available, unavailable }
 
 enum AuthFailureCode {
@@ -109,6 +111,8 @@ abstract interface class AuthGateway {
 
   Future<String?> getRegisteredNickname(String uid);
 
+  Future<PlanEntitlementSnapshot> getPlanEntitlement(String uid);
+
   Future<String> claimNickname({required String uid, required String nickname});
 
   Future<void> releaseNickname({required String uid, required String nickname});
@@ -173,6 +177,10 @@ class UnavailableAuthGateway implements AuthGateway {
   @override
   Future<String?> getRegisteredNickname(String uid) =>
       Future<String?>.error(failure);
+
+  @override
+  Future<PlanEntitlementSnapshot> getPlanEntitlement(String uid) =>
+      Future<PlanEntitlementSnapshot>.error(failure);
 
   @override
   Future<String> claimNickname({
