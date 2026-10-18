@@ -48,6 +48,17 @@ async function request(path, {token, method = 'GET', body} = {}) {
   });
 }
 
+async function adminRequest(path, {method = 'GET', body} = {}) {
+  return fetch(`${firestoreBase}${path}`, {
+    method,
+    headers: {
+      authorization: 'Bearer owner',
+      'content-type': 'application/json',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 function stringValue(value) {
   return {stringValue: value};
 }
@@ -58,6 +69,34 @@ function integerValue(value) {
 
 function timestampValue(value) {
   return {timestampValue: value};
+}
+
+function nullValue() {
+  return {nullValue: null};
+}
+
+function entitlementFields({planType, status, expiresAt}) {
+  return {
+    planType: stringValue(planType),
+    status: stringValue(status),
+    ...(expiresAt === undefined
+      ? {}
+      : {expiresAt: expiresAt === null ? nullValue() : timestampValue(expiresAt)}),
+  };
+}
+
+async function seedEntitlement(
+  uid,
+  {planType = 'PAID', status = 'ACTIVE', expiresAt} = {},
+) {
+  await expectStatus(
+    `seed entitlement for ${uid}`,
+    await adminRequest(`/plan_entitlements/${uid}`, {
+      method: 'PATCH',
+      body: {fields: entitlementFields({planType, status, expiresAt})},
+    }),
+    200,
+  );
 }
 
 function activeRecordFields({
@@ -244,7 +283,130 @@ async function commit(label, token, body, expectedStatus) {
 
 const owner = await createUser('owner');
 const intruder = await createUser('intruder');
+const freeMember = await createUser('free-member');
+const expiredMember = await createUser('expired-member');
+const inactiveMember = await createUser('inactive-member');
+const nullExpiryMember = await createUser('null-expiry-member');
+const futureExpiryMember = await createUser('future-expiry-member');
 const recordId = 'rules-record';
+
+await seedEntitlement(owner.uid);
+await seedEntitlement(freeMember.uid, {planType: 'FREE'});
+await seedEntitlement(expiredMember.uid, {
+  expiresAt: '2000-01-01T00:00:00Z',
+});
+await seedEntitlement(inactiveMember.uid, {status: 'EXPIRED'});
+await seedEntitlement(nullExpiryMember.uid, {expiresAt: null});
+await seedEntitlement(futureExpiryMember.uid, {
+  expiresAt: '2099-01-01T00:00:00Z',
+});
+
+await expectStatus(
+  'owner can read own entitlement',
+  await request(`/plan_entitlements/${owner.uid}`, {token: owner.token}),
+  200,
+);
+await expectStatus(
+  'another member cannot read owner entitlement',
+  await request(`/plan_entitlements/${owner.uid}`, {token: intruder.token}),
+  403,
+);
+await expectStatus(
+  'entitlement list is denied',
+  await request('/plan_entitlements', {token: owner.token}),
+  403,
+);
+await expectStatus(
+  'member cannot create own entitlement',
+  await request(`/plan_entitlements/${intruder.uid}`, {
+    token: intruder.token,
+    method: 'PATCH',
+    body: {
+      fields: entitlementFields({planType: 'PAID', status: 'ACTIVE'}),
+    },
+  }),
+  403,
+);
+await expectStatus(
+  'member cannot update own entitlement',
+  await request(`/plan_entitlements/${owner.uid}`, {
+    token: owner.token,
+    method: 'PATCH',
+    body: {
+      fields: entitlementFields({planType: 'FREE', status: 'ACTIVE'}),
+    },
+  }),
+  403,
+);
+await expectStatus(
+  'member cannot delete own entitlement',
+  await request(`/plan_entitlements/${owner.uid}`, {
+    token: owner.token,
+    method: 'DELETE',
+  }),
+  403,
+);
+
+for (const [label, member] of [
+  ['missing entitlement', intruder],
+  ['free entitlement', freeMember],
+  ['expired entitlement', expiredMember],
+  ['inactive entitlement', inactiveMember],
+]) {
+  await expectStatus(
+    `${label} record read denied`,
+    await request(`/users/${member.uid}/records/blocked-record`, {
+      token: member.token,
+    }),
+    403,
+  );
+  await expectStatus(
+    `${label} receipt read denied`,
+    await request(`/users/${member.uid}/sync_receipts/blocked-record`, {
+      token: member.token,
+    }),
+    403,
+  );
+  await commit(
+    `${label} record write denied`,
+    member.token,
+    mutationCommit({
+      uid: member.uid,
+      recordId: 'blocked-record',
+      outboxId: 'blocked-record',
+      operationType: 'create',
+      baseVersionNo: 0,
+      resultingVersionNo: 1,
+    }),
+    403,
+  );
+}
+
+for (const [label, member] of [
+  ['null expiry entitlement', nullExpiryMember],
+  ['future expiry entitlement', futureExpiryMember],
+]) {
+  await commit(
+    `${label} record write allowed`,
+    member.token,
+    mutationCommit({
+      uid: member.uid,
+      recordId: 'allowed-record',
+      outboxId: 'allowed-record',
+      operationType: 'create',
+      baseVersionNo: 0,
+      resultingVersionNo: 1,
+    }),
+    200,
+  );
+  await expectStatus(
+    `${label} record read allowed`,
+    await request(`/users/${member.uid}/records/allowed-record`, {
+      token: member.token,
+    }),
+    200,
+  );
+}
 
 await commit(
   'record without matching receipt denied',
@@ -384,6 +546,14 @@ let ownerRead = await request(`/users/${owner.uid}/records/${recordId}`, {
 await expectStatus('owner get', ownerRead, 200);
 let ownerDocument = await ownerRead.json();
 const createdAt = ownerDocument.fields.createdAt;
+
+await expectStatus(
+  'owner receipt get',
+  await request(`/users/${owner.uid}/sync_receipts/rules-create`, {
+    token: owner.token,
+  }),
+  200,
+);
 
 await expectStatus(
   'intruder get denied',

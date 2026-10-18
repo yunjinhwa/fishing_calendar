@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../local/app_database.dart';
 import '../local/local_data_store.dart';
 import '../models/outbox_item.dart';
+import '../models/plan_entitlement.dart';
 import '../models/user_plan.dart';
 import '../repositories/auth_session_repository.dart';
 import '../repositories/fishing_record_repository.dart';
@@ -19,6 +20,31 @@ class PlanPolicyService {
   final _recordRepository = FishingRecordRepository.instance;
   final _outboxRepository = OutboxRepository.instance;
   final _store = LocalDataStore.instance;
+  Future<PlanEntitlementRefreshResult>? _refreshFuture;
+
+  Future<PlanEntitlementRefreshResult> refreshServerPlan() {
+    final inProgress = _refreshFuture;
+    if (inProgress != null) {
+      return inProgress;
+    }
+
+    late final Future<PlanEntitlementRefreshResult> future;
+    future = _performServerPlanRefresh().whenComplete(() {
+      if (identical(_refreshFuture, future)) {
+        _refreshFuture = null;
+      }
+    });
+    _refreshFuture = future;
+    return future;
+  }
+
+  Future<PlanEntitlementRefreshResult> _performServerPlanRefresh() async {
+    final result = await _authSession.refreshServerPlan();
+    if (_authSession.isPaid) {
+      await resumePendingMigration();
+    }
+    return result;
+  }
 
   Future<PlanChangeResult> changePlan(UserPlan nextPlan) async {
     if (!_authSession.isMember) {
@@ -110,16 +136,30 @@ class PlanPolicyService {
   Future<void> _queueMissingMigrationItems() async {
     for (final record in _recordRepository.getAllRecords()) {
       final payload = record.toJson();
-      final existingItems = _outboxRepository
+      final recordItems = _outboxRepository
           .getAllItems()
-          .where((item) => item.recordId == record.id && item.isMigration)
+          .where((item) => item.recordId == record.id)
           .toList(growable: false);
-      final existingItem = existingItems.isEmpty ? null : existingItems.last;
+      final migrationItems = recordItems
+          .where((item) => item.isMigration)
+          .toList(growable: false);
+      final unfinishedRegularItems = recordItems
+          .where(
+            (item) =>
+                !item.isMigration && item.status != OutboxStatus.succeeded,
+          )
+          .toList(growable: false);
+      final existingItem = migrationItems.isNotEmpty
+          ? migrationItems.last
+          : unfinishedRegularItems.isNotEmpty
+          ? unfinishedRegularItems.last
+          : null;
 
       if (existingItem?.status == OutboxStatus.conflicted) {
         continue;
       }
       if (existingItem != null &&
+          existingItem.isMigration &&
           jsonEncode(existingItem.payload) == jsonEncode(payload)) {
         continue;
       }

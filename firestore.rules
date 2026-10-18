@@ -47,6 +47,24 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function hasActivePaidEntitlement(uid) {
+      let entitlementPath =
+        /databases/$(database)/documents/plan_entitlements/$(uid);
+      let entitlement = get(entitlementPath).data;
+      return ownsUserData(uid)
+        && exists(entitlementPath)
+        && entitlement.planType == 'PAID'
+        && entitlement.status == 'ACTIVE'
+        && (
+          !entitlement.keys().hasAny(['expiresAt'])
+          || entitlement.expiresAt == null
+          || (
+            entitlement.expiresAt is timestamp
+            && entitlement.expiresAt > request.time
+          )
+        );
+    }
+
     function validSyncReceiptV1Shape(data, uid, outboxId) {
       return data.keys().hasOnly([
           'ownerUid', 'outboxId', 'recordId', 'operationType',
@@ -288,13 +306,17 @@ service cloud.firestore {
         );
     }
 
-    // The app currently enforces paid-plan access locally. These rules enforce
-    // account ownership; server-owned entitlement claims are added with the
-    // billing backend before production billing is enabled.
-    match /users/{uid}/records/{recordId} {
-      allow get, list: if ownsUserData(uid);
+    // Plan entitlements are written only by a trusted administrator or billing
+    // backend. The signed-in member can read only their own current policy.
+    match /plan_entitlements/{uid} {
+      allow get: if ownsUserData(uid);
+      allow list, create, update, delete: if false;
+    }
 
-      allow create: if ownsUserData(uid)
+    match /users/{uid}/records/{recordId} {
+      allow get, list: if hasActivePaidEntitlement(uid);
+
+      allow create: if hasActivePaidEntitlement(uid)
         && validActiveRecord(request.resource.data, uid, recordId)
         && request.resource.data.versionNo == 1
         && request.resource.data.createdAt == request.time
@@ -306,7 +328,7 @@ service cloud.firestore {
           0
         );
 
-      allow update: if ownsUserData(uid)
+      allow update: if hasActivePaidEntitlement(uid)
         && resource.data.ownerUid == uid
         && resource.data.recordId == recordId
         && validRecord(request.resource.data, uid, recordId)
@@ -337,9 +359,9 @@ service cloud.firestore {
     }
 
     match /users/{uid}/sync_receipts/{outboxId} {
-      allow get: if ownsUserData(uid);
+      allow get: if hasActivePaidEntitlement(uid);
       allow list: if false;
-      allow create: if ownsUserData(uid)
+      allow create: if hasActivePaidEntitlement(uid)
         && validSyncReceipt(request.resource.data, uid, outboxId);
       allow update, delete: if false;
     }

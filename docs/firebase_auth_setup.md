@@ -1,6 +1,6 @@
 # Firebase Authentication / Firestore 설정
 
-이 브랜치는 이메일/비밀번호 Firebase Authentication, Firestore 기반 고유 닉네임 예약, Firebase UID 기반 로컬 데이터 소유권, 기존 이메일 기반 로컬 데이터 이전까지 구현한다. Firebase 프로젝트 값이 없는 디버그 환경에서는 `FIREBASE_AUTH_ENABLED`의 기본값이 `false`이므로 기존 로컬 인증 방식으로 실행된다. 릴리스 빌드는 Firebase 인증이 기본 활성화되어 설정 누락 시 로컬 비밀번호 방식으로 실행되지 않는다.
+이 브랜치는 이메일/비밀번호 Firebase Authentication, Firestore 기반 고유 닉네임 예약과 서버 플랜 판정, Firebase UID 기반 로컬 데이터 소유권, 기존 이메일 기반 로컬 데이터 이전까지 구현한다. Firebase 프로젝트 값이 없는 디버그 환경에서는 `FIREBASE_AUTH_ENABLED`의 기본값이 `false`이므로 기존 로컬 인증 방식으로 실행된다. 릴리스 빌드는 Firebase 인증이 기본 활성화되어 설정 누락 시 로컬 비밀번호 방식으로 실행되지 않는다.
 
 Firebase Authentication 플러그인 구현이 없는 Linux 데스크톱은 이 연동의 지원 대상이 아니다. Android, iOS, macOS, Windows, Web을 대상으로 설정한다.
 
@@ -120,3 +120,5 @@ flutter build apk --debug --dart-define=FIREBASE_AUTH_ENABLED=true
 ```
 
 실제 Firebase 프로젝트를 연결한 뒤에는 신규 가입, 앱 재실행 후 세션 복원, 로그아웃, 잘못된 비밀번호, 중복 이메일, 중복 닉네임, 네트워크 단절, 기존 로컬 계정의 최초 로그인과 기록 이전을 기기에서 확인한다. 서로 다른 두 계정에서 같은 닉네임을 거의 동시에 제출하는 경우도 확인한다.
+
+플랜 문서 형식, 테스트 계정의 유료 지정, 오프라인 캐시와 규칙 배포는 [서버 플랜 entitlement 설정](server_plan_entitlement.md)을 참고한다.

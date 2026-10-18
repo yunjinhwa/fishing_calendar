@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -9,6 +10,7 @@ import '../auth/auth_gateway.dart';
 import '../auth/nickname_policy.dart';
 import '../local/data_owner_key.dart';
 import '../local/local_identity_migration_service.dart';
+import '../models/plan_entitlement.dart';
 import '../models/user_plan.dart';
 import '../models/user_plan_policy.dart';
 
@@ -39,6 +41,8 @@ class AuthSessionRepository extends ChangeNotifier {
       'auth_account_password_hashes';
   static const String _firebasePolicyStatesKey =
       'auth_firebase_policy_states_v1';
+  static const String _serverEntitlementStatesKey =
+      'auth_server_entitlement_states_v1';
   static const String _firebaseNicknamesKey = 'auth_firebase_nicknames_v1';
 
   AuthGateway? _authGateway;
@@ -51,16 +55,31 @@ class AuthSessionRepository extends ChangeNotifier {
   String? _nickname;
   bool _requiresPasswordSetup = false;
   AuthFailure? _lastAuthFailure;
+  PlanEntitlementSource _planEntitlementSource =
+      PlanEntitlementSource.localDevelopment;
+  DateTime? _planEntitlementCheckedAt;
+  DateTime? _planEntitlementExpiresAt;
+  String? _planEntitlementProvider;
+  AuthFailure? _lastPlanEntitlementFailure;
+  Timer? _planEntitlementExpiryTimer;
 
   bool get hasActiveSession => _hasActiveSession;
   bool get persistsAcrossRestarts => _persistsAcrossRestarts;
-  UserPlan get plan => _plan;
+  UserPlan get plan => _hasExpiredServerEntitlement ? UserPlan.free : _plan;
   PlanMigrationStatus get migrationStatus => _migrationStatus;
   String? get email => _email;
   String? get nickname => _nickname;
   bool get requiresPasswordSetup => _requiresPasswordSetup;
   bool get usesFirebaseAuth => _authGateway != null;
   AuthFailure? get lastAuthFailure => _lastAuthFailure;
+  bool get usesServerPlan => _authGateway != null;
+  bool get canRefreshServerPlan =>
+      _authGateway != null && (_memberId?.trim().isNotEmpty ?? false);
+  PlanEntitlementSource get planEntitlementSource => _planEntitlementSource;
+  DateTime? get planEntitlementCheckedAt => _planEntitlementCheckedAt;
+  DateTime? get planEntitlementExpiresAt => _planEntitlementExpiresAt;
+  String? get planEntitlementProvider => _planEntitlementProvider;
+  AuthFailure? get lastPlanEntitlementFailure => _lastPlanEntitlementFailure;
 
   String get dataOwnerKey {
     if (!isMember) {
@@ -96,15 +115,23 @@ class AuthSessionRepository extends ChangeNotifier {
     return normalizedEmail.isEmpty ? null : normalizedEmail;
   }
 
-  bool get isGuest => !_hasActiveSession || _plan == UserPlan.guest;
-  bool get isMember => _hasActiveSession && _plan != UserPlan.guest;
-  bool get isFree => isMember && _plan == UserPlan.free;
-  bool get isPaid => isMember && _plan == UserPlan.paid;
+  bool get _hasExpiredServerEntitlement {
+    final expiresAt = _planEntitlementExpiresAt;
+    return _authGateway != null &&
+        _plan == UserPlan.paid &&
+        expiresAt != null &&
+        !expiresAt.isAfter(DateTime.now());
+  }
+
+  bool get isGuest => !_hasActiveSession || plan == UserPlan.guest;
+  bool get isMember => _hasActiveSession && plan != UserPlan.guest;
+  bool get isFree => isMember && plan == UserPlan.free;
+  bool get isPaid => isMember && plan == UserPlan.paid;
   bool get isPlanMigrationPending =>
-      _migrationStatus == PlanMigrationStatus.localToCloudPending;
+      isPaid && _migrationStatus == PlanMigrationStatus.localToCloudPending;
 
   UserPlanPolicy get policy =>
-      UserPlanPolicy.forPlan(isGuest ? UserPlan.guest : _plan);
+      UserPlanPolicy.forPlan(isGuest ? UserPlan.guest : plan);
 
   bool get canManageRecords => policy.canManageRecords;
   bool get canUseOfflineRecords => policy.canUseOfflineRecords;
@@ -129,14 +156,14 @@ class AuthSessionRepository extends ChangeNotifier {
     if (!_hasActiveSession) {
       return '방문 전';
     }
-    return _plan.label;
+    return plan.label;
   }
 
   String get displayName {
     if (!_hasActiveSession) {
       return '사용자';
     }
-    if (_plan == UserPlan.guest) {
+    if (plan == UserPlan.guest) {
       return '비회원';
     }
 
@@ -149,7 +176,7 @@ class AuthSessionRepository extends ChangeNotifier {
     if (savedEmail != null && savedEmail.isNotEmpty) {
       return savedEmail;
     }
-    return _plan.label;
+    return plan.label;
   }
 
   /// Passing a gateway opts this repository into Firebase-backed member auth.
@@ -157,6 +184,9 @@ class AuthSessionRepository extends ChangeNotifier {
   void configureAuthGateway(AuthGateway? gateway) {
     _authGateway = gateway;
     _lastAuthFailure = gateway?.availabilityFailure;
+    if (gateway == null) {
+      _resetPlanEntitlementState();
+    }
   }
 
   Future<void> loadSession() async {
@@ -669,25 +699,24 @@ class AuthSessionRepository extends ChangeNotifier {
       allowInitialClaim: migrateLegacyAccount,
     );
 
-    var state = await _readFirebaseAccountState(user.uid);
-    if (state == null) {
-      final legacyPlan = migrateLegacyAccount
-          ? await _readAccountPlan(normalizedEmail)
-          : null;
-      final plan = legacyPlan ?? UserPlan.free;
-      final migrationStatus = plan == UserPlan.paid
-          ? await _readAccountMigrationStatus(normalizedEmail)
-          : PlanMigrationStatus.none;
-      await _writeFirebaseAccountState(
-        user.uid,
-        plan: plan,
-        migrationStatus: migrationStatus,
-      );
-      state = _FirebaseAccountState(
-        plan: plan,
-        migrationStatus: migrationStatus,
-      );
+    var localState = await _readFirebaseAccountState(user.uid);
+    if (localState == null && migrateLegacyAccount) {
+      final legacyPlan = await _readAccountPlan(normalizedEmail);
+      if (legacyPlan != null) {
+        localState = _FirebaseAccountState(
+          plan: legacyPlan,
+          migrationStatus: legacyPlan == UserPlan.paid
+              ? await _readAccountMigrationStatus(normalizedEmail)
+              : PlanMigrationStatus.none,
+        );
+      }
     }
+    final resolution = await _resolveServerAccountState(
+      gateway: gateway,
+      uid: user.uid,
+      localState: localState,
+    );
+    final state = resolution.accountState;
 
     String? nickname;
     try {
@@ -748,8 +777,12 @@ class AuthSessionRepository extends ChangeNotifier {
       nickname: nickname,
       persistSession: rememberSession,
       requiresPasswordSetup: false,
-      notify: notify,
+      notify: false,
     );
+    _applyResolvedPlanEntitlement(resolution);
+    if (notify) {
+      notifyListeners();
+    }
 
     final prefs = await SharedPreferences.getInstance();
     if (rememberSession) {
@@ -791,6 +824,65 @@ class AuthSessionRepository extends ChangeNotifier {
     }
   }
 
+  Future<PlanEntitlementRefreshResult> refreshServerPlan() async {
+    if (!isMember) {
+      throw StateError('로그인한 회원만 플랜 정보를 새로고침할 수 있습니다.');
+    }
+
+    final gateway = _authGateway;
+    if (gateway == null) {
+      return PlanEntitlementRefreshResult(
+        previousPlan: _plan,
+        currentPlan: _plan,
+        source: PlanEntitlementSource.localDevelopment,
+      );
+    }
+    _requireAvailableGateway(gateway);
+
+    final uid = _memberId?.trim();
+    if (uid == null || uid.isEmpty) {
+      throw StateError('플랜 정보를 조회할 Firebase 계정을 확인할 수 없습니다.');
+    }
+
+    final previousPlan = plan;
+    final resolution = await _resolveServerAccountState(
+      gateway: gateway,
+      uid: uid,
+      localState: await _readFirebaseAccountState(uid),
+    );
+    if (!identical(_authGateway, gateway) ||
+        !_hasActiveSession ||
+        _memberId?.trim() != uid) {
+      return PlanEntitlementRefreshResult(
+        previousPlan: previousPlan,
+        currentPlan: plan,
+        source: _planEntitlementSource,
+      );
+    }
+
+    final state = resolution.accountState;
+    _applySession(
+      hasActiveSession: true,
+      persistsAcrossRestarts: _persistsAcrossRestarts,
+      plan: state.plan,
+      migrationStatus: state.migrationStatus,
+      memberId: uid,
+      email: _email,
+      nickname: _nickname,
+      requiresPasswordSetup: _requiresPasswordSetup,
+      notify: false,
+    );
+    _applyResolvedPlanEntitlement(resolution);
+    notifyListeners();
+
+    return PlanEntitlementRefreshResult(
+      previousPlan: previousPlan,
+      currentPlan: state.plan,
+      source: _planEntitlementSource,
+      errorMessage: _lastPlanEntitlementFailure?.message,
+    );
+  }
+
   Future<void> changeMemberPlan(
     UserPlan nextPlan, {
     PlanMigrationStatus migrationStatus = PlanMigrationStatus.none,
@@ -800,6 +892,9 @@ class AuthSessionRepository extends ChangeNotifier {
     }
     if (nextPlan == UserPlan.guest) {
       throw ArgumentError.value(nextPlan, 'nextPlan', '회원 플랜만 선택할 수 있습니다.');
+    }
+    if (_authGateway != null && nextPlan != _plan) {
+      throw StateError('Firebase 회원의 플랜은 서버에서 관리됩니다.');
     }
     if (_plan == nextPlan && _migrationStatus == migrationStatus) {
       return;
@@ -1038,6 +1133,234 @@ class AuthSessionRepository extends ChangeNotifier {
     final states = _decodeObjectMap(prefs.getString(_accountPolicyStatesKey));
     final state = states[DataOwnerKey.normalizeEmail(email)];
     return state is Map ? Map<String, dynamic>.from(state) : null;
+  }
+
+  Future<_ResolvedServerAccountState> _resolveServerAccountState({
+    required AuthGateway gateway,
+    required String uid,
+    required _FirebaseAccountState? localState,
+  }) async {
+    final now = DateTime.now().toUtc();
+    var effectiveLocalState = localState;
+    final previousEntitlement = await _readServerEntitlementState(uid);
+    if (localState?.plan == UserPlan.paid &&
+        previousEntitlement != null &&
+        (previousEntitlement.entitlement?.effectivePlanAt(now) ??
+                UserPlan.free) !=
+            UserPlan.paid) {
+      effectiveLocalState = const _FirebaseAccountState(
+        plan: UserPlan.free,
+        migrationStatus: PlanMigrationStatus.none,
+      );
+    }
+    try {
+      final snapshot = await gateway.getPlanEntitlement(uid);
+      final entitlement = snapshot.entitlement;
+      final plan = entitlement?.effectivePlanAt(now) ?? UserPlan.free;
+      final state = _FirebaseAccountState(
+        plan: plan,
+        migrationStatus: _migrationStatusForServerPlan(
+          plan,
+          effectiveLocalState,
+        ),
+      );
+      await _writeServerEntitlementState(
+        uid,
+        entitlement: entitlement,
+        checkedAt: now,
+      );
+      await _writeFirebaseAccountState(
+        uid,
+        plan: state.plan,
+        migrationStatus: state.migrationStatus,
+      );
+      return _ResolvedServerAccountState(
+        accountState: state,
+        source: snapshot.isFromCache
+            ? PlanEntitlementSource.firestoreCache
+            : PlanEntitlementSource.server,
+        checkedAt: now,
+        entitlement: entitlement,
+      );
+    } on AuthFailure catch (failure) {
+      final canUseVerifiedCache =
+          failure.code == AuthFailureCode.networkUnavailable ||
+          failure.code == AuthFailureCode.serviceUnavailable;
+      final cached = canUseVerifiedCache
+          ? await _readServerEntitlementState(uid)
+          : null;
+      final entitlement = cached?.entitlement;
+      final plan = cached == null
+          ? UserPlan.free
+          : entitlement?.effectivePlanAt(now) ?? UserPlan.free;
+      final state = _FirebaseAccountState(
+        plan: plan,
+        migrationStatus: _migrationStatusForServerPlan(
+          plan,
+          effectiveLocalState,
+        ),
+      );
+      await _writeFirebaseAccountState(
+        uid,
+        plan: state.plan,
+        migrationStatus: state.migrationStatus,
+      );
+      return _ResolvedServerAccountState(
+        accountState: state,
+        source: cached == null
+            ? PlanEntitlementSource.defaultFree
+            : PlanEntitlementSource.deviceCache,
+        checkedAt: cached?.checkedAt,
+        entitlement: entitlement,
+        failure: failure,
+      );
+    }
+  }
+
+  void _applyResolvedPlanEntitlement(_ResolvedServerAccountState resolution) {
+    _setPlanEntitlementState(
+      source: resolution.source,
+      checkedAt: resolution.checkedAt,
+      entitlement: resolution.entitlement,
+      failure: resolution.failure,
+    );
+  }
+
+  PlanMigrationStatus _migrationStatusForServerPlan(
+    UserPlan plan,
+    _FirebaseAccountState? localState,
+  ) {
+    if (plan != UserPlan.paid) {
+      return PlanMigrationStatus.none;
+    }
+    if (localState?.plan == UserPlan.paid) {
+      return localState!.migrationStatus;
+    }
+    return PlanMigrationStatus.localToCloudPending;
+  }
+
+  Future<_CachedServerEntitlementState?> _readServerEntitlementState(
+    String uid,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final states = _decodeObjectMap(
+      prefs.getString(_serverEntitlementStatesKey),
+    );
+    final rawState = states[uid];
+    if (rawState is! Map) {
+      return null;
+    }
+    final state = Map<String, dynamic>.from(rawState);
+    final rawCheckedAt = state['checkedAt'];
+    final checkedAt = rawCheckedAt is String
+        ? DateTime.tryParse(rawCheckedAt)
+        : null;
+    final hasDocument = state['hasDocument'];
+    if (checkedAt == null || hasDocument is! bool) {
+      return null;
+    }
+    if (!hasDocument) {
+      return _CachedServerEntitlementState(
+        entitlement: null,
+        checkedAt: checkedAt,
+      );
+    }
+
+    final rawPlan = state['plan'];
+    final plan = UserPlan.fromStorageValue(rawPlan is String ? rawPlan : null);
+    final rawStatus = state['status'];
+    final status = PlanEntitlementStatus.fromWireValue(
+      rawStatus is String ? rawStatus : null,
+    );
+    if (plan == UserPlan.guest || status == null) {
+      return null;
+    }
+    final rawExpiresAt = state['expiresAt'];
+    final expiresAt = rawExpiresAt is String
+        ? DateTime.tryParse(rawExpiresAt)
+        : null;
+    if (rawExpiresAt != null && expiresAt == null) {
+      return null;
+    }
+    final rawUpdatedAt = state['updatedAt'];
+    final updatedAt = rawUpdatedAt is String
+        ? DateTime.tryParse(rawUpdatedAt)
+        : null;
+    final rawSource = state['source'];
+    return _CachedServerEntitlementState(
+      entitlement: PlanEntitlement(
+        plan: plan,
+        status: status,
+        expiresAt: expiresAt,
+        updatedAt: updatedAt,
+        source: rawSource is String ? rawSource : null,
+      ),
+      checkedAt: checkedAt,
+    );
+  }
+
+  Future<void> _writeServerEntitlementState(
+    String uid, {
+    required PlanEntitlement? entitlement,
+    required DateTime checkedAt,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final states = _decodeObjectMap(
+      prefs.getString(_serverEntitlementStatesKey),
+    );
+    states[uid] = <String, dynamic>{
+      'hasDocument': entitlement != null,
+      'checkedAt': checkedAt.toUtc().toIso8601String(),
+      if (entitlement != null) ...<String, dynamic>{
+        'plan': entitlement.plan.storageValue,
+        'status': entitlement.status.wireValue,
+        if (entitlement.expiresAt != null)
+          'expiresAt': entitlement.expiresAt!.toUtc().toIso8601String(),
+        if (entitlement.updatedAt != null)
+          'updatedAt': entitlement.updatedAt!.toUtc().toIso8601String(),
+        if (entitlement.source != null) 'source': entitlement.source,
+      },
+    };
+    _requirePreferenceSuccess(
+      await prefs.setString(_serverEntitlementStatesKey, jsonEncode(states)),
+      'cache server entitlement',
+    );
+  }
+
+  void _setPlanEntitlementState({
+    required PlanEntitlementSource source,
+    required DateTime? checkedAt,
+    required PlanEntitlement? entitlement,
+    AuthFailure? failure,
+  }) {
+    _planEntitlementExpiryTimer?.cancel();
+    _planEntitlementSource = source;
+    _planEntitlementCheckedAt = checkedAt;
+    _planEntitlementExpiresAt = entitlement?.expiresAt;
+    _planEntitlementProvider = entitlement?.source;
+    _lastPlanEntitlementFailure = failure;
+
+    final expiresAt = entitlement?.expiresAt;
+    if (expiresAt != null) {
+      final remaining = expiresAt.difference(DateTime.now());
+      if (remaining > Duration.zero) {
+        _planEntitlementExpiryTimer = Timer(remaining, () {
+          if (_planEntitlementExpiresAt == expiresAt && _hasActiveSession) {
+            notifyListeners();
+          }
+        });
+      }
+    }
+  }
+
+  void _resetPlanEntitlementState() {
+    _planEntitlementExpiryTimer?.cancel();
+    _planEntitlementExpiryTimer = null;
+    _planEntitlementSource = PlanEntitlementSource.localDevelopment;
+    _planEntitlementCheckedAt = null;
+    _planEntitlementExpiresAt = null;
+    _planEntitlementProvider = null;
+    _lastPlanEntitlementFailure = null;
   }
 
   Future<_FirebaseAccountState?> _readFirebaseAccountState(String uid) async {
@@ -1293,6 +1616,7 @@ class AuthSessionRepository extends ChangeNotifier {
   }
 
   void _applySignedOut({bool notify = true}) {
+    _resetPlanEntitlementState();
     _applySession(
       hasActiveSession: false,
       persistsAcrossRestarts: false,
@@ -1395,5 +1719,31 @@ class _FirebaseAccountState {
   const _FirebaseAccountState({
     required this.plan,
     required this.migrationStatus,
+  });
+}
+
+class _CachedServerEntitlementState {
+  final PlanEntitlement? entitlement;
+  final DateTime checkedAt;
+
+  const _CachedServerEntitlementState({
+    required this.entitlement,
+    required this.checkedAt,
+  });
+}
+
+class _ResolvedServerAccountState {
+  final _FirebaseAccountState accountState;
+  final PlanEntitlementSource source;
+  final DateTime? checkedAt;
+  final PlanEntitlement? entitlement;
+  final AuthFailure? failure;
+
+  const _ResolvedServerAccountState({
+    required this.accountState,
+    required this.source,
+    required this.checkedAt,
+    required this.entitlement,
+    this.failure,
   });
 }
