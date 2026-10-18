@@ -102,6 +102,33 @@ final class IoRecordPhotoFileStoreBackend
     return _readFileBytes(normalized);
   }
 
+  @override
+  Future<void> deleteOwnerFiles(String ownerId) async {
+    final rootPath = (await _supportPathProvider()).trim();
+    if (rootPath.isEmpty) {
+      throw const RecordPhotoFileStoreException(
+        'Application support directory path is empty.',
+      );
+    }
+    final root = p.normalize(p.absolute(rootPath));
+    final ownerDirectory = Directory(
+      p.join(
+        root,
+        recordPhotoStorageDirectoryName,
+        safeRecordPhotoPathSegment(ownerId, fieldName: 'ownerId'),
+      ),
+    );
+    final target = p.normalize(p.absolute(ownerDirectory.path));
+    if (!p.isWithin(root, target)) {
+      throw const RecordPhotoFileStoreException(
+        'Resolved photo directory is outside the application support path.',
+      );
+    }
+    if (await ownerDirectory.exists()) {
+      await ownerDirectory.delete(recursive: true);
+    }
+  }
+
   Future<Uint8List> _readFileBytes(String path) async {
     final file = File(path);
     final stat = await file.stat();

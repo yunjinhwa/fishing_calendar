@@ -146,7 +146,7 @@ class RecordMutationService {
     // local database is authoritative; replaying an older outbox payload would
     // overwrite those newer edits. Reconciliation resumes after the server
     // grants paid sync access again.
-    if (!_authSession.isPaid) {
+    if (!_authSession.canUseOutbox) {
       return;
     }
 

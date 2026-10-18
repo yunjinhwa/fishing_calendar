@@ -9,6 +9,7 @@ import 'data/repositories/auth_session_repository.dart';
 import 'data/repositories/conflict_repository.dart';
 import 'data/repositories/fishing_record_repository.dart';
 import 'data/repositories/outbox_repository.dart';
+import 'data/services/account_deletion_service.dart';
 import 'data/services/network_status_service.dart';
 import 'data/services/plan_policy_service.dart';
 import 'data/services/record_mutation_service.dart';
@@ -22,9 +23,14 @@ Future<void> main() async {
   final authSession = AuthSessionRepository.instance;
   final authGateway = await FirebaseAuthBootstrap.initialize();
   authSession.configureAuthGateway(authGateway);
+  final accountDeletionService = AccountDeletionService.instance;
+  authSession.configureRemoteAccountDeletionCleanup(
+    accountDeletionService.handleRemoteAccountDeletion,
+  );
   RecordSyncService.instance.configureGateway(
     FirebaseRecordSyncBootstrap.create(authGateway),
   );
+  await accountDeletionService.resumePendingLocalCleanup();
   await authSession.loadSession();
   await FishingRecordRepository.instance.loadRecords();
   await OutboxRepository.instance.loadItems();

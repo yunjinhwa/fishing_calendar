@@ -84,7 +84,11 @@ class _FishingBuildAppState extends State<FishingBuildApp>
           theme: AppTheme.lightTheme,
           home: authSession.hasActiveSession
               ? AppShell(
-                  initialIndex: authSession.isGuest ? 1 : 0,
+                  initialIndex: authSession.hasPendingAccountDeletion
+                      ? 4
+                      : authSession.isGuest
+                      ? 1
+                      : 0,
                   networkStatusService: _networkStatusService,
                 )
               : const LoginChoicePage(),

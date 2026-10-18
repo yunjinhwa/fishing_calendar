@@ -145,6 +145,39 @@ void main() {
   );
 
   test(
+    'interactive Firebase sign-in requires the deletion marker server check',
+    () async {
+      final gateway = FakeAuthGateway();
+      authSession.configureAuthGateway(gateway);
+      await authSession.registerAsFree(
+        email: 'deletion-check@example.com',
+        password: 'Password1',
+        nickname: '삭제확인회원',
+      );
+      await authSession.logout();
+      gateway.accountDeletionLookupFailure = const AuthFailure(
+        code: AuthFailureCode.networkUnavailable,
+        message: 'offline',
+      );
+
+      await expectLater(
+        authSession.signIn(
+          email: 'deletion-check@example.com',
+          password: 'Password1',
+        ),
+        throwsA(
+          isA<AuthFailure>().having(
+            (failure) => failure.code,
+            'code',
+            AuthFailureCode.networkUnavailable,
+          ),
+        ),
+      );
+      expect(authSession.hasActiveSession, isFalse);
+    },
+  );
+
+  test(
     'Firebase rejects duplicate nicknames after trimming and lowercasing',
     () async {
       final gateway = FakeAuthGateway();
@@ -898,30 +931,52 @@ void main() {
     }
   });
 
-  test('offline restore uses only a previously verified entitlement', () async {
-    final gateway = FakeAuthGateway()
-      ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
-    authSession.configureAuthGateway(gateway);
-    await authSession.registerAsFree(
-      email: 'cached-plan@example.com',
-      password: 'Password1',
-      nickname: '캐시회원',
-    );
-    expect(authSession.isPaid, isTrue);
+  test(
+    'offline restore tolerates an unavailable deletion marker check',
+    () async {
+      final gateway = FakeAuthGateway()
+        ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
+      authSession.configureAuthGateway(gateway);
+      await authSession.registerAsFree(
+        email: 'cached-plan@example.com',
+        password: 'Password1',
+        nickname: '캐시회원',
+      );
+      expect(authSession.isPaid, isTrue);
 
-    gateway.entitlementLookupFailure = const AuthFailure(
-      code: AuthFailureCode.networkUnavailable,
-      message: 'offline',
-    );
-    authSession.clearMemoryOnlyForTesting();
-    await authSession.loadSession();
+      gateway.entitlementLookupFailure = const AuthFailure(
+        code: AuthFailureCode.networkUnavailable,
+        message: 'offline',
+      );
+      gateway.nicknameLookupFailure = const AuthFailure(
+        code: AuthFailureCode.networkUnavailable,
+        message: 'offline',
+      );
+      gateway.accountDeletionLookupFailure = const AuthFailure(
+        code: AuthFailureCode.networkUnavailable,
+        message: 'offline',
+      );
+      authSession.clearMemoryOnlyForTesting();
+      await authSession.loadSession();
 
-    expect(authSession.isPaid, isTrue);
-    expect(
-      authSession.planEntitlementSource,
-      PlanEntitlementSource.deviceCache,
-    );
-  });
+      expect(authSession.isPaid, isTrue);
+      expect(authSession.hasPendingAccountDeletion, isFalse);
+      expect(
+        authSession.planEntitlementSource,
+        PlanEntitlementSource.deviceCache,
+      );
+
+      gateway.setPendingAccountDeletion('uid-1', isPending: true);
+      await pumpEventQueue();
+
+      expect(authSession.hasPendingAccountDeletion, isTrue);
+      expect(authSession.isAccountDeletedRemotely, isTrue);
+      expect(authSession.canResumeAccountDeletion, isFalse);
+      expect(authSession.canManageRecords, isFalse);
+      expect(authSession.canUseOutbox, isFalse);
+      expect(authSession.canUseCloudSync, isFalse);
+    },
+  );
 
   test('offline first lookup falls back to free', () async {
     final gateway = FakeAuthGateway()
@@ -1086,6 +1141,337 @@ void main() {
       expect(authSession.isPlanMigrationPending, isTrue);
     },
   );
+
+  test('wrong Firebase password does not start account deletion', () async {
+    final gateway = FakeAuthGateway();
+    authSession.configureAuthGateway(gateway);
+    await authSession.registerAsFree(
+      email: 'delete-wrong-password@example.com',
+      password: 'Password1',
+      nickname: 'Delete Wrong',
+    );
+    var purged = false;
+
+    await expectLater(
+      authSession.deleteCurrentAccount(
+        password: 'WrongPassword1',
+        prepareLocalDataDeletion: (_, _, _) async {},
+        purgeLocalData: (_, _, _) async {
+          purged = true;
+        },
+      ),
+      throwsA(
+        isA<AuthFailure>().having(
+          (failure) => failure.code,
+          'code',
+          AuthFailureCode.invalidCredentials,
+        ),
+      ),
+    );
+
+    expect(purged, isFalse);
+    expect(gateway.hasAccount('delete-wrong-password@example.com'), isTrue);
+    expect(gateway._pendingAccountDeletionUids, isEmpty);
+    expect(authSession.isMember, isTrue);
+    expect(authSession.hasPendingAccountDeletion, isFalse);
+  });
+
+  test('an uncertain deletion request stays locked for a safe retry', () async {
+    final gateway = FakeAuthGateway();
+    authSession.configureAuthGateway(gateway);
+    await authSession.registerAsFree(
+      email: 'delete-uncertain@example.com',
+      password: 'Password1',
+      nickname: 'Delete Uncertain',
+    );
+    gateway.deleteAccountDataFailure = const AuthFailure(
+      code: AuthFailureCode.networkUnavailable,
+      message: 'request result unknown',
+    );
+    gateway.accountDeletionLookupFailure = const AuthFailure(
+      code: AuthFailureCode.networkUnavailable,
+      message: 'marker lookup unavailable',
+    );
+
+    await expectLater(
+      authSession.deleteCurrentAccount(
+        password: 'Password1',
+        prepareLocalDataDeletion: (_, _, _) async {},
+        purgeLocalData: (_, _, _) async {},
+      ),
+      throwsA(
+        isA<AuthFailure>().having(
+          (failure) => failure.code,
+          'code',
+          AuthFailureCode.networkUnavailable,
+        ),
+      ),
+    );
+
+    expect(authSession.hasPendingAccountDeletion, isTrue);
+    expect(authSession.canResumeAccountDeletion, isTrue);
+    expect(authSession.isAccountDeletedRemotely, isFalse);
+    expect(authSession.canManageRecords, isFalse);
+    expect(authSession.canUseCloudSync, isFalse);
+  });
+
+  test(
+    'a remote deletion during failed reauthentication stays remote',
+    () async {
+      String? cleanedUid;
+      final gateway = FakeAuthGateway();
+      authSession.configureAuthGateway(gateway);
+      authSession.configureRemoteAccountDeletionCleanup(({
+        required String ownerKey,
+        required String email,
+        required String firebaseUid,
+      }) async {
+        cleanedUid = firebaseUid;
+      });
+      await authSession.registerAsFree(
+        email: 'delete-race@example.com',
+        password: 'Password1',
+        nickname: 'Delete Race',
+      );
+      gateway.reauthenticationStarted = Completer<void>();
+      gateway.reauthenticationGate = Completer<void>();
+
+      final deletion = authSession.deleteCurrentAccount(
+        password: 'WrongPassword1',
+        prepareLocalDataDeletion: (_, _, _) async {},
+        purgeLocalData: (_, _, _) async {},
+      );
+      await gateway.reauthenticationStarted!.future;
+      gateway.setPendingAccountDeletion('uid-1', isPending: true);
+      gateway.reauthenticationGate!.complete();
+
+      await expectLater(
+        deletion,
+        throwsA(
+          isA<AuthFailure>().having(
+            (failure) => failure.code,
+            'code',
+            AuthFailureCode.invalidCredentials,
+          ),
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(authSession.hasPendingAccountDeletion, isTrue);
+      expect(authSession.isAccountDeletedRemotely, isTrue);
+      expect(authSession.canResumeAccountDeletion, isFalse);
+      expect(cleanedUid, 'uid-1');
+    },
+  );
+
+  test(
+    'a remote deletion tombstone immediately locks an active device',
+    () async {
+      String? cleanedOwnerKey;
+      String? cleanedEmail;
+      String? cleanedUid;
+      final gateway = FakeAuthGateway()
+        ..seedAccount(
+          uid: 'live-delete-uid',
+          email: 'live-delete@example.com',
+          password: 'Password1',
+          displayName: 'Live Delete',
+        )
+        ..seedEntitlement(uid: 'live-delete-uid', plan: UserPlan.paid);
+      authSession.configureAuthGateway(gateway);
+      authSession.configureRemoteAccountDeletionCleanup(({
+        required String ownerKey,
+        required String email,
+        required String firebaseUid,
+      }) async {
+        cleanedOwnerKey = ownerKey;
+        cleanedEmail = email;
+        cleanedUid = firebaseUid;
+      });
+
+      expect(
+        await authSession.signIn(
+          email: 'live-delete@example.com',
+          password: 'Password1',
+        ),
+        AuthSignInResult.success,
+      );
+      await pumpEventQueue();
+      expect(authSession.isPaid, isTrue);
+      expect(authSession.canManageRecords, isTrue);
+      expect(authSession.canUseOutbox, isTrue);
+
+      gateway.setPendingAccountDeletion('live-delete-uid', isPending: true);
+      await pumpEventQueue();
+
+      expect(authSession.hasPendingAccountDeletion, isTrue);
+      expect(authSession.isAccountDeletedRemotely, isTrue);
+      expect(authSession.canResumeAccountDeletion, isFalse);
+      expect(authSession.canManageRecords, isFalse);
+      expect(authSession.canUseOutbox, isFalse);
+      expect(authSession.canUseCloudSync, isFalse);
+      expect(cleanedOwnerKey, 'member:uid:live-delete-uid');
+      expect(cleanedEmail, 'live-delete@example.com');
+      expect(cleanedUid, 'live-delete-uid');
+      await expectLater(
+        RecordMutationService.instance.addRecord(_record('blocked-delete')),
+        throwsStateError,
+      );
+      expect(recordRepository.getAllRecords(), isEmpty);
+      expect(outboxRepository.getAllItems(), isEmpty);
+      await expectLater(
+        authSession.deleteCurrentAccount(
+          password: 'Password1',
+          prepareLocalDataDeletion: (_, _, _) async {},
+          purgeLocalData: (_, _, _) async {},
+        ),
+        throwsA(
+          isA<AuthFailure>().having(
+            (failure) => failure.code,
+            'code',
+            AuthFailureCode.noCurrentUser,
+          ),
+        ),
+      );
+
+      gateway.accountDeletionLookupFailure = const AuthFailure(
+        code: AuthFailureCode.networkUnavailable,
+        message: 'offline',
+      );
+      authSession.clearMemoryOnlyForTesting();
+      await authSession.loadSession();
+      expect(authSession.isAccountDeletedRemotely, isTrue);
+      expect(authSession.canResumeAccountDeletion, isFalse);
+      gateway.accountDeletionLookupFailure = null;
+
+      gateway.setPendingAccountDeletion('live-delete-uid', isPending: false);
+      await pumpEventQueue();
+      expect(authSession.hasPendingAccountDeletion, isTrue);
+
+      await authSession.logout();
+      gateway.setPendingAccountDeletion('live-delete-uid', isPending: true);
+      await pumpEventQueue();
+      expect(authSession.hasPendingAccountDeletion, isFalse);
+    },
+  );
+
+  test('Firebase account deletion clears auth and session state', () async {
+    final gateway = FakeAuthGateway();
+    authSession.configureAuthGateway(gateway);
+    await authSession.registerAsFree(
+      email: 'delete-success@example.com',
+      password: 'Password1',
+      nickname: 'Delete Success',
+    );
+    String? purgedOwner;
+    String? purgedEmail;
+    String? purgedUid;
+
+    await authSession.deleteCurrentAccount(
+      password: 'Password1',
+      prepareLocalDataDeletion: (_, _, _) async {},
+      purgeLocalData: (ownerKey, email, uid) async {
+        purgedOwner = ownerKey;
+        purgedEmail = email;
+        purgedUid = uid;
+      },
+    );
+
+    expect(purgedOwner, DataOwnerKey.firebaseUid('uid-1'));
+    expect(purgedEmail, 'delete-success@example.com');
+    expect(purgedUid, 'uid-1');
+    expect(gateway.hasAccount('delete-success@example.com'), isFalse);
+    expect(gateway.deleteCount, 1);
+    expect(authSession.hasActiveSession, isFalse);
+    expect(authSession.hasPendingAccountDeletion, isFalse);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('auth_has_active_session'), isNull);
+    expect(prefs.getString('auth_firebase_nicknames_v1'), isNull);
+  });
+
+  test('a deletion tombstone restores a resumable member session', () async {
+    final gateway = FakeAuthGateway();
+    authSession.configureAuthGateway(gateway);
+    await authSession.registerAsFree(
+      email: 'delete-resume@example.com',
+      password: 'Password1',
+      nickname: 'Delete Resume',
+    );
+    await expectLater(
+      authSession.deleteCurrentAccount(
+        password: 'Password1',
+        prepareLocalDataDeletion: (_, _, _) async {},
+        purgeLocalData: (_, _, _) async {
+          throw StateError('simulated interruption');
+        },
+      ),
+      throwsStateError,
+    );
+    expect(authSession.hasPendingAccountDeletion, isTrue);
+    expect(authSession.canResumeAccountDeletion, isTrue);
+    expect(authSession.isAccountDeletedRemotely, isFalse);
+
+    authSession.clearMemoryOnlyForTesting();
+    await authSession.loadSession();
+
+    expect(authSession.isMember, isTrue);
+    expect(authSession.hasPendingAccountDeletion, isTrue);
+    expect(authSession.canResumeAccountDeletion, isTrue);
+    expect(authSession.isAccountDeletedRemotely, isFalse);
+    expect(authSession.canManageRecords, isFalse);
+    expect(authSession.canUseCloudSync, isFalse);
+
+    await authSession.deleteCurrentAccount(
+      password: 'Password1',
+      prepareLocalDataDeletion: (_, _, _) async {},
+      purgeLocalData: (_, _, _) async {},
+    );
+    expect(gateway.hasAccount('delete-resume@example.com'), isFalse);
+    expect(authSession.hasActiveSession, isFalse);
+  });
+
+  test('local account deletion preserves other local accounts', () async {
+    await authSession.registerAsFree(
+      email: 'delete-local@example.com',
+      password: 'Password1',
+      nickname: 'Delete Local',
+    );
+    await authSession.logout();
+    await authSession.registerAsFree(
+      email: 'keep-local@example.com',
+      password: 'Password2',
+      nickname: 'Keep Local',
+    );
+    await authSession.logout();
+    expect(
+      await authSession.signIn(
+        email: 'delete-local@example.com',
+        password: 'Password1',
+      ),
+      AuthSignInResult.success,
+    );
+
+    await authSession.deleteCurrentAccount(
+      password: 'Password1',
+      prepareLocalDataDeletion: (_, _, _) async {},
+      purgeLocalData: (_, _, _) async {},
+    );
+
+    expect(
+      await authSession.signIn(
+        email: 'delete-local@example.com',
+        password: 'Password1',
+      ),
+      AuthSignInResult.accountNotFound,
+    );
+    expect(
+      await authSession.signIn(
+        email: 'keep-local@example.com',
+        password: 'Password2',
+      ),
+      AuthSignInResult.success,
+    );
+  });
 }
 
 FishingRecord _record(String id, {String location = '부산'}) {
@@ -1108,6 +1494,9 @@ class FakeAuthGateway implements AuthGateway {
   final Map<String, String> _uidByNicknameKey = <String, String>{};
   final Map<String, PlanEntitlement> _entitlementByUid =
       <String, PlanEntitlement>{};
+  final Set<String> _pendingAccountDeletionUids = <String>{};
+  final Map<String, StreamController<bool>> _accountDeletionChanges =
+      <String, StreamController<bool>>{};
   final StreamController<AuthUser?> _changes =
       StreamController<AuthUser?>.broadcast(sync: true);
 
@@ -1121,6 +1510,10 @@ class FakeAuthGateway implements AuthGateway {
   Completer<void>? registrationStarted;
   AuthFailure? nicknameLookupFailure;
   AuthFailure? entitlementLookupFailure;
+  AuthFailure? accountDeletionLookupFailure;
+  AuthFailure? deleteAccountDataFailure;
+  Completer<void>? reauthenticationStarted;
+  Completer<void>? reauthenticationGate;
   bool entitlementFromCache = false;
   int entitlementLookupCount = 0;
   Completer<void>? entitlementLookupStarted;
@@ -1262,6 +1655,19 @@ class FakeAuthGateway implements AuthGateway {
   }
 
   @override
+  Future<void> reauthenticateWithPassword(String password) async {
+    final current = _requireCurrentUser();
+    reauthenticationStarted?.complete();
+    await reauthenticationGate?.future;
+    if (_accounts[current.email]?.password != password) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidCredentials,
+        message: 'invalid',
+      );
+    }
+  }
+
+  @override
   Future<String?> getRegisteredNickname(String uid) async {
     final failure = nicknameLookupFailure;
     if (failure != null) {
@@ -1286,6 +1692,38 @@ class FakeAuthGateway implements AuthGateway {
       entitlement: _entitlementByUid[uid],
       isFromCache: entitlementFromCache,
     );
+  }
+
+  @override
+  Future<bool> hasPendingAccountDeletion(String uid) async {
+    _requireCurrentUser();
+    final failure = accountDeletionLookupFailure;
+    if (failure != null) {
+      throw failure;
+    }
+    return _pendingAccountDeletionUids.contains(uid);
+  }
+
+  @override
+  Stream<bool> watchPendingAccountDeletion(String uid) async* {
+    final current = _requireCurrentUser();
+    if (current.uid != uid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: 'wrong user',
+      );
+    }
+    yield _pendingAccountDeletionUids.contains(uid);
+    yield* _accountDeletionController(uid).stream;
+  }
+
+  void setPendingAccountDeletion(String uid, {required bool isPending}) {
+    if (isPending) {
+      _pendingAccountDeletionUids.add(uid);
+    } else {
+      _pendingAccountDeletionUids.remove(uid);
+    }
+    _accountDeletionController(uid).add(isPending);
   }
 
   @override
@@ -1335,6 +1773,23 @@ class FakeAuthGateway implements AuthGateway {
   }
 
   @override
+  Future<void> deleteAccountData({required String uid}) async {
+    final current = _requireCurrentUser();
+    if (current.uid != uid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: 'wrong user',
+      );
+    }
+    final failure = deleteAccountDataFailure;
+    if (failure != null) {
+      throw failure;
+    }
+    setPendingAccountDeletion(uid, isPending: true);
+    _entitlementByUid.remove(uid);
+  }
+
+  @override
   Future<void> deleteCurrentUser() async {
     final current = _currentUser;
     if (current == null) {
@@ -1374,6 +1829,13 @@ class FakeAuthGateway implements AuthGateway {
   void _setCurrentUser(AuthUser? user) {
     _currentUser = user;
     _changes.add(user);
+  }
+
+  StreamController<bool> _accountDeletionController(String uid) {
+    return _accountDeletionChanges.putIfAbsent(
+      uid,
+      () => StreamController<bool>.broadcast(sync: true),
+    );
   }
 
   AuthUser _user({

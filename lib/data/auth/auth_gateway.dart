@@ -109,13 +109,21 @@ abstract interface class AuthGateway {
 
   Future<AuthUser> updatePassword(String password);
 
+  Future<void> reauthenticateWithPassword(String password);
+
   Future<String?> getRegisteredNickname(String uid);
 
   Future<PlanEntitlementSnapshot> getPlanEntitlement(String uid);
 
+  Future<bool> hasPendingAccountDeletion(String uid);
+
+  Stream<bool> watchPendingAccountDeletion(String uid);
+
   Future<String> claimNickname({required String uid, required String nickname});
 
   Future<void> releaseNickname({required String uid, required String nickname});
+
+  Future<void> deleteAccountData({required String uid});
 
   Future<void> deleteCurrentUser();
 
@@ -175,12 +183,24 @@ class UnavailableAuthGateway implements AuthGateway {
       Future<AuthUser>.error(failure);
 
   @override
+  Future<void> reauthenticateWithPassword(String password) =>
+      Future<void>.error(failure);
+
+  @override
   Future<String?> getRegisteredNickname(String uid) =>
       Future<String?>.error(failure);
 
   @override
   Future<PlanEntitlementSnapshot> getPlanEntitlement(String uid) =>
       Future<PlanEntitlementSnapshot>.error(failure);
+
+  @override
+  Future<bool> hasPendingAccountDeletion(String uid) =>
+      Future<bool>.error(failure);
+
+  @override
+  Stream<bool> watchPendingAccountDeletion(String uid) =>
+      Stream<bool>.error(failure);
 
   @override
   Future<String> claimNickname({
@@ -193,6 +213,10 @@ class UnavailableAuthGateway implements AuthGateway {
     required String uid,
     required String nickname,
   }) => Future<void>.error(failure);
+
+  @override
+  Future<void> deleteAccountData({required String uid}) =>
+      Future<void>.error(failure);
 
   @override
   Future<void> deleteCurrentUser() => Future<void>.error(failure);
