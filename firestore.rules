@@ -6,6 +6,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function recentlyAuthenticated() {
+      return signedIn()
+        && request.auth.token.auth_time is int
+        && request.time.toMillis() / 1000
+          - request.auth.token.auth_time < 300;
+    }
+
     function validNicknameData(data, uid, nicknameKey) {
       return data.keys().hasOnly(['uid', 'nickname', 'nicknameKey'])
         && data.uid == uid
@@ -47,11 +54,19 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function accountDeletionRequested(uid) {
+      return ownsUserData(uid)
+        && exists(
+          /databases/$(database)/documents/account_deletion_requests/$(uid)
+        );
+    }
+
     function hasActivePaidEntitlement(uid) {
       let entitlementPath =
         /databases/$(database)/documents/plan_entitlements/$(uid);
       let entitlement = get(entitlementPath).data;
       return ownsUserData(uid)
+        && !accountDeletionRequested(uid)
         && exists(entitlementPath)
         && entitlement.planType == 'PAID'
         && entitlement.status == 'ACTIVE'
@@ -256,6 +271,7 @@ service cloud.firestore {
       allow list: if false;
 
       allow create: if signedIn()
+        && !accountDeletionRequested(request.auth.uid)
         && request.auth.uid == request.resource.data.uid
         && validNicknameData(
           request.resource.data,
@@ -265,6 +281,7 @@ service cloud.firestore {
         && profileMatchesClaim(request.auth.uid, nicknameKey);
 
       allow update: if signedIn()
+        && !accountDeletionRequested(request.auth.uid)
         && resource.data.uid == request.auth.uid
         && resource.data.nicknameKey == nicknameKey
         && request.resource.data.uid == request.auth.uid
@@ -287,11 +304,13 @@ service cloud.firestore {
       allow list: if false;
 
       allow create: if signedIn()
+        && !accountDeletionRequested(uid)
         && request.auth.uid == uid
         && validNicknameData(request.resource.data, uid, request.resource.data.nicknameKey)
         && claimMatchesProfile(uid, request.resource.data.nicknameKey);
 
       allow update: if signedIn()
+        && !accountDeletionRequested(uid)
         && request.auth.uid == uid
         && resource.data.uid == uid
         && resource.data.nicknameKey == request.resource.data.nicknameKey
@@ -307,14 +326,35 @@ service cloud.firestore {
     }
 
     // Plan entitlements are written only by a trusted administrator or billing
-    // backend. The signed-in member can read only their own current policy.
+    // backend. A member can only remove their own entitlement after entering
+    // the irreversible account-deletion flow.
     match /plan_entitlements/{uid} {
       allow get: if ownsUserData(uid);
-      allow list, create, update, delete: if false;
+      allow delete: if accountDeletionRequested(uid);
+      allow list, create, update: if false;
+    }
+
+    // This tombstone contains no profile data. It is intentionally immutable
+    // and remains after Firebase Auth deletion so an interrupted cleanup cannot
+    // restore cloud access on another signed-in device.
+    match /account_deletion_requests/{uid} {
+      allow get: if ownsUserData(uid);
+      allow list: if false;
+      allow create: if ownsUserData(uid)
+        && recentlyAuthenticated()
+        && request.resource.data.keys().hasOnly([
+          'schemaVersion', 'uid', 'status', 'requestedAt'
+        ])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.uid == uid
+        && request.resource.data.status == 'REQUESTED'
+        && request.resource.data.requestedAt == request.time;
+      allow update, delete: if false;
     }
 
     match /users/{uid}/records/{recordId} {
-      allow get, list: if hasActivePaidEntitlement(uid);
+      allow get, list: if hasActivePaidEntitlement(uid)
+        || accountDeletionRequested(uid);
 
       allow create: if hasActivePaidEntitlement(uid)
         && validActiveRecord(request.resource.data, uid, recordId)
@@ -353,17 +393,19 @@ service cloud.firestore {
             ))
         );
 
-      // Deletes are represented by validated tombstones so another device can
-      // observe them during its next complete snapshot pull.
-      allow delete: if false;
+      // Normal deletes remain validated tombstones. Physical deletion is only
+      // available after this account has entered the deletion flow.
+      allow delete: if accountDeletionRequested(uid);
     }
 
     match /users/{uid}/sync_receipts/{outboxId} {
-      allow get: if hasActivePaidEntitlement(uid);
-      allow list: if false;
+      allow get: if hasActivePaidEntitlement(uid)
+        || accountDeletionRequested(uid);
+      allow list: if accountDeletionRequested(uid);
       allow create: if hasActivePaidEntitlement(uid)
         && validSyncReceipt(request.resource.data, uid, outboxId);
-      allow update, delete: if false;
+      allow delete: if accountDeletionRequested(uid);
+      allow update: if false;
     }
   }
 }

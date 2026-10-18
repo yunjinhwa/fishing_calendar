@@ -42,7 +42,18 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _handleSessionChange() {
-    if (!mounted || !authSession.isGuest || !_isMemberOnlyTab(selectedIndex)) {
+    if (!mounted) {
+      return;
+    }
+
+    if (authSession.hasPendingAccountDeletion && selectedIndex != 4) {
+      setState(() {
+        selectedIndex = 4;
+      });
+      return;
+    }
+
+    if (!authSession.isGuest || !_isMemberOnlyTab(selectedIndex)) {
       return;
     }
 
@@ -82,11 +93,26 @@ class _AppShellState extends State<AppShell> {
             ),
         ],
       ),
-      bottomNavigationBar: isKeyboardVisible
+      bottomNavigationBar:
+          isKeyboardVisible || authSession.isAccountDeletedRemotely
           ? null
           : NavigationBar(
               selectedIndex: selectedIndex,
               onDestinationSelected: (index) async {
+                if (authSession.hasPendingAccountDeletion && index != 4) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          authSession.isAccountDeletedRemotely
+                              ? '탈퇴된 계정입니다. 로그아웃해 주세요.'
+                              : '회원 탈퇴 처리를 먼저 완료해 주세요.',
+                        ),
+                      ),
+                    );
+                  }
+                  return;
+                }
                 if (_isMemberOnlyTab(index) && !authSession.canManageRecords) {
                   final allowed = await requireMemberAccess(
                     context,

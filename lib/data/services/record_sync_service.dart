@@ -594,6 +594,8 @@ class RecordSyncService extends ChangeNotifier {
 
   bool _isCurrentSession(String uid, String ownerKey) {
     return _authSession.isPaid &&
+        !_authSession.isDeletingAccount &&
+        !_authSession.hasPendingAccountDeletion &&
         _authSession.memberId == uid &&
         _authSession.dataOwnerKey == ownerKey;
   }

@@ -4,6 +4,7 @@ import '../../core/validation/auth_input_validator.dart';
 import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/services/account_deletion_service.dart';
 import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../auth/auth_error_message.dart';
@@ -80,6 +81,122 @@ class MyPage extends StatelessWidget {
     }
   }
 
+  Future<void> _showAccountDeletionDialog(BuildContext context) async {
+    final authSession = AuthSessionRepository.instance;
+    if (authSession.requiresPasswordSetup) {
+      await _showPasswordSetupDialog(context);
+      if (!context.mounted || authSession.requiresPasswordSetup) {
+        return;
+      }
+    }
+
+    final deleted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _AccountDeletionDialog(
+        isResume: authSession.canResumeAccountDeletion,
+      ),
+    );
+    if (deleted != true || !context.mounted) {
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginChoicePage()),
+      (route) => false,
+    );
+  }
+
+  Future<void> _logout(
+    BuildContext context, {
+    bool requireConfirmation = true,
+  }) async {
+    final authSession = AuthSessionRepository.instance;
+    if (requireConfirmation && authSession.requiresPasswordSetup) {
+      await _showPasswordSetupDialog(context);
+      if (!context.mounted || authSession.requiresPasswordSetup) {
+        return;
+      }
+    }
+
+    if (requireConfirmation) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('로그아웃'),
+            content: const Text('현재 계정에서 로그아웃할까요?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('로그아웃'),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed != true || !context.mounted) {
+        return;
+      }
+    }
+
+    try {
+      await authSession.logout();
+    } on AuthFailure catch (failure) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(authFailureMessage(failure))));
+      }
+    }
+
+    if (!context.mounted) {
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginChoicePage()),
+      (route) => false,
+    );
+  }
+
+  Widget _buildRemotelyDeletedPage(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('내정보')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const SizedBox(height: 48),
+            Icon(Icons.person_off_outlined, size: 64, color: colors.error),
+            const SizedBox(height: 20),
+            Text(
+              '해당 계정은 탈퇴되었습니다',
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '다른 기기에서 회원 탈퇴가 처리되어 이 계정은 더 이상 사용할 수 없습니다. 로그아웃해 주세요.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            FilledButton.icon(
+              onPressed: () => _logout(context, requireConfirmation: false),
+              icon: const Icon(Icons.logout),
+              label: const Text('로그아웃'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authSession = AuthSessionRepository.instance;
@@ -88,6 +205,9 @@ class MyPage extends StatelessWidget {
     return AnimatedBuilder(
       animation: Listenable.merge([authSession, recordRepository]),
       builder: (context, _) {
+        if (authSession.isAccountDeletedRemotely) {
+          return _buildRemotelyDeletedPage(context);
+        }
         return Scaffold(
           appBar: AppBar(title: const Text('내정보')),
           body: SafeArea(
@@ -267,62 +387,36 @@ class MyPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
 
+                if (authSession.canResumeAccountDeletion) ...[
+                  Card(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: const ListTile(
+                      leading: Icon(Icons.warning_amber_rounded),
+                      title: Text('회원 탈퇴 처리가 중단되었습니다'),
+                      subtitle: Text('클라우드 접근은 이미 차단되었습니다. 남은 정리를 완료해 주세요.'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (authSession.isMember) ...[
+                  OutlinedButton.icon(
+                    onPressed: authSession.isDeletingAccount
+                        ? null
+                        : () => _showAccountDeletionDialog(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                    icon: const Icon(Icons.person_remove_outlined),
+                    label: Text(
+                      authSession.canResumeAccountDeletion
+                          ? '회원 탈퇴 계속하기'
+                          : '회원 탈퇴',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 OutlinedButton.icon(
-                  onPressed: () async {
-                    if (authSession.requiresPasswordSetup) {
-                      await _showPasswordSetupDialog(context);
-                      if (!context.mounted ||
-                          authSession.requiresPasswordSetup) {
-                        return;
-                      }
-                    }
-
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (context) {
-                        return AlertDialog(
-                          title: const Text('로그아웃'),
-                          content: const Text('현재 계정에서 로그아웃할까요?'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(context).pop(false),
-                              child: const Text('취소'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.of(context).pop(true),
-                              child: const Text('로그아웃'),
-                            ),
-                          ],
-                        );
-                      },
-                    );
-
-                    if (confirmed != true || !context.mounted) {
-                      return;
-                    }
-
-                    try {
-                      await authSession.logout();
-                    } on AuthFailure catch (failure) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(authFailureMessage(failure))),
-                        );
-                      }
-                    }
-
-                    if (!context.mounted) return;
-
-                    Navigator.of(
-                      context,
-                      rootNavigator: true,
-                    ).pushAndRemoveUntil(
-                      MaterialPageRoute(
-                        builder: (_) => const LoginChoicePage(),
-                      ),
-                      (route) => false,
-                    );
-                  },
+                  onPressed: () => _logout(context),
                   icon: const Icon(Icons.logout),
                   label: const Text('로그아웃'),
                 ),
@@ -331,6 +425,146 @@ class MyPage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _AccountDeletionDialog extends StatefulWidget {
+  final bool isResume;
+
+  const _AccountDeletionDialog({required this.isResume});
+
+  @override
+  State<_AccountDeletionDialog> createState() => _AccountDeletionDialogState();
+}
+
+class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
+  final passwordController = TextEditingController();
+  final confirmationController = TextEditingController();
+  String? errorText;
+  bool isSubmitting = false;
+
+  bool get canSubmit =>
+      passwordController.text.isNotEmpty &&
+      confirmationController.text.trim() == '탈퇴' &&
+      !isSubmitting;
+
+  @override
+  void initState() {
+    super.initState();
+    passwordController.addListener(_refresh);
+    confirmationController.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    passwordController
+      ..removeListener(_refresh)
+      ..dispose();
+    confirmationController
+      ..removeListener(_refresh)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _submit() async {
+    if (!canSubmit) {
+      return;
+    }
+    setState(() {
+      isSubmitting = true;
+      errorText = null;
+    });
+    try {
+      await AccountDeletionService.instance.deleteCurrentAccount(
+        passwordController.text,
+      );
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
+    } on AuthFailure catch (failure) {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+          errorText = authFailureMessage(failure);
+        });
+      }
+    } on Object {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+          errorText = '회원 탈퇴를 완료하지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !isSubmitting,
+      child: AlertDialog(
+        title: Text(widget.isResume ? '회원 탈퇴 계속하기' : '회원 탈퇴'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.isResume
+                    ? '이전에 시작한 탈퇴 처리를 완료합니다.'
+                    : '탈퇴하면 계정, 낚시 기록, 동기화 내역, 로컬 사진과 닉네임이 삭제되며 되돌릴 수 없습니다.',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '다른 기기의 동기화도 중단됩니다. 중단된 삭제를 재시도하기 위해 Firebase UID와 요청 시각만 담은 표식은 서버에 남습니다.',
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                enabled: !isSubmitting,
+                obscureText: true,
+                autofillHints: const [AutofillHints.password],
+                decoration: const InputDecoration(
+                  labelText: '현재 비밀번호',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: confirmationController,
+                enabled: !isSubmitting,
+                decoration: InputDecoration(
+                  labelText: '확인을 위해 탈퇴 입력',
+                  border: const OutlineInputBorder(),
+                  errorText: errorText,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: isSubmitting
+                ? null
+                : () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: canSubmit ? _submit : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: Text(isSubmitting ? '처리 중...' : '영구 삭제'),
+          ),
+        ],
+      ),
     );
   }
 }

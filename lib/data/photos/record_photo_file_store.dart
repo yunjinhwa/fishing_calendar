@@ -60,4 +60,8 @@ final class RecordPhotoFileStore implements RecordPhotoFileStoreBackend {
 
   @override
   Future<Uint8List> readBytes(String path) => _backend.readBytes(path);
+
+  @override
+  Future<void> deleteOwnerFiles(String ownerId) =>
+      _backend.deleteOwnerFiles(ownerId);
 }

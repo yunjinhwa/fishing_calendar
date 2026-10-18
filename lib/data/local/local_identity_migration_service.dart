@@ -98,6 +98,19 @@ class LocalIdentityMigrationService {
 
   final LocalDataStore _store = LocalDataStore.instance;
 
+  Future<void> deleteAccountClaim(
+    DatabaseExecutor executor, {
+    required String authenticatedEmail,
+  }) async {
+    final sourceOwnerKey = DataOwnerKey.legacyEmail(authenticatedEmail);
+    final metadataKey = _claimMetadataKey(sourceOwnerKey);
+    await executor.delete(
+      AppDatabase.localMetadataTable,
+      where: 'metadata_key = ?',
+      whereArgs: <Object?>[metadataKey],
+    );
+  }
+
   Future<LocalIdentityMigrationResult> claimLegacyMemberData({
     required String firebaseUid,
     required String authenticatedEmail,

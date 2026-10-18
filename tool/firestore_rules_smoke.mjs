@@ -281,6 +281,69 @@ async function commit(label, token, body, expectedStatus) {
   );
 }
 
+function accountDeletionRequestCommit({
+  documentUid,
+  claimedUid = documentUid,
+  schemaVersion = 1,
+  status = 'REQUESTED',
+  extraFields = {},
+}) {
+  const name =
+    `projects/${projectId}/databases/(default)/documents/account_deletion_requests/${documentUid}`;
+  return {
+    writes: [
+      {
+        update: {
+          name,
+          fields: {
+            schemaVersion: integerValue(schemaVersion),
+            uid: stringValue(claimedUid),
+            status: stringValue(status),
+            ...extraFields,
+          },
+        },
+        updateTransforms: [
+          {fieldPath: 'requestedAt', setToServerValue: 'REQUEST_TIME'},
+        ],
+      },
+    ],
+  };
+}
+
+async function listAllDocuments(label, path, token, pageSize = 10) {
+  const documents = [];
+  let pageToken;
+  do {
+    const query = new URLSearchParams({pageSize: String(pageSize)});
+    if (pageToken) {
+      query.set('pageToken', pageToken);
+    }
+    const response = await request(`${path}?${query}`, {token});
+    await expectStatus(label, response, 200);
+    const body = await response.json();
+    documents.push(...(body.documents ?? []));
+    pageToken = body.nextPageToken;
+  } while (pageToken);
+  return documents;
+}
+
+function hardDeleteCommit(documents) {
+  return {
+    writes: documents.map((document) => ({delete: document.name})),
+  };
+}
+
+async function hardDeleteInBatches(label, token, documents, batchSize = 15) {
+  for (let index = 0; index < documents.length; index += batchSize) {
+    await commit(
+      `${label} batch ${Math.floor(index / batchSize) + 1}`,
+      token,
+      hardDeleteCommit(documents.slice(index, index + batchSize)),
+      200,
+    );
+  }
+}
+
 const owner = await createUser('owner');
 const intruder = await createUser('intruder');
 const freeMember = await createUser('free-member');
@@ -684,5 +747,209 @@ await commit(
   }),
   200,
 );
+
+const deletionMember = await createUser('deletion-member');
+await seedEntitlement(deletionMember.uid);
+
+await commit(
+  'deletion marker with an invalid status is denied',
+  deletionMember.token,
+  accountDeletionRequestCommit({
+    documentUid: deletionMember.uid,
+    status: 'CANCELLED',
+  }),
+  403,
+);
+await commit(
+  'deletion marker with an extra field is denied',
+  deletionMember.token,
+  accountDeletionRequestCommit({
+    documentUid: deletionMember.uid,
+    extraFields: {reason: stringValue('not allowed')},
+  }),
+  403,
+);
+await commit(
+  'member cannot create a deletion marker for another uid',
+  deletionMember.token,
+  accountDeletionRequestCommit({
+    documentUid: intruder.uid,
+    claimedUid: deletionMember.uid,
+  }),
+  403,
+);
+await commit(
+  'member cannot spoof the uid in their deletion marker',
+  deletionMember.token,
+  accountDeletionRequestCommit({
+    documentUid: deletionMember.uid,
+    claimedUid: intruder.uid,
+  }),
+  403,
+);
+
+await commit(
+  'deletion member can create a record before requesting deletion',
+  deletionMember.token,
+  mutationCommit({
+    uid: deletionMember.uid,
+    recordId: 'deletion-record-00',
+    outboxId: 'deletion-receipt-00',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+  }),
+  200,
+);
+
+const deletionSeedWrites = [];
+for (let index = 1; index < 25; index += 1) {
+  const suffix = String(index).padStart(2, '0');
+  deletionSeedWrites.push(
+    ...mutationCommit({
+      uid: deletionMember.uid,
+      recordId: `deletion-record-${suffix}`,
+      outboxId: `deletion-receipt-${suffix}`,
+      operationType: 'create',
+      baseVersionNo: 0,
+      resultingVersionNo: 1,
+    }).writes,
+  );
+}
+await expectStatus(
+  'seed more than twenty records and receipts for deletion pagination',
+  await adminRequest(':commit', {
+    method: 'POST',
+    body: {writes: deletionSeedWrites},
+  }),
+  200,
+);
+
+await commit(
+  'member can create their own valid deletion marker',
+  deletionMember.token,
+  accountDeletionRequestCommit({documentUid: deletionMember.uid}),
+  200,
+);
+await expectStatus(
+  'member can read their own deletion marker',
+  await request(`/account_deletion_requests/${deletionMember.uid}`, {
+    token: deletionMember.token,
+  }),
+  200,
+);
+await expectStatus(
+  'another member cannot read a deletion marker',
+  await request(`/account_deletion_requests/${deletionMember.uid}`, {
+    token: intruder.token,
+  }),
+  403,
+);
+await commit(
+  'deletion marker is immutable',
+  deletionMember.token,
+  accountDeletionRequestCommit({documentUid: deletionMember.uid}),
+  403,
+);
+await expectStatus(
+  'deletion marker cannot be removed by its owner',
+  await request(`/account_deletion_requests/${deletionMember.uid}`, {
+    token: deletionMember.token,
+    method: 'DELETE',
+  }),
+  403,
+);
+
+await commit(
+  'deletion marker blocks normal record writes',
+  deletionMember.token,
+  mutationCommit({
+    uid: deletionMember.uid,
+    recordId: 'write-after-deletion-request',
+    outboxId: 'write-after-deletion-request',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+  }),
+  403,
+);
+await expectStatus(
+  'intruder cannot delete deletion member entitlement',
+  await request(`/plan_entitlements/${deletionMember.uid}`, {
+    token: intruder.token,
+    method: 'DELETE',
+  }),
+  403,
+);
+await expectStatus(
+  'deletion member can delete own entitlement',
+  await request(`/plan_entitlements/${deletionMember.uid}`, {
+    token: deletionMember.token,
+    method: 'DELETE',
+  }),
+  200,
+);
+
+const deletionRecords = await listAllDocuments(
+  'deletion member can page through own records',
+  `/users/${deletionMember.uid}/records`,
+  deletionMember.token,
+);
+if (deletionRecords.length !== 25) {
+  throw new Error(
+    `deletion record pagination: expected 25 documents, received ${deletionRecords.length}`,
+  );
+}
+const deletionReceipts = await listAllDocuments(
+  'deletion member can page through own receipts',
+  `/users/${deletionMember.uid}/sync_receipts`,
+  deletionMember.token,
+);
+if (deletionReceipts.length !== 25) {
+  throw new Error(
+    `deletion receipt pagination: expected 25 documents, received ${deletionReceipts.length}`,
+  );
+}
+
+await expectStatus(
+  'intruder cannot hard delete deletion member record',
+  await request(`/users/${deletionMember.uid}/records/deletion-record-00`, {
+    token: intruder.token,
+    method: 'DELETE',
+  }),
+  403,
+);
+await expectStatus(
+  'intruder cannot hard delete deletion member receipt',
+  await request(
+    `/users/${deletionMember.uid}/sync_receipts/deletion-receipt-00`,
+    {token: intruder.token, method: 'DELETE'},
+  ),
+  403,
+);
+await hardDeleteInBatches(
+  'deletion member can hard delete own records',
+  deletionMember.token,
+  deletionRecords,
+);
+await hardDeleteInBatches(
+  'deletion member can hard delete own receipts',
+  deletionMember.token,
+  deletionReceipts,
+);
+
+const recordsAfterDeletion = await listAllDocuments(
+  'deleted record collection remains listable',
+  `/users/${deletionMember.uid}/records`,
+  deletionMember.token,
+);
+const receiptsAfterDeletion = await listAllDocuments(
+  'deleted receipt collection remains listable',
+  `/users/${deletionMember.uid}/sync_receipts`,
+  deletionMember.token,
+);
+if (recordsAfterDeletion.length !== 0 || receiptsAfterDeletion.length !== 0) {
+  throw new Error('account deletion cleanup left records or receipts behind');
+}
 
 console.log('Firestore rules smoke test passed.');

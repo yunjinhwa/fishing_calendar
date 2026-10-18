@@ -51,6 +51,8 @@ abstract interface class RecordPhotoFileStoreBackend {
   });
 
   Future<Uint8List> readBytes(String path);
+
+  Future<void> deleteOwnerFiles(String ownerId);
 }
 
 class RecordPhotoFileStoreException implements Exception {

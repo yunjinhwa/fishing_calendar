@@ -75,4 +75,45 @@ void main() {
       throwsA(isA<RecordPhotoTooLargeException>()),
     );
   });
+
+  test('deleting one owner photos preserves every other owner', () async {
+    final firstOwnerPhoto = await fileStore.persistSelection(
+      ownerId: 'member:first-user',
+      recordId: 'first-record',
+      photoId: 'first-photo',
+      bytes: Uint8List.fromList(<int>[0xff, 0xd8, 0x01, 0xd9]),
+      contentType: 'image/jpeg',
+    );
+    final firstOwnerSecondPhoto = await fileStore.persistSelection(
+      ownerId: 'member:first-user',
+      recordId: 'second-record',
+      photoId: 'second-photo',
+      bytes: Uint8List.fromList(<int>[0xff, 0xd8, 0x02, 0xd9]),
+      contentType: 'image/jpeg',
+    );
+    final secondOwnerPhoto = await fileStore.persistSelection(
+      ownerId: 'member:second-user',
+      recordId: 'shared-record-id',
+      photoId: 'shared-photo-id',
+      bytes: Uint8List.fromList(<int>[0xff, 0xd8, 0x03, 0xd9]),
+      contentType: 'image/jpeg',
+    );
+
+    await fileStore.deleteOwnerFiles('member:first-user');
+    // Retrying a partially completed account cleanup must be harmless.
+    await fileStore.deleteOwnerFiles('member:first-user');
+
+    await expectLater(
+      fileStore.readBytes(firstOwnerPhoto.path),
+      throwsA(isA<RecordPhotoFileNotFoundException>()),
+    );
+    await expectLater(
+      fileStore.readBytes(firstOwnerSecondPhoto.path),
+      throwsA(isA<RecordPhotoFileNotFoundException>()),
+    );
+    expect(
+      await fileStore.readBytes(secondOwnerPhoto.path),
+      Uint8List.fromList(<int>[0xff, 0xd8, 0x03, 0xd9]),
+    );
+  });
 }

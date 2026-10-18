@@ -210,6 +210,24 @@ class LocalDataStore {
     );
   }
 
+  Future<void> deleteOwnerData(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+  }) async {
+    for (final table in <String>[
+      AppDatabase.recordConflictsTable,
+      AppDatabase.recordSyncStatesTable,
+      AppDatabase.outboxItemsTable,
+      AppDatabase.fishingRecordsTable,
+    ]) {
+      await executor.delete(
+        table,
+        where: 'owner_key = ?',
+        whereArgs: <Object?>[ownerKey],
+      );
+    }
+  }
+
   Future<List<OutboxItem>> readOutboxItemsForOwner(String ownerKey) async {
     final database = await AppDatabase.instance.database;
     final rows = await database.query(
@@ -529,6 +547,17 @@ class LocalDataStore {
       'metadata_value': value,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> deleteMetadata(
+    DatabaseExecutor executor, {
+    required String key,
+  }) async {
+    await executor.delete(
+      AppDatabase.localMetadataTable,
+      where: 'metadata_key = ?',
+      whereArgs: <Object?>[key],
+    );
   }
 
   String _recordKey(String ownerKey, String recordId) =>

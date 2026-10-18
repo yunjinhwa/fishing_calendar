@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -20,6 +21,15 @@ enum AuthSignInResult {
   invalidCredentials,
   credentialSetupRequired,
 }
+
+typedef RemoteAccountDeletionCleanup =
+    Future<void> Function({
+      required String ownerKey,
+      required String email,
+      required String firebaseUid,
+    });
+
+enum _LocalAccountDeletionOrigin { none, initiatedHere, observedRemotely }
 
 class AuthSessionRepository extends ChangeNotifier {
   AuthSessionRepository._();
@@ -44,6 +54,8 @@ class AuthSessionRepository extends ChangeNotifier {
   static const String _serverEntitlementStatesKey =
       'auth_server_entitlement_states_v1';
   static const String _firebaseNicknamesKey = 'auth_firebase_nicknames_v1';
+  static const String _accountDeletionOriginsKey =
+      'auth_account_deletion_origins_v1';
 
   AuthGateway? _authGateway;
   bool _hasActiveSession = false;
@@ -54,6 +66,9 @@ class AuthSessionRepository extends ChangeNotifier {
   String? _email;
   String? _nickname;
   bool _requiresPasswordSetup = false;
+  bool _isDeletingAccount = false;
+  bool _hasPendingAccountDeletion = false;
+  bool _accountDeletionInitiatedLocally = false;
   AuthFailure? _lastAuthFailure;
   PlanEntitlementSource _planEntitlementSource =
       PlanEntitlementSource.localDevelopment;
@@ -62,6 +77,9 @@ class AuthSessionRepository extends ChangeNotifier {
   String? _planEntitlementProvider;
   AuthFailure? _lastPlanEntitlementFailure;
   Timer? _planEntitlementExpiryTimer;
+  StreamSubscription<bool>? _accountDeletionSubscription;
+  int _accountDeletionWatchGeneration = 0;
+  RemoteAccountDeletionCleanup? _remoteAccountDeletionCleanup;
 
   bool get hasActiveSession => _hasActiveSession;
   bool get persistsAcrossRestarts => _persistsAcrossRestarts;
@@ -70,11 +88,19 @@ class AuthSessionRepository extends ChangeNotifier {
   String? get email => _email;
   String? get nickname => _nickname;
   bool get requiresPasswordSetup => _requiresPasswordSetup;
+  bool get isDeletingAccount => _isDeletingAccount;
+  bool get hasPendingAccountDeletion => _hasPendingAccountDeletion;
+  bool get canResumeAccountDeletion =>
+      _hasPendingAccountDeletion && _accountDeletionInitiatedLocally;
+  bool get isAccountDeletedRemotely =>
+      _hasPendingAccountDeletion && !_accountDeletionInitiatedLocally;
   bool get usesFirebaseAuth => _authGateway != null;
   AuthFailure? get lastAuthFailure => _lastAuthFailure;
   bool get usesServerPlan => _authGateway != null;
   bool get canRefreshServerPlan =>
-      _authGateway != null && (_memberId?.trim().isNotEmpty ?? false);
+      !_isAccountDeletionLocked &&
+      _authGateway != null &&
+      (_memberId?.trim().isNotEmpty ?? false);
   PlanEntitlementSource get planEntitlementSource => _planEntitlementSource;
   DateTime? get planEntitlementCheckedAt => _planEntitlementCheckedAt;
   DateTime? get planEntitlementExpiresAt => _planEntitlementExpiresAt;
@@ -133,13 +159,19 @@ class AuthSessionRepository extends ChangeNotifier {
   UserPlanPolicy get policy =>
       UserPlanPolicy.forPlan(isGuest ? UserPlan.guest : plan);
 
-  bool get canManageRecords => policy.canManageRecords;
-  bool get canUseOfflineRecords => policy.canUseOfflineRecords;
+  bool get _isAccountDeletionLocked =>
+      _isDeletingAccount || _hasPendingAccountDeletion;
+
+  bool get canManageRecords =>
+      !_isAccountDeletionLocked && policy.canManageRecords;
+  bool get canUseOfflineRecords =>
+      !_isAccountDeletionLocked && policy.canUseOfflineRecords;
   bool get canUseCloudSync =>
+      !_isAccountDeletionLocked &&
       policy.canUseCloudSync &&
       !isPlanMigrationPending &&
       (_authGateway == null || _memberId != null);
-  bool get canUseOutbox => policy.usesOutbox;
+  bool get canUseOutbox => !_isAccountDeletionLocked && policy.usesOutbox;
 
   bool allows(UserCapability capability) {
     switch (capability) {
@@ -182,11 +214,18 @@ class AuthSessionRepository extends ChangeNotifier {
   /// Passing a gateway opts this repository into Firebase-backed member auth.
   /// A null gateway keeps the existing local-only development behavior.
   void configureAuthGateway(AuthGateway? gateway) {
+    _stopAccountDeletionWatch();
     _authGateway = gateway;
     _lastAuthFailure = gateway?.availabilityFailure;
     if (gateway == null) {
       _resetPlanEntitlementState();
     }
+  }
+
+  void configureRemoteAccountDeletionCleanup(
+    RemoteAccountDeletionCleanup? cleanup,
+  ) {
+    _remoteAccountDeletionCleanup = cleanup;
   }
 
   Future<void> loadSession() async {
@@ -295,6 +334,9 @@ class AuthSessionRepository extends ChangeNotifier {
     }
 
     if (user == null) {
+      if (prefs.getString(_memberIdKey)?.trim().isNotEmpty ?? false) {
+        await _clearPersistedSession(prefs);
+      }
       if (await _restoreLegacyPasswordSetupSession(prefs)) {
         return;
       }
@@ -327,6 +369,7 @@ class AuthSessionRepository extends ChangeNotifier {
         rememberSession: true,
         migrateLegacyAccount: false,
         allowCachedNickname: true,
+        allowOfflineAccountDeletionCheck: true,
         notify: false,
       );
       _lastAuthFailure = null;
@@ -677,6 +720,7 @@ class AuthSessionRepository extends ChangeNotifier {
     required bool migrateLegacyAccount,
     String? nicknameOverride,
     bool allowCachedNickname = false,
+    bool allowOfflineAccountDeletionCheck = false,
     bool notify = true,
   }) async {
     if (user.isAnonymous || user.uid.trim().isEmpty) {
@@ -692,6 +736,67 @@ class AuthSessionRepository extends ChangeNotifier {
         message: '인증 계정의 이메일 정보를 확인할 수 없습니다.',
       );
     }
+
+    var localDeletionOrigin = await _readAccountDeletionOrigin(user.uid);
+    var hasPendingAccountDeletion = false;
+    var accountDeletionStatusKnown = true;
+    try {
+      hasPendingAccountDeletion = await gateway.hasPendingAccountDeletion(
+        user.uid,
+      );
+    } on AuthFailure catch (failure) {
+      final canContinueOffline =
+          allowOfflineAccountDeletionCheck &&
+          failure.code == AuthFailureCode.networkUnavailable;
+      if (!canContinueOffline) {
+        rethrow;
+      }
+      accountDeletionStatusKnown = false;
+    }
+
+    if (hasPendingAccountDeletion ||
+        (!accountDeletionStatusKnown &&
+            localDeletionOrigin != _LocalAccountDeletionOrigin.none)) {
+      if (hasPendingAccountDeletion &&
+          localDeletionOrigin == _LocalAccountDeletionOrigin.none) {
+        localDeletionOrigin = _LocalAccountDeletionOrigin.observedRemotely;
+        await _setAccountDeletionOrigin(user.uid, localDeletionOrigin);
+      }
+      final cachedNickname = await _readFirebaseNickname(user.uid);
+      _hasPendingAccountDeletion = true;
+      _accountDeletionInitiatedLocally =
+          localDeletionOrigin == _LocalAccountDeletionOrigin.initiatedHere;
+      await _saveSession(
+        plan: UserPlan.free,
+        migrationStatus: PlanMigrationStatus.none,
+        memberId: user.uid,
+        email: normalizedEmail,
+        nickname: cachedNickname ?? user.displayName,
+        persistSession: rememberSession,
+        requiresPasswordSetup: false,
+        notify: false,
+      );
+      _resetPlanEntitlementState();
+      _startAccountDeletionWatch(gateway, user.uid);
+      if (notify) {
+        notifyListeners();
+      }
+      await _runRemoteAccountDeletionCleanup(
+        ownerKey: DataOwnerKey.firebaseUid(user.uid),
+        email: normalizedEmail,
+        firebaseUid: user.uid,
+      );
+      return;
+    }
+    if (localDeletionOrigin != _LocalAccountDeletionOrigin.none &&
+        accountDeletionStatusKnown) {
+      await _setAccountDeletionOrigin(
+        user.uid,
+        _LocalAccountDeletionOrigin.none,
+      );
+    }
+    _hasPendingAccountDeletion = false;
+    _accountDeletionInitiatedLocally = false;
 
     await LocalIdentityMigrationService.instance.claimLegacyMemberData(
       firebaseUid: user.uid,
@@ -780,6 +885,7 @@ class AuthSessionRepository extends ChangeNotifier {
       notify: false,
     );
     _applyResolvedPlanEntitlement(resolution);
+    _startAccountDeletionWatch(gateway, user.uid);
     if (notify) {
       notifyListeners();
     }
@@ -980,6 +1086,244 @@ class AuthSessionRepository extends ChangeNotifier {
       _lastAuthFailure = signOutFailure;
       throw signOutFailure;
     }
+  }
+
+  Future<void> deleteCurrentAccount({
+    required String password,
+    required Future<void> Function(
+      String ownerKey,
+      String email,
+      String? firebaseUid,
+    )
+    prepareLocalDataDeletion,
+    required Future<void> Function(
+      String ownerKey,
+      String email,
+      String? firebaseUid,
+    )
+    purgeLocalData,
+  }) async {
+    final currentEmail = _email;
+    if (!isMember ||
+        currentEmail == null ||
+        !AuthInputValidator.isValidEmail(currentEmail)) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: '탈퇴할 로그인 계정을 확인할 수 없습니다.',
+      );
+    }
+    if (password.isEmpty) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidCredentials,
+        message: '계정 비밀번호를 입력해 주세요.',
+      );
+    }
+    if (_isDeletingAccount) {
+      throw const AuthFailure(
+        code: AuthFailureCode.serviceUnavailable,
+        message: '회원 탈퇴가 이미 진행 중입니다.',
+      );
+    }
+    if (isAccountDeletedRemotely) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: '다른 기기에서 탈퇴 처리된 계정입니다. 로그아웃해 주세요.',
+      );
+    }
+
+    final ownerKey = dataOwnerKey;
+    final currentUid = _memberId?.trim();
+    final currentNickname = _nickname?.trim() ?? '';
+    final gateway = _authGateway;
+    final hasFirebaseIdentity =
+        gateway != null && currentUid != null && currentUid.isNotEmpty;
+    var accountIdentityRemoved = false;
+
+    _isDeletingAccount = true;
+    notifyListeners();
+    try {
+      if (!hasFirebaseIdentity) {
+        final savedPasswordHash = await _readAccountPasswordHash(currentEmail);
+        if (savedPasswordHash == null ||
+            savedPasswordHash != _hashPassword(password)) {
+          throw const AuthFailure(
+            code: AuthFailureCode.invalidCredentials,
+            message: '비밀번호가 올바르지 않습니다.',
+          );
+        }
+      } else {
+        final firebaseGateway = gateway;
+        _requireAvailableGateway(firebaseGateway);
+        await firebaseGateway.reauthenticateWithPassword(password);
+        if (isAccountDeletedRemotely) {
+          throw const AuthFailure(
+            code: AuthFailureCode.noCurrentUser,
+            message: '다른 기기에서 탈퇴 처리된 계정입니다. 로그아웃해 주세요.',
+          );
+        }
+        _hasPendingAccountDeletion = true;
+        _accountDeletionInitiatedLocally = true;
+        await _setAccountDeletionOrigin(
+          currentUid,
+          _LocalAccountDeletionOrigin.initiatedHere,
+        );
+        await firebaseGateway.deleteAccountData(uid: currentUid);
+        notifyListeners();
+      }
+
+      await prepareLocalDataDeletion(ownerKey, currentEmail, currentUid);
+      await clearDeletedAccountLocalState(
+        email: currentEmail,
+        firebaseUid: currentUid,
+      );
+      if (!hasFirebaseIdentity) {
+        accountIdentityRemoved = true;
+      }
+
+      await purgeLocalData(ownerKey, currentEmail, currentUid);
+
+      if (hasFirebaseIdentity) {
+        final firebaseGateway = gateway;
+        await firebaseGateway.releaseNickname(
+          uid: currentUid,
+          nickname: currentNickname,
+        );
+        await firebaseGateway.deleteCurrentUser();
+        accountIdentityRemoved = true;
+        await _setAccountDeletionOriginBestEffort(
+          currentUid,
+          _LocalAccountDeletionOrigin.none,
+        );
+      } else if (gateway != null) {
+        await gateway.signOut();
+      }
+
+      _isDeletingAccount = false;
+      _lastAuthFailure = null;
+      _applySignedOut();
+    } on Object {
+      if (accountIdentityRemoved) {
+        _isDeletingAccount = false;
+        _lastAuthFailure = null;
+        _applySignedOut();
+      } else if (hasFirebaseIdentity) {
+        try {
+          _hasPendingAccountDeletion = await gateway.hasPendingAccountDeletion(
+            currentUid,
+          );
+          if (_hasPendingAccountDeletion && !_accountDeletionInitiatedLocally) {
+            await _setAccountDeletionOriginBestEffort(
+              currentUid,
+              _LocalAccountDeletionOrigin.observedRemotely,
+            );
+            await _runRemoteAccountDeletionCleanup(
+              ownerKey: ownerKey,
+              email: currentEmail,
+              firebaseUid: currentUid,
+            );
+          } else if (!_hasPendingAccountDeletion) {
+            _accountDeletionInitiatedLocally = false;
+            await _setAccountDeletionOriginBestEffort(
+              currentUid,
+              _LocalAccountDeletionOrigin.none,
+            );
+          }
+        } on Object {
+          // Keep the last known state when the deletion marker cannot be read.
+        }
+      }
+      if (!accountIdentityRemoved) {
+        _isDeletingAccount = false;
+        notifyListeners();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> clearDeletedAccountLocalState({
+    required String email,
+    required String? firebaseUid,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await _removeDeletedAccountPreferences(
+      prefs,
+      email: email,
+      firebaseUid: firebaseUid,
+    );
+
+    final persistedUid = prefs.getString(_memberIdKey)?.trim();
+    final persistedEmail = prefs.getString(_emailKey);
+    final normalizedEmail = DataOwnerKey.normalizeEmail(email);
+    final matchesPersistedSession = firebaseUid != null
+        ? persistedUid == firebaseUid ||
+              ((persistedUid == null || persistedUid.isEmpty) &&
+                  persistedEmail != null &&
+                  DataOwnerKey.normalizeEmail(persistedEmail) ==
+                      normalizedEmail)
+        : (persistedUid == null || persistedUid.isEmpty) &&
+              persistedEmail != null &&
+              DataOwnerKey.normalizeEmail(persistedEmail) == normalizedEmail;
+    if (!matchesPersistedSession) {
+      return;
+    }
+
+    await _clearPersistedSession(prefs);
+    await _removePreference(
+      prefs,
+      _signOutOnRestartKey,
+      'clear deleted account restart state',
+    );
+  }
+
+  Future<void> _removeDeletedAccountPreferences(
+    SharedPreferences prefs, {
+    required String email,
+    required String? firebaseUid,
+  }) async {
+    final normalizedEmail = DataOwnerKey.normalizeEmail(email);
+    for (final key in <String>[
+      _accountPlansKey,
+      _accountMigrationStatusesKey,
+      _accountPolicyStatesKey,
+      _accountNicknamesKey,
+      _accountPasswordHashesKey,
+    ]) {
+      await _removeMapEntry(prefs, key: key, entryKey: normalizedEmail);
+    }
+
+    if (firebaseUid != null && firebaseUid.isNotEmpty) {
+      for (final key in <String>[
+        _firebasePolicyStatesKey,
+        _serverEntitlementStatesKey,
+        _firebaseNicknamesKey,
+      ]) {
+        await _removeMapEntry(prefs, key: key, entryKey: firebaseUid);
+      }
+    }
+  }
+
+  Future<void> _removeMapEntry(
+    SharedPreferences prefs, {
+    required String key,
+    required String entryKey,
+  }) async {
+    final raw = prefs.getString(key);
+    if (raw == null) {
+      return;
+    }
+    final values = _decodeObjectMap(raw);
+    if (!values.containsKey(entryKey)) {
+      return;
+    }
+    values.remove(entryKey);
+    if (values.isEmpty) {
+      await _removePreference(prefs, key, 'remove deleted account cache');
+      return;
+    }
+    _requirePreferenceSuccess(
+      await prefs.setString(key, jsonEncode(values)),
+      'remove deleted account cache',
+    );
   }
 
   Future<String?> getIdToken({bool forceRefresh = false}) async {
@@ -1458,6 +1802,67 @@ class AuthSessionRepository extends ChangeNotifier {
     );
   }
 
+  Future<_LocalAccountDeletionOrigin> _readAccountDeletionOrigin(
+    String uid,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final origins = _decodeStringMap(
+      prefs.getString(_accountDeletionOriginsKey),
+    );
+    return switch (origins[uid]) {
+      'initiatedHere' => _LocalAccountDeletionOrigin.initiatedHere,
+      'observedRemotely' => _LocalAccountDeletionOrigin.observedRemotely,
+      _ => _LocalAccountDeletionOrigin.none,
+    };
+  }
+
+  Future<void> _setAccountDeletionOrigin(
+    String uid,
+    _LocalAccountDeletionOrigin origin,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final origins = _decodeStringMap(
+      prefs.getString(_accountDeletionOriginsKey),
+    );
+    if (origin == _LocalAccountDeletionOrigin.none) {
+      if (origins.remove(uid) == null) {
+        return;
+      }
+    } else if (origins[uid] == origin.name) {
+      return;
+    } else {
+      origins[uid] = origin.name;
+    }
+    if (origins.isEmpty) {
+      await _removePreference(
+        prefs,
+        _accountDeletionOriginsKey,
+        'clear account-deletion origin',
+      );
+      return;
+    }
+    _requirePreferenceSuccess(
+      await prefs.setString(_accountDeletionOriginsKey, jsonEncode(origins)),
+      'save account-deletion origin',
+    );
+  }
+
+  Future<void> _setAccountDeletionOriginBestEffort(
+    String uid,
+    _LocalAccountDeletionOrigin origin,
+  ) async {
+    try {
+      await _setAccountDeletionOrigin(uid, origin);
+    } on Object catch (error, stackTrace) {
+      developer.log(
+        'Failed to update the local account-deletion origin marker.',
+        name: 'AuthSessionRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
   Future<String?> _readAccountPasswordHash(String email) async {
     final prefs = await SharedPreferences.getInstance();
     final hashes = _decodeStringMap(prefs.getString(_accountPasswordHashesKey));
@@ -1616,6 +2021,10 @@ class AuthSessionRepository extends ChangeNotifier {
   }
 
   void _applySignedOut({bool notify = true}) {
+    _stopAccountDeletionWatch();
+    _isDeletingAccount = false;
+    _hasPendingAccountDeletion = false;
+    _accountDeletionInitiatedLocally = false;
     _resetPlanEntitlementState();
     _applySession(
       hasActiveSession: false,
@@ -1628,6 +2037,101 @@ class AuthSessionRepository extends ChangeNotifier {
       requiresPasswordSetup: false,
       notify: notify,
     );
+  }
+
+  void _startAccountDeletionWatch(AuthGateway gateway, String uid) {
+    _stopAccountDeletionWatch();
+    final generation = _accountDeletionWatchGeneration;
+    _accountDeletionSubscription = gateway
+        .watchPendingAccountDeletion(uid)
+        .listen(
+          (isPending) {
+            if (!isPending ||
+                generation != _accountDeletionWatchGeneration ||
+                _authGateway != gateway ||
+                _memberId != uid ||
+                !isMember ||
+                _hasPendingAccountDeletion) {
+              return;
+            }
+            final ownerKey = dataOwnerKey;
+            final currentEmail = _email;
+            final observedRemotely = !_accountDeletionInitiatedLocally;
+            _hasPendingAccountDeletion = true;
+            _resetPlanEntitlementState();
+            notifyListeners();
+            if (observedRemotely) {
+              unawaited(
+                _persistRemoteAccountDeletionAndCleanup(
+                  uid: uid,
+                  ownerKey: ownerKey,
+                  email: currentEmail,
+                ),
+              );
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (generation != _accountDeletionWatchGeneration ||
+                _authGateway != gateway ||
+                _memberId != uid) {
+              return;
+            }
+            _lastAuthFailure = _asAuthFailure(error, stackTrace);
+            notifyListeners();
+          },
+        );
+  }
+
+  void _stopAccountDeletionWatch() {
+    _accountDeletionWatchGeneration += 1;
+    final subscription = _accountDeletionSubscription;
+    _accountDeletionSubscription = null;
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
+  }
+
+  Future<void> _persistRemoteAccountDeletionAndCleanup({
+    required String uid,
+    required String ownerKey,
+    required String? email,
+  }) async {
+    await _setAccountDeletionOriginBestEffort(
+      uid,
+      _LocalAccountDeletionOrigin.observedRemotely,
+    );
+    if (email == null || !AuthInputValidator.isValidEmail(email)) {
+      return;
+    }
+    await _runRemoteAccountDeletionCleanup(
+      ownerKey: ownerKey,
+      email: email,
+      firebaseUid: uid,
+    );
+  }
+
+  Future<void> _runRemoteAccountDeletionCleanup({
+    required String ownerKey,
+    required String email,
+    required String firebaseUid,
+  }) async {
+    final cleanup = _remoteAccountDeletionCleanup;
+    if (cleanup == null) {
+      return;
+    }
+    try {
+      await cleanup(ownerKey: ownerKey, email: email, firebaseUid: firebaseUid);
+    } on Object catch (error, stackTrace) {
+      // The server tombstone still keeps this session restricted. Local
+      // cleanup persists its own retry marker and must not sign the user back
+      // in or make application startup fail.
+      developer.log(
+        'Deferred remote account-deletion cleanup until the next launch.',
+        name: 'AuthSessionRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   void _applySession({
@@ -1705,7 +2209,18 @@ class AuthSessionRepository extends ChangeNotifier {
   }
 
   @visibleForTesting
+  void setAccountDeletionStateForTesting({
+    required bool isPending,
+    required bool initiatedLocally,
+  }) {
+    _hasPendingAccountDeletion = isPending;
+    _accountDeletionInitiatedLocally = isPending && initiatedLocally;
+    notifyListeners();
+  }
+
+  @visibleForTesting
   void resetAuthGatewayForTesting() {
+    _remoteAccountDeletionCleanup = null;
     _authGateway = null;
     _lastAuthFailure = null;
     _applySignedOut();

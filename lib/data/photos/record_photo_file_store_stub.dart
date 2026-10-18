@@ -76,6 +76,18 @@ final class MemoryRecordPhotoFileStoreBackend
     return Uint8List.fromList(stored);
   }
 
+  @override
+  Future<void> deleteOwnerFiles(String ownerId) async {
+    final ownerSegment = safeRecordPhotoPathSegment(
+      ownerId,
+      fieldName: 'ownerId',
+    );
+    final prefix =
+        'memory-record-photo:///'
+        '${p.url.join(recordPhotoStorageDirectoryName, ownerSegment)}/';
+    _files.removeWhere((path, _) => path.startsWith(prefix));
+  }
+
   StoredRecordPhotoFile _store({
     required String ownerId,
     required String recordId,

@@ -9,6 +9,8 @@ import 'nickname_policy.dart';
 
 class FirebaseAuthGateway implements AuthGateway {
   static const String _nicknameClaimsCollection = 'nickname_claims';
+  static const String _accountDeletionRequestsCollection =
+      'account_deletion_requests';
   static const String _planEntitlementsCollection = 'plan_entitlements';
   static const String _userProfilesCollection = 'user_profiles';
 
@@ -126,6 +128,31 @@ class FirebaseAuthGateway implements AuthGateway {
   }
 
   @override
+  Future<void> reauthenticateWithPassword(String password) async {
+    final user = _auth.currentUser;
+    final email = user?.email?.trim();
+    if (user == null || email == null || email.isEmpty) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: '로그인한 이메일 회원을 확인할 수 없습니다.',
+      );
+    }
+
+    try {
+      final credential = firebase.EmailAuthProvider.credential(
+        email: email,
+        password: password,
+      );
+      await user.reauthenticateWithCredential(credential);
+      await user.getIdToken(true);
+    } on firebase.FirebaseAuthException catch (error, stackTrace) {
+      throw _mapFirebaseError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  @override
   Future<String?> getRegisteredNickname(String uid) async {
     try {
       final snapshot = await _firestore
@@ -223,6 +250,54 @@ class FirebaseAuthGateway implements AuthGateway {
       rethrow;
     } on FirebaseException catch (error, stackTrace) {
       throw _mapFirestoreError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  @override
+  Future<bool> hasPendingAccountDeletion(String uid) async {
+    final user = _auth.currentUser;
+    if (user == null || user.uid != uid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: '로그인한 계정을 확인할 수 없습니다.',
+      );
+    }
+    try {
+      final snapshot = await _firestore
+          .collection(_accountDeletionRequestsCollection)
+          .doc(uid)
+          .get(const firestore.GetOptions(source: firestore.Source.server));
+      return snapshot.exists;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirestoreError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  @override
+  Stream<bool> watchPendingAccountDeletion(String uid) async* {
+    final user = _auth.currentUser;
+    if (user == null || user.uid != uid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: '로그인한 계정을 확인할 수 없습니다.',
+      );
+    }
+    try {
+      await for (final snapshot
+          in _firestore
+              .collection(_accountDeletionRequestsCollection)
+              .doc(uid)
+              .snapshots()) {
+        yield snapshot.exists;
+      }
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirestoreError(error, stackTrace);
+    } on AuthFailure {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw _unknownFailure(error, stackTrace);
     }
@@ -328,7 +403,14 @@ class FirebaseAuthGateway implements AuthGateway {
         final storedKey = profile?['uid'] == uid && storedNicknameKey is String
             ? storedNicknameKey
             : null;
-        final nicknameKey = storedKey ?? NicknamePolicy.canonicalKey(nickname);
+        final fallbackNickname = NicknamePolicy.displayValue(nickname);
+        final fallbackKey = NicknamePolicy.isValid(fallbackNickname)
+            ? NicknamePolicy.canonicalKey(fallbackNickname)
+            : null;
+        final nicknameKey = storedKey ?? fallbackKey;
+        if (nicknameKey == null) {
+          return;
+        }
         final claimReference = _firestore
             .collection(_nicknameClaimsCollection)
             .doc(nicknameKey);
@@ -345,6 +427,73 @@ class FirebaseAuthGateway implements AuthGateway {
       throw _mapFirestoreError(error, stackTrace);
     } on Object catch (error, stackTrace) {
       throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  @override
+  Future<void> deleteAccountData({required String uid}) async {
+    final user = _auth.currentUser;
+    if (user == null || user.uid != uid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: '탈퇴할 로그인 계정을 확인할 수 없습니다.',
+      );
+    }
+
+    try {
+      await _beginAccountDeletion(uid);
+      final userReference = _firestore.collection('users').doc(uid);
+      await _deleteCollection(userReference.collection('records'));
+      await _deleteCollection(userReference.collection('sync_receipts'));
+      await _firestore
+          .collection(_planEntitlementsCollection)
+          .doc(uid)
+          .delete();
+    } on AuthFailure {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirestoreError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  Future<void> _beginAccountDeletion(String uid) async {
+    final reference = _firestore
+        .collection(_accountDeletionRequestsCollection)
+        .doc(uid);
+    final existing = await reference.get(
+      const firestore.GetOptions(source: firestore.Source.server),
+    );
+    if (existing.exists) {
+      return;
+    }
+    await reference.set(<String, Object>{
+      'schemaVersion': 1,
+      'uid': uid,
+      'status': 'REQUESTED',
+      'requestedAt': firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> _deleteCollection(
+    firestore.CollectionReference<Map<String, dynamic>> collection,
+  ) async {
+    // Each delete rule checks the account-deletion tombstone. Keep the batch
+    // below Firestore's multi-document rules access limit.
+    const batchSize = 15;
+    while (true) {
+      final snapshot = await collection
+          .limit(batchSize)
+          .get(const firestore.GetOptions(source: firestore.Source.server));
+      if (snapshot.docs.isEmpty) {
+        return;
+      }
+      final batch = _firestore.batch();
+      for (final document in snapshot.docs) {
+        batch.delete(document.reference);
+      }
+      await batch.commit();
     }
   }
 
