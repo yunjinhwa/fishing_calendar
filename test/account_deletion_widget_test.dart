@@ -1,5 +1,6 @@
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
+import 'package:fishing_build/presentation/common/hold_to_reveal_password_field.dart';
 import 'package:fishing_build/presentation/my_page/my_page.dart';
 import 'package:fishing_build/presentation/shell/app_shell.dart';
 import 'package:flutter/material.dart';
@@ -33,6 +34,7 @@ void main() {
 
     expect(find.textContaining('되돌릴 수 없습니다'), findsOneWidget);
     expect(find.textContaining('UID와 요청 시각'), findsOneWidget);
+    expect(find.byType(HoldToRevealPasswordField), findsOneWidget);
     var deleteButton = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, '영구 삭제'),
     );

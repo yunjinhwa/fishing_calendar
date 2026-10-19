@@ -7,6 +7,7 @@ import '../../data/repositories/conflict_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_mutation_service.dart';
+import '../common/hold_to_reveal_password_field.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
 import 'login_page.dart';
@@ -183,9 +184,9 @@ class _SignupPageState extends State<SignupPage> {
             ),
             const SizedBox(height: 16),
 
-            TextField(
+            HoldToRevealPasswordField(
               controller: passwordController,
-              obscureText: true,
+              autofillHints: const [AutofillHints.newPassword],
               decoration: const InputDecoration(
                 labelText: '비밀번호',
                 hintText: '비밀번호를 입력하세요',
@@ -194,9 +195,9 @@ class _SignupPageState extends State<SignupPage> {
             ),
             const SizedBox(height: 16),
 
-            TextField(
+            HoldToRevealPasswordField(
               controller: passwordConfirmController,
-              obscureText: true,
+              autofillHints: const [AutofillHints.newPassword],
               decoration: const InputDecoration(
                 labelText: '비밀번호 확인',
                 hintText: '비밀번호를 다시 입력하세요',

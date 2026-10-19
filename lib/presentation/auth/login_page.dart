@@ -11,6 +11,7 @@ import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/plan_policy_service.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_sync_service.dart';
+import '../common/hold_to_reveal_password_field.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
 import 'signup_page.dart';
@@ -188,9 +189,9 @@ class _LoginPageState extends State<LoginPage> {
             ),
             const SizedBox(height: 16),
 
-            TextField(
+            HoldToRevealPasswordField(
               controller: passwordController,
-              obscureText: true,
+              autofillHints: const [AutofillHints.password],
               decoration: const InputDecoration(
                 labelText: '비밀번호',
                 hintText: '비밀번호를 입력하세요',
