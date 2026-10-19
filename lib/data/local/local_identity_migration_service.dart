@@ -22,6 +22,7 @@ class LocalIdentityMigrationResult {
   final int migratedOutboxCount;
   final int migratedSyncStateCount;
   final int migratedConflictCount;
+  final int migratedLocalChangeCount;
 
   const LocalIdentityMigrationResult({
     required this.status,
@@ -31,13 +32,15 @@ class LocalIdentityMigrationResult {
     required this.migratedOutboxCount,
     this.migratedSyncStateCount = 0,
     this.migratedConflictCount = 0,
+    this.migratedLocalChangeCount = 0,
   });
 
   int get migratedItemCount =>
       migratedRecordCount +
       migratedOutboxCount +
       migratedSyncStateCount +
-      migratedConflictCount;
+      migratedConflictCount +
+      migratedLocalChangeCount;
 }
 
 sealed class LocalIdentityMigrationConflict implements Exception {
@@ -260,6 +263,12 @@ class LocalIdentityMigrationService {
       ''',
       <Object?>[targetOwnerKey, sourceOwnerKey],
     );
+    final migratedLocalChangeCount = await transaction.update(
+      AppDatabase.localRecordChangesTable,
+      <String, Object?>{'owner_key': targetOwnerKey},
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[sourceOwnerKey],
+    );
 
     await _store.writeMetadata(
       transaction,
@@ -276,7 +285,8 @@ class LocalIdentityMigrationService {
         migratedRecordCount > 0 ||
             migratedOutboxCount > 0 ||
             migratedSyncStateCount > 0 ||
-            migratedConflictCount > 0
+            migratedConflictCount > 0 ||
+            migratedLocalChangeCount > 0
         ? LocalIdentityMigrationStatus.migrated
         : existingClaim == null
         ? LocalIdentityMigrationStatus.claimedWithoutData
@@ -290,6 +300,7 @@ class LocalIdentityMigrationService {
       migratedOutboxCount: migratedOutboxCount,
       migratedSyncStateCount: migratedSyncStateCount,
       migratedConflictCount: migratedConflictCount,
+      migratedLocalChangeCount: migratedLocalChangeCount,
     );
   }
 
@@ -372,57 +383,26 @@ class LocalIdentityMigrationService {
     required String sourceOwnerKey,
     required String targetOwnerKey,
   }) async {
-    final records = AppDatabase.fishingRecordsTable;
-    final outbox = AppDatabase.outboxItemsTable;
+    const tables = [
+      AppDatabase.fishingRecordsTable,
+      AppDatabase.outboxItemsTable,
+      AppDatabase.recordSyncStatesTable,
+      AppDatabase.localRecordChangesTable,
+    ];
+    final ownerIdsQuery = tables
+        .map((table) => 'SELECT record_id FROM $table WHERE owner_key = ?')
+        .join(' UNION ');
     final rows = await executor.rawQuery(
       '''
-      SELECT conflicting_id
-      FROM (
-        SELECT source_record.record_id AS conflicting_id
-        FROM $records AS source_record
-        INNER JOIN $records AS target_record
-          ON target_record.owner_key = ?
-         AND target_record.record_id = source_record.record_id
-        WHERE source_record.owner_key = ?
-
-        UNION
-
-        SELECT source_record.record_id AS conflicting_id
-        FROM $records AS source_record
-        INNER JOIN $outbox AS target_outbox
-          ON target_outbox.owner_key = ?
-         AND target_outbox.record_id = source_record.record_id
-        WHERE source_record.owner_key = ?
-
-        UNION
-
-        SELECT source_outbox.record_id AS conflicting_id
-        FROM $outbox AS source_outbox
-        INNER JOIN $records AS target_record
-          ON target_record.owner_key = ?
-         AND target_record.record_id = source_outbox.record_id
-        WHERE source_outbox.owner_key = ?
-
-        UNION
-
-        SELECT source_outbox.record_id AS conflicting_id
-        FROM $outbox AS source_outbox
-        INNER JOIN $outbox AS target_outbox
-          ON target_outbox.owner_key = ?
-         AND target_outbox.record_id = source_outbox.record_id
-        WHERE source_outbox.owner_key = ?
-      )
-      ORDER BY conflicting_id ASC
+      SELECT source.record_id AS conflicting_id
+      FROM ($ownerIdsQuery) AS source
+      INNER JOIN ($ownerIdsQuery) AS target
+        ON source.record_id = target.record_id
+      ORDER BY source.record_id ASC
       ''',
       <Object?>[
-        targetOwnerKey,
-        sourceOwnerKey,
-        targetOwnerKey,
-        sourceOwnerKey,
-        targetOwnerKey,
-        sourceOwnerKey,
-        targetOwnerKey,
-        sourceOwnerKey,
+        ...List.filled(tables.length, sourceOwnerKey),
+        ...List.filled(tables.length, targetOwnerKey),
       ],
     );
 

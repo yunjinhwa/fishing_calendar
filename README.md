@@ -33,7 +33,8 @@
 - 오프라인 상태별 안내 화면
 - 실제 네트워크 연결 상태 감지, 수동 재확인 및 앱 복귀 시 갱신
 - 유료 회원 기록 생성 / 수정 / 삭제 Outbox 대기열 및 앱 재실행 복원
-- 중간 종료 후 Outbox 기준 로컬 기록 복구와 최신 마이그레이션 payload 재조정
+- 중간 종료 후 로컬 기록 복구와 재승급 시 최신 무료 수정·삭제 보존
+- 기존 Outbox 요청을 유지하는 후속 전송과 계정 전환 중 마이그레이션 취소
 - 계정별 Outbox 분리와 변경 당시 payload 보존
 - SQLite 기반 계정별 출조 기록 및 Outbox 저장과 기존 데이터 이전
 - Firestore 기반 유료 회원 기록 생성 / 수정 / 삭제 실제 동기화
@@ -80,3 +81,4 @@
 Firebase 프로젝트 연결과 실행 방법은 [Firebase Authentication 설정](docs/firebase_auth_setup.md)을 참고한다.
 기록 동기화 배포와 검증 방법은 [Firestore 기록 동기화 설정](docs/firestore_record_sync.md)을 참고한다.
 계정 플랜 문서 생성과 보안 규칙 배포 방법은 [서버 플랜 entitlement 설정](docs/server_plan_entitlement.md)을 참고한다.
+무료 기간의 수정·삭제를 유료 재전환 시 반영하는 정책과 테스트 방법은 [요금제 전환 중 기록 보존](docs/plan_migration_integrity.md)을 참고한다.

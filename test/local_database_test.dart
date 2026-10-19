@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:fishing_build/data/local/app_database.dart';
+import 'package:fishing_build/data/local/local_data_store.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/outbox_item.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
@@ -510,6 +511,49 @@ void main() {
           'base_version_no': 4,
         });
   });
+  test(
+    'database v3 upgrade preserves records and adds the free change journal',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'fishing-v3-upgrade-',
+      );
+      final databasePath = path.join(directory.path, 'records.db');
+      addTearDown(() async {
+        await AppDatabase.instance.close();
+        await directory.delete(recursive: true);
+      });
+      await AppDatabase.instance.configureForTesting(
+        databaseFactory: databaseFactoryFfiNoIsolate,
+        databasePath: databasePath,
+      );
+      await authSession.setSessionForTesting(
+        plan: UserPlan.free,
+        email: 'v3@example.com',
+      );
+      final record = _record(id: 'v3-record');
+      await recordRepository.addRecord(record);
+      final database = await AppDatabase.instance.database;
+      await database.execute(
+        'DROP TABLE ${AppDatabase.localRecordChangesTable}',
+      );
+      await database.setVersion(3);
+      await AppDatabase.instance.close();
+      final upgraded = await AppDatabase.instance.database;
+      expect(await upgraded.getVersion(), 4);
+      await recordRepository.reloadOwner(authSession.dataOwnerKey);
+      expect(
+        recordRepository.getRecordById(record.id)?.location,
+        record.location,
+      );
+      await RecordMutationService.instance.deleteRecord(record.id);
+      expect(
+        (await LocalDataStore.instance.readLocalRecordChangesForOwner(
+          authSession.dataOwnerKey,
+        )).single.operationType,
+        OutboxOperationType.delete,
+      );
+    },
+  );
 }
 
 FishingRecord _record({

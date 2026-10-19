@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'fishing_calendar.db';
-  static const int databaseVersion = 3;
+  static const int databaseVersion = 4;
 
   static const String localMetadataTable = 'local_metadata';
   static const String fishingRecordsTable = 'fishing_records';
@@ -19,6 +19,7 @@ class AppDatabase {
   static const String outboxItemsTable = 'outbox_items';
   static const String recordSyncStatesTable = 'record_sync_states';
   static const String recordConflictsTable = 'record_conflicts';
+  static const String localRecordChangesTable = 'local_record_changes';
 
   static const String legacyRecordsPreferencesMigrationKey =
       'records_shared_preferences_to_sqlite_v1';
@@ -132,6 +133,7 @@ class AppDatabase {
     batch.execute(_createOutboxItemsTableSql(outboxItemsTable));
     batch.execute(_createRecordSyncStatesTableSql(recordSyncStatesTable));
     batch.execute(_createRecordConflictsTableSql(recordConflictsTable));
+    batch.execute(_createLocalRecordChangesTableSql);
 
     batch.execute('''
       CREATE INDEX idx_fishing_records_owner_start
@@ -282,7 +284,21 @@ class AppDatabase {
         ON $recordConflictsTable (owner_key, status, detected_at)
       ''');
     }
+    if (oldVersion < 4) {
+      await database.execute(_createLocalRecordChangesTableSql);
+    }
   }
+
+  static const String _createLocalRecordChangesTableSql =
+      '''
+    CREATE TABLE $localRecordChangesTable (
+      owner_key TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      operation_type TEXT NOT NULL CHECK (operation_type IN ('update', 'delete')),
+      payload_json TEXT NOT NULL,
+      PRIMARY KEY (owner_key, record_id)
+    )
+  ''';
 
   static String _createRecordPhotosTableSql(String tableName) =>
       '''

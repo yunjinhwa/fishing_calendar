@@ -1094,7 +1094,7 @@ void main() {
   );
 
   test(
-    're-upgrade reuses a pending mutation with the latest free-plan edit',
+    're-upgrade preserves a pending mutation and appends the latest free edit',
     () async {
       final gateway = FakeAuthGateway()
         ..seedEntitlement(uid: 'uid-1', plan: UserPlan.paid);
@@ -1134,10 +1134,11 @@ void main() {
       await PlanPolicyService.instance.refreshServerPlan();
 
       final items = outboxRepository.getAllItems();
-      expect(items, hasLength(1));
-      expect(items.single.isMigration, isTrue);
-      expect(items.single.status, OutboxStatus.pending);
-      expect(items.single.payload?['location'], 'latest free edit');
+      expect(items, hasLength(2));
+      expect(items.first.payload?['location'], 'paid edit');
+      expect(items.last.isMigration, isTrue);
+      expect(items.last.status, OutboxStatus.pending);
+      expect(items.last.payload?['location'], 'latest free edit');
       expect(authSession.isPlanMigrationPending, isTrue);
     },
   );
