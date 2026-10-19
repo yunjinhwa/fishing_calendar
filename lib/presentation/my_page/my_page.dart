@@ -9,6 +9,7 @@ import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../auth/auth_error_message.dart';
 import '../auth/login_choice_page.dart';
+import '../common/hold_to_reveal_password_field.dart';
 import '../offline/offline_mode_page.dart';
 import '../plan/plan_page.dart';
 import '../personal_best/personal_best_page.dart';
@@ -526,10 +527,9 @@ class _AccountDeletionDialogState extends State<_AccountDeletionDialog> {
                 '다른 기기의 동기화도 중단됩니다. 중단된 삭제를 재시도하기 위해 Firebase UID와 요청 시각만 담은 표식은 서버에 남습니다.',
               ),
               const SizedBox(height: 16),
-              TextField(
+              HoldToRevealPasswordField(
                 controller: passwordController,
                 enabled: !isSubmitting,
-                obscureText: true,
                 autofillHints: const [AutofillHints.password],
                 decoration: const InputDecoration(
                   labelText: '현재 비밀번호',
@@ -644,20 +644,20 @@ class _PasswordSetupDialogState extends State<_PasswordSetupDialog> {
           children: [
             const Text('이전 버전의 계정을 보호하려면 로그아웃 전에 비밀번호를 설정해야 합니다.'),
             const SizedBox(height: 16),
-            TextField(
+            HoldToRevealPasswordField(
               controller: passwordController,
-              obscureText: true,
               enabled: !isSubmitting,
+              autofillHints: const [AutofillHints.newPassword],
               decoration: const InputDecoration(
                 labelText: '새 비밀번호',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            HoldToRevealPasswordField(
               controller: confirmController,
-              obscureText: true,
               enabled: !isSubmitting,
+              autofillHints: const [AutofillHints.newPassword],
               decoration: InputDecoration(
                 labelText: '새 비밀번호 확인',
                 border: const OutlineInputBorder(),

@@ -14,6 +14,7 @@ import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/core/validation/auth_input_validator.dart';
 import 'package:fishing_build/presentation/auth/signup_page.dart';
+import 'package:fishing_build/presentation/common/hold_to_reveal_password_field.dart';
 import 'package:fishing_build/presentation/my_page/my_page.dart';
 import 'package:fishing_build/presentation/offline/offline_mode_page.dart';
 import 'package:fishing_build/presentation/plan/plan_page.dart';
@@ -187,6 +188,7 @@ void main() {
     await tester.tap(find.text('계정 비밀번호 설정 필요'));
     await tester.pumpAndSettle();
 
+    expect(find.byType(HoldToRevealPasswordField), findsNWidgets(2));
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), 'Password1');
     await tester.enterText(fields.at(1), 'Password1');
