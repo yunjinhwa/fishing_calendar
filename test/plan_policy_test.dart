@@ -502,7 +502,7 @@ void main() {
     expect(item.payload, originalItem.payload);
   });
 
-  test('an interrupted upgrade refreshes a stale migration payload', () async {
+  test('an interrupted upgrade appends to a stale migration payload', () async {
     await authSession.setSessionForTesting(
       plan: UserPlan.free,
       email: 'stale-migration@example.com',
@@ -530,15 +530,18 @@ void main() {
     );
     await PlanPolicyService.instance.changePlan(UserPlan.paid);
 
-    final migrationItem = outboxRepository.getAllItems().single;
-    expect(migrationItem.id, 'stale-migration-item');
-    expect(migrationItem.payload?['location'], '수정 후 위치');
-    expect(migrationItem.status, OutboxStatus.pending);
+    final migrationItems = outboxRepository.getAllItems();
+    expect(migrationItems, hasLength(2));
+    expect(migrationItems.first.id, 'stale-migration-item');
+    expect(migrationItems.first.payload?['location'], '수정 전 위치');
+    expect(migrationItems.last.id, isNot(migrationItems.first.id));
+    expect(migrationItems.last.payload?['location'], '수정 후 위치');
+    expect(migrationItems.last.status, OutboxStatus.pending);
     expect(authSession.isPlanMigrationPending, isTrue);
   });
 
   test(
-    'an interrupted upgrade removes migration items for deleted records',
+    'an interrupted upgrade preserves prior requests and appends deletion',
     () async {
       await authSession.setSessionForTesting(
         plan: UserPlan.free,
@@ -562,7 +565,15 @@ void main() {
       await RecordMutationService.instance.deleteRecord(record.id);
       await PlanPolicyService.instance.changePlan(UserPlan.paid);
 
-      expect(outboxRepository.getAllItems(), isEmpty);
+      final items = outboxRepository.getAllItems();
+      expect(items, hasLength(2));
+      expect(items.first.id, 'deleted-migration-item');
+      expect(items.last.operationType, OutboxOperationType.delete);
+      expect(authSession.isPlanMigrationPending, isTrue);
+      final gateway = FakeRecordSyncGateway();
+      RecordSyncService.instance.configureGateway(gateway);
+      expect((await RecordSyncService.instance.syncNow()).isSuccess, isTrue);
+      expect(gateway.record(authSession.memberId!, record.id), isNull);
       expect(authSession.isPlanMigrationPending, isFalse);
       expect(authSession.canUseCloudSync, isTrue);
     },

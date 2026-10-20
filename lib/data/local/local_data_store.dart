@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/conflict_item.dart';
 import '../models/fishing_record.dart';
+import '../models/local_record_change.dart';
 import '../models/outbox_item.dart';
 import '../models/record_sync_metadata.dart';
 import 'app_database.dart';
@@ -13,8 +14,11 @@ class LocalDataStore {
 
   static final LocalDataStore instance = LocalDataStore._();
 
-  Future<List<FishingRecord>> readRecordsForOwner(String ownerKey) async {
-    final database = await AppDatabase.instance.database;
+  Future<List<FishingRecord>> readRecordsForOwner(
+    String ownerKey, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
     final recordRows = await database.query(
       AppDatabase.fishingRecordsTable,
       where: 'owner_key = ?',
@@ -216,6 +220,7 @@ class LocalDataStore {
   }) async {
     for (final table in <String>[
       AppDatabase.recordConflictsTable,
+      AppDatabase.localRecordChangesTable,
       AppDatabase.recordSyncStatesTable,
       AppDatabase.outboxItemsTable,
       AppDatabase.fishingRecordsTable,
@@ -228,8 +233,67 @@ class LocalDataStore {
     }
   }
 
-  Future<List<OutboxItem>> readOutboxItemsForOwner(String ownerKey) async {
-    final database = await AppDatabase.instance.database;
+  Future<void> writeLocalRecordChange(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required FishingRecord record,
+    required bool deleted,
+  }) async {
+    await executor.insert(
+      AppDatabase.localRecordChangesTable,
+      <String, Object?>{
+        'owner_key': ownerKey,
+        'record_id': record.id,
+        'operation_type': deleted ? 'delete' : 'update',
+        'payload_json': jsonEncode(record.toJson()),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<LocalRecordChange>> readLocalRecordChangesForOwner(
+    String ownerKey, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
+    final rows = await database.query(
+      AppDatabase.localRecordChangesTable,
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[ownerKey],
+      orderBy: 'record_id ASC',
+    );
+    return rows
+        .map(
+          (row) => LocalRecordChange(
+            recordId: row['record_id']! as String,
+            operationType: OutboxOperationType.values.byName(
+              row['operation_type']! as String,
+            ),
+            payload: Map<String, dynamic>.from(
+              jsonDecode(row['payload_json']! as String) as Map,
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> deleteLocalRecordChange(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required String recordId,
+  }) async {
+    await executor.delete(
+      AppDatabase.localRecordChangesTable,
+      where: 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, recordId],
+    );
+  }
+
+  Future<List<OutboxItem>> readOutboxItemsForOwner(
+    String ownerKey, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
     final rows = await database.query(
       AppDatabase.outboxItemsTable,
       where: 'owner_key = ?',
@@ -369,9 +433,10 @@ class LocalDataStore {
 
   Future<RecordSyncMetadata?> readRecordSyncMetadata(
     String ownerKey,
-    String recordId,
-  ) async {
-    final database = await AppDatabase.instance.database;
+    String recordId, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
     final rows = await database.query(
       AppDatabase.recordSyncStatesTable,
       where: 'owner_key = ? AND record_id = ?',

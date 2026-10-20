@@ -166,24 +166,6 @@ class OutboxRepository {
     await reloadOwner(ownerKey);
   }
 
-  Future<void> removeObsoleteMigrationItems(Set<String> recordIds) async {
-    final ownerKey = _ownerKey;
-    final placeholders = List.filled(recordIds.length, '?').join(', ');
-    final recordFilter = recordIds.isEmpty
-        ? ''
-        : ' AND record_id NOT IN ($placeholders)';
-
-    await AppDatabase.instance.transaction((transaction) async {
-      await _store.deleteOutboxItems(
-        transaction,
-        ownerKey: ownerKey,
-        where: 'is_migration = 1 AND operation_type = ?$recordFilter',
-        whereArgs: <Object?>[OutboxOperationType.create.name, ...recordIds],
-      );
-    });
-    await reloadOwner(ownerKey);
-  }
-
   Future<void> clearAll() async {
     final ownerKey = _ownerKey;
     await AppDatabase.instance.transaction((transaction) async {

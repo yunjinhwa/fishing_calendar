@@ -208,6 +208,12 @@ class RecordSyncService extends ChangeNotifier {
 
     var pushedCount = 0;
     try {
+      // Preserve local free-plan edits/deletions before any old request is
+      // retried or an authoritative server snapshot can replace the cache.
+      await PlanPolicyService.instance.resumePendingMigration();
+      if (!_isCurrentSession(uid, ownerKey)) {
+        return _skip(RecordSyncSkipReason.sessionChanged);
+      }
       final firstRealSync = !await _hasCompletedFirstSync(uid);
       if (firstRealSync) {
         final serverBeforePush = await gateway.fetchSnapshot(uid: uid);
@@ -278,6 +284,39 @@ class RecordSyncService extends ChangeNotifier {
               message: error.message,
             );
           } on Object catch (error) {
+            if (error is RecordSyncGatewayException &&
+                error.code == 'idempotency-conflict') {
+              if (!_isCurrentSession(uid, ownerKey)) {
+                return _skip(RecordSyncSkipReason.sessionChanged);
+              }
+              // Older builds could replace the body of a committed request.
+              // Its original body cannot be recovered from a fingerprint.
+              // Preserve current local intent and let the user resolve it
+              // against the latest server revision using a fresh request ID.
+              final remote = await gateway.fetchRecordRevision(
+                uid: uid,
+                recordId: queuedItem.recordId,
+              );
+              if (!_isCurrentSession(uid, ownerKey)) {
+                return _skip(RecordSyncSkipReason.sessionChanged);
+              }
+              await _recordConflict(
+                ownerKey: ownerKey,
+                blockingItem: queuedItem,
+                error: RecordVersionConflictException(
+                  recordId: queuedItem.recordId,
+                  baseVersionNo: queuedItem.baseVersionNo,
+                  remoteVersionNo: remote?.versionNo ?? 0,
+                  remoteStatus: remote?.status ?? RemoteRecordStatus.missing,
+                  remoteRecord: remote?.record,
+                ),
+              );
+              return _fail(
+                pushedCount: pushedCount,
+                failedCount: 1,
+                message: '이전 전송 요청과 서버 처리 이력이 달라 충돌 확인이 필요합니다.',
+              );
+            }
             final message = _messageFor(error);
             if (_isCurrentSession(uid, ownerKey)) {
               await _outboxRepository.updateItemStatusForOwner(

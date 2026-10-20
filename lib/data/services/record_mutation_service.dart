@@ -23,38 +23,7 @@ class RecordMutationService {
   Future<void> addRecord(FishingRecord record) async {
     _ensureRecordAccess();
     _ensureValidRecord(record);
-    final ownerKey = _authSession.dataOwnerKey;
-    OutboxItem? outboxItem;
-
-    await AppDatabase.instance.transaction((transaction) async {
-      if (_authSession.canUseOutbox) {
-        final baseVersionNo = await _store.reserveNextRecordVersion(
-          transaction,
-          ownerKey: ownerKey,
-          recordId: record.id,
-        );
-        outboxItem = _createOutbox(
-          record.id,
-          OutboxOperationType.create,
-          baseVersionNo: baseVersionNo,
-          payload: record.toJson(),
-        );
-      }
-      await _store.insertRecord(
-        transaction,
-        ownerKey: ownerKey,
-        record: record,
-      );
-      final queuedItem = outboxItem;
-      if (queuedItem != null) {
-        await _store.insertOutboxItem(
-          transaction,
-          ownerKey: ownerKey,
-          item: queuedItem,
-        );
-      }
-    });
-    await _reloadAfterMutation(ownerKey, hasOutboxItem: outboxItem != null);
+    await _persistMutation(record, OutboxOperationType.create);
   }
 
   Future<void> updateRecord(FishingRecord record) async {
@@ -63,40 +32,7 @@ class RecordMutationService {
     if (_recordRepository.getRecordById(record.id) == null) {
       throw StateError('Record not found: ${record.id}');
     }
-
-    final ownerKey = _authSession.dataOwnerKey;
-    OutboxItem? outboxItem;
-
-    await AppDatabase.instance.transaction((transaction) async {
-      if (_authSession.canUseOutbox) {
-        final baseVersionNo = await _store.reserveNextRecordVersion(
-          transaction,
-          ownerKey: ownerKey,
-          recordId: record.id,
-        );
-        outboxItem = _createOutbox(
-          record.id,
-          OutboxOperationType.update,
-          baseVersionNo: baseVersionNo,
-          payload: record.toJson(),
-        );
-      }
-      await _store.insertRecord(
-        transaction,
-        ownerKey: ownerKey,
-        record: record,
-        replace: true,
-      );
-      final queuedItem = outboxItem;
-      if (queuedItem != null) {
-        await _store.insertOutboxItem(
-          transaction,
-          ownerKey: ownerKey,
-          item: queuedItem,
-        );
-      }
-    });
-    await _reloadAfterMutation(ownerKey, hasOutboxItem: outboxItem != null);
+    await _persistMutation(record, OutboxOperationType.update);
   }
 
   Future<void> deleteRecord(String recordId) async {
@@ -105,83 +41,158 @@ class RecordMutationService {
     if (record == null) {
       throw StateError('Record not found: $recordId');
     }
+    await _persistMutation(record, OutboxOperationType.delete);
+  }
 
+  Future<void> _persistMutation(
+    FishingRecord record,
+    OutboxOperationType operation,
+  ) async {
     final ownerKey = _authSession.dataOwnerKey;
-    OutboxItem? outboxItem;
+    final generation = _authSession.sessionGeneration;
+    final userId = _authSession.memberId;
+    final usesOutbox = _authSession.canUseOutbox;
+    final isMigration =
+        _authSession.isPlanMigrationPending &&
+        operation == OutboxOperationType.create;
+    void ensureSession() {
+      if (generation != _authSession.sessionGeneration ||
+          ownerKey != _authSession.dataOwnerKey ||
+          !_authSession.canManageRecords ||
+          usesOutbox != _authSession.canUseOutbox) {
+        throw StateError('계정 또는 플랜이 변경되어 저장을 중단했습니다. 다시 시도해 주세요.');
+      }
+    }
 
     await AppDatabase.instance.transaction((transaction) async {
-      if (_authSession.canUseOutbox) {
-        final baseVersionNo = await _store.reserveNextRecordVersion(
+      ensureSession();
+      if (usesOutbox) {
+        final baseVersion = await _store.reserveNextRecordVersion(
           transaction,
           ownerKey: ownerKey,
-          recordId: recordId,
+          recordId: record.id,
         );
-        outboxItem = _createOutbox(
-          recordId,
-          OutboxOperationType.delete,
-          baseVersionNo: baseVersionNo,
-          payload: record.toJson(),
-        );
-      }
-      await _store.deleteRecord(
-        transaction,
-        ownerKey: ownerKey,
-        recordId: recordId,
-      );
-      final queuedItem = outboxItem;
-      if (queuedItem != null) {
+        ensureSession();
+        final now = DateTime.now();
         await _store.insertOutboxItem(
           transaction,
           ownerKey: ownerKey,
-          item: queuedItem,
+          item: OutboxItem(
+            id: 'outbox-${now.microsecondsSinceEpoch}-${record.id}',
+            userId: userId,
+            recordId: record.id,
+            operationType: operation,
+            status: OutboxStatus.pending,
+            createdAt: now,
+            isMigration: isMigration,
+            baseVersionNo: baseVersion,
+            payload: record.toJson(),
+          ),
+        );
+        await _store.deleteLocalRecordChange(
+          transaction,
+          ownerKey: ownerKey,
+          recordId: record.id,
+        );
+      } else {
+        // Latest free-plan intent survives restart, including local deletion.
+        await _store.writeLocalRecordChange(
+          transaction,
+          ownerKey: ownerKey,
+          record: record,
+          deleted: operation == OutboxOperationType.delete,
         );
       }
+      ensureSession();
+      if (operation == OutboxOperationType.delete) {
+        await _store.deleteRecord(
+          transaction,
+          ownerKey: ownerKey,
+          recordId: record.id,
+        );
+      } else {
+        await _store.insertRecord(
+          transaction,
+          ownerKey: ownerKey,
+          record: record,
+          replace: operation == OutboxOperationType.update,
+        );
+      }
+      ensureSession();
     });
-    await _reloadAfterMutation(ownerKey, hasOutboxItem: outboxItem != null);
+    await _recordRepository.reloadOwner(ownerKey);
+    if (usesOutbox) {
+      await _outboxRepository.reloadOwner(ownerKey);
+      if (generation == _authSession.sessionGeneration) {
+        unawaited(
+          RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),
+        );
+      }
+    }
   }
 
   Future<void> reconcileOutboxWithLocalRecords() async {
-    // A server downgrade can leave cloud mutations queued while the account
-    // continues editing its local-only copy. During that free-plan period the
-    // local database is authoritative; replaying an older outbox payload would
-    // overwrite those newer edits. Reconciliation resumes after the server
-    // grants paid sync access again.
-    if (!_authSession.canUseOutbox) {
+    // SQLite mutations are atomic. Legacy recovery must never replay an old
+    // paid request over the authoritative local copy being migrated.
+    if (!_authSession.canUseOutbox || _authSession.isPlanMigrationPending) {
       return;
     }
-
-    for (final item in _outboxRepository.getAllItems()) {
-      if (item.isMigration || item.status == OutboxStatus.succeeded) {
-        continue;
-      }
-
-      if (item.operationType == OutboxOperationType.delete) {
-        if (_recordRepository.getRecordById(item.recordId) != null) {
-          await _recordRepository.deleteRecord(item.recordId);
-        }
-        continue;
-      }
-
-      final payload = item.payload;
-      if (payload == null) {
-        continue;
-      }
-
-      FishingRecord record;
-      try {
-        record = FishingRecord.fromJson(payload);
-      } on FormatException {
-        continue;
-      } on TypeError {
-        continue;
-      }
-
-      if (_recordRepository.getRecordById(record.id) == null) {
-        await _recordRepository.addRecord(record);
-      } else {
-        await _recordRepository.updateRecord(record);
-      }
-    }
+    final ownerKey = _authSession.dataOwnerKey;
+    final generation = _authSession.sessionGeneration;
+    await AppDatabase.instance
+        .transaction((transaction) async {
+          if (generation != _authSession.sessionGeneration) return;
+          final changes = await _store.readLocalRecordChangesForOwner(
+            ownerKey,
+            executor: transaction,
+          );
+          if (changes.isNotEmpty) return;
+          final items = await _store.readOutboxItemsForOwner(
+            ownerKey,
+            executor: transaction,
+          );
+          for (final item in items) {
+            if (generation != _authSession.sessionGeneration) {
+              throw const _ReconciliationCancelled();
+            }
+            if (!_authSession.canUseOutbox ||
+                _authSession.isPlanMigrationPending) {
+              throw const _ReconciliationCancelled();
+            }
+            if (item.isMigration || item.status == OutboxStatus.succeeded) {
+              continue;
+            }
+            if (item.operationType == OutboxOperationType.delete) {
+              await _store.deleteRecord(
+                transaction,
+                ownerKey: ownerKey,
+                recordId: item.recordId,
+              );
+              continue;
+            }
+            final payload = item.payload;
+            if (payload == null) continue;
+            FishingRecord record;
+            try {
+              record = FishingRecord.fromJson(payload);
+            } on FormatException {
+              continue;
+            } on TypeError {
+              continue;
+            }
+            await _store.insertRecord(
+              transaction,
+              ownerKey: ownerKey,
+              record: record,
+              replace: true,
+            );
+          }
+          if (generation != _authSession.sessionGeneration) {
+            throw const _ReconciliationCancelled();
+          }
+        })
+        .onError<_ReconciliationCancelled>((_, _) {});
+    await _recordRepository.reloadOwner(ownerKey);
   }
 
   void _ensureRecordAccess() {
@@ -196,39 +207,8 @@ class RecordMutationService {
       throw ArgumentError.value(record, 'record', errorMessage);
     }
   }
+}
 
-  OutboxItem _createOutbox(
-    String recordId,
-    OutboxOperationType operationType, {
-    required int baseVersionNo,
-    required Map<String, dynamic> payload,
-  }) {
-    final now = DateTime.now();
-    return OutboxItem(
-      id: 'outbox-${now.microsecondsSinceEpoch}-$recordId',
-      userId: _authSession.memberId,
-      recordId: recordId,
-      operationType: operationType,
-      status: OutboxStatus.pending,
-      createdAt: now,
-      isMigration:
-          _authSession.isPlanMigrationPending &&
-          operationType == OutboxOperationType.create,
-      baseVersionNo: baseVersionNo,
-      payload: payload,
-    );
-  }
-
-  Future<void> _reloadAfterMutation(
-    String ownerKey, {
-    required bool hasOutboxItem,
-  }) async {
-    await _recordRepository.reloadOwner(ownerKey);
-    if (hasOutboxItem) {
-      await _outboxRepository.reloadOwner(ownerKey);
-      unawaited(
-        RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),
-      );
-    }
-  }
+class _ReconciliationCancelled implements Exception {
+  const _ReconciliationCancelled();
 }

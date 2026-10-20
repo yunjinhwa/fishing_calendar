@@ -79,9 +79,11 @@ class AuthSessionRepository extends ChangeNotifier {
   Timer? _planEntitlementExpiryTimer;
   StreamSubscription<bool>? _accountDeletionSubscription;
   int _accountDeletionWatchGeneration = 0;
+  int _sessionGeneration = 0;
   RemoteAccountDeletionCleanup? _remoteAccountDeletionCleanup;
 
   bool get hasActiveSession => _hasActiveSession;
+  int get sessionGeneration => _sessionGeneration;
   bool get persistsAcrossRestarts => _persistsAcrossRestarts;
   UserPlan get plan => _hasExpiredServerEntitlement ? UserPlan.free : _plan;
   PlanMigrationStatus get migrationStatus => _migrationStatus;
@@ -214,6 +216,9 @@ class AuthSessionRepository extends ChangeNotifier {
   /// Passing a gateway opts this repository into Firebase-backed member auth.
   /// A null gateway keeps the existing local-only development behavior.
   void configureAuthGateway(AuthGateway? gateway) {
+    if (!identical(_authGateway, gateway)) {
+      _sessionGeneration += 1;
+    }
     _stopAccountDeletionWatch();
     _authGateway = gateway;
     _lastAuthFailure = gateway?.availabilityFailure;
@@ -950,13 +955,15 @@ class AuthSessionRepository extends ChangeNotifier {
       throw StateError('플랜 정보를 조회할 Firebase 계정을 확인할 수 없습니다.');
     }
 
+    final generation = _sessionGeneration;
     final previousPlan = plan;
     final resolution = await _resolveServerAccountState(
       gateway: gateway,
       uid: uid,
       localState: await _readFirebaseAccountState(uid),
     );
-    if (!identical(_authGateway, gateway) ||
+    if (generation != _sessionGeneration ||
+        !identical(_authGateway, gateway) ||
         !_hasActiveSession ||
         _memberId?.trim() != uid) {
       return PlanEntitlementRefreshResult(
@@ -992,7 +999,12 @@ class AuthSessionRepository extends ChangeNotifier {
   Future<void> changeMemberPlan(
     UserPlan nextPlan, {
     PlanMigrationStatus migrationStatus = PlanMigrationStatus.none,
+    int? expectedSessionGeneration,
   }) async {
+    final generation = expectedSessionGeneration ?? _sessionGeneration;
+    if (generation != _sessionGeneration) {
+      return;
+    }
     if (!isMember) {
       throw StateError('로그인한 회원만 플랜을 변경할 수 있습니다.');
     }
@@ -1007,39 +1019,32 @@ class AuthSessionRepository extends ChangeNotifier {
     }
 
     final uid = _authGateway == null ? null : _memberId;
-    if (uid != null && uid.trim().isNotEmpty) {
-      await _writeFirebaseAccountState(
-        uid,
-        plan: nextPlan,
-        migrationStatus: migrationStatus,
-      );
-    } else {
-      final currentEmail = _email;
-      if (currentEmail != null && currentEmail.trim().isNotEmpty) {
-        await _writeAccountState(
-          currentEmail,
-          plan: nextPlan,
-          migrationStatus: migrationStatus,
-        );
-      }
+    final accountKey = uid ?? DataOwnerKey.normalizeEmail(_email!);
+    final storageKey = uid == null
+        ? _accountPolicyStatesKey
+        : _firebasePolicyStatesKey;
+    final prefs = await SharedPreferences.getInstance();
+    if (generation != _sessionGeneration || !isMember) {
+      return;
     }
-
-    await _saveSession(
-      plan: nextPlan,
-      migrationStatus: migrationStatus,
-      memberId: _memberId,
-      email: _email,
-      nickname: _nickname,
-      persistSession: _persistsAcrossRestarts,
-      requiresPasswordSetup: _requiresPasswordSetup,
+    final states = _decodeObjectMap(prefs.getString(storageKey));
+    states[accountKey] = <String, dynamic>{
+      'plan': nextPlan.storageValue,
+      'migrationStatus': migrationStatus.storageValue,
+    };
+    _requirePreferenceSuccess(
+      await prefs.setString(storageKey, jsonEncode(states)),
+      'save account policy',
     );
-    if (_authGateway != null && !_persistsAcrossRestarts) {
-      final prefs = await SharedPreferences.getInstance();
-      _requirePreferenceSuccess(
-        await prefs.setBool(_signOutOnRestartKey, true),
-        'preserve restart sign-out',
-      );
+
+    if (generation != _sessionGeneration || !isMember) {
+      return;
     }
+    // Per-account policy above is authoritative on restoration. Updating a
+    // plan must not rewrite global identity preferences after an account switch.
+    _plan = nextPlan;
+    _migrationStatus = migrationStatus;
+    notifyListeners();
   }
 
   Future<void> logout() async {
@@ -2145,6 +2150,12 @@ class AuthSessionRepository extends ChangeNotifier {
     required bool requiresPasswordSetup,
     bool notify = true,
   }) {
+    if (_hasActiveSession != hasActiveSession ||
+        (_plan == UserPlan.guest) != (plan == UserPlan.guest) ||
+        _memberId != memberId ||
+        _email != email) {
+      _sessionGeneration += 1;
+    }
     final changed =
         _hasActiveSession != hasActiveSession ||
         _persistsAcrossRestarts != persistsAcrossRestarts ||
