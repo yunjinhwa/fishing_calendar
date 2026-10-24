@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -65,6 +66,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
   String? _editLoadError;
   bool _isPreparingEdit = false;
   bool _isSaving = false;
+  bool _isConfirmingDiscard = false;
+  bool _isConfirmingReload = false;
+  String? _draftBaseline;
+  bool _hasUnsavedChanges = false;
   VoidCallback? _stopRecordWatch;
   bool isPickingPhoto = false;
   int nextPhotoSequence = 0;
@@ -108,6 +113,89 @@ class _RecordFormPageState extends State<RecordFormPage> {
       _stopRecordWatch = RecordSyncService.instance.observeRecord(recordId);
       _isPreparingEdit = true;
       unawaited(_prepareEditingRecord(editingRecord));
+    }
+    _resetDraftBaseline();
+    for (final controller in _textControllers) {
+      controller.addListener(_handleDraftChange);
+    }
+    for (final item in catchItems) {
+      item.addListener(_handleDraftChange);
+    }
+  }
+
+  Iterable<TextEditingController> get _textControllers => [
+    locationController,
+    tideController,
+    weatherController,
+    airTemperatureController,
+    waterTemperatureController,
+    memoController,
+    customGenreController,
+  ];
+
+  String _captureDraft() => jsonEncode([
+    for (final controller in _textControllers) controller.text,
+    startAt.toIso8601String(),
+    endAt.toIso8601String(),
+    selectedGenre,
+    for (final item in catchItems)
+      [
+        item.speciesController.text,
+        item.lengthController.text,
+        item.weightController.text,
+      ],
+    photos.map((photo) => photo.toJson()).toList(),
+  ]);
+
+  void _resetDraftBaseline() {
+    _draftBaseline = _captureDraft();
+    _hasUnsavedChanges = false;
+  }
+
+  void _handleDraftChange() {
+    if (!mounted || _draftBaseline == null) return;
+    final changed = _captureDraft() != _draftBaseline;
+    if (changed != _hasUnsavedChanges) {
+      setState(() => _hasUnsavedChanges = changed);
+    }
+  }
+
+  Future<void> _requestExit() async {
+    if (_isSaving) {
+      showMessage('기록을 저장하는 중입니다. 잠시만 기다려 주세요.');
+      return;
+    }
+    if (_isPreparingEdit || isPickingPhoto) {
+      showMessage('기록 정보를 처리하는 중입니다. 잠시만 기다려 주세요.');
+      return;
+    }
+    if (_isConfirmingDiscard || _isConfirmingReload) return;
+    if (!_hasUnsavedChanges) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _isConfirmingDiscard = true;
+    try {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('저장하지 않고 나가시겠습니까?'),
+          content: const Text('작성한 내용이 저장되지 않습니다.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('계속 작성'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('나가기'),
+            ),
+          ],
+        ),
+      );
+      if (discard == true && mounted) Navigator.of(context).pop();
+    } finally {
+      _isConfirmingDiscard = false;
     }
   }
 
@@ -165,30 +253,42 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> _reloadLatestRecord() async {
-    if (_isPreparingEdit || _isSaving) return;
+    if (_isPreparingEdit ||
+        _isSaving ||
+        isPickingPhoto ||
+        _isConfirmingDiscard ||
+        _isConfirmingReload) {
+      return;
+    }
     if (!_isEditingSessionCurrent) {
       setState(
         () => _editConflictReason = RecordEditConflictReason.sessionChanged,
       );
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('최신 기록 불러오기'),
-        content: const Text('최신 기록을 불러오면 현재 입력한 내용이 대체됩니다. 불러오시겠습니까?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('입력 유지'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('불러오기'),
-          ),
-        ],
-      ),
-    );
+    _isConfirmingReload = true;
+    final bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('최신 기록 불러오기'),
+          content: const Text('최신 기록을 불러오면 현재 입력한 내용이 대체됩니다. 불러오시겠습니까?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('입력 유지'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('불러오기'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      _isConfirmingReload = false;
+    }
     if (confirmed != true || !mounted) return;
     if (!_isEditingSessionCurrent) {
       setState(
@@ -211,6 +311,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
         _editSnapshot = snapshot;
         _editConflictReason = null;
         _editLoadError = null;
+        _resetDraftBaseline();
       });
     } on RecordEditConflictException catch (error) {
       if (!mounted) return;
@@ -258,6 +359,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
     if (catchItems.isEmpty) {
       catchItems.add(_CatchItemInput());
     }
+    if (_draftBaseline != null) {
+      for (final item in catchItems) {
+        item.addListener(_handleDraftChange);
+      }
+    }
 
     photos
       ..clear()
@@ -285,7 +391,14 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> saveRecord() async {
-    if (_isSaving || _isPreparingEdit) return;
+    if (_isSaving ||
+        _isPreparingEdit ||
+        isPickingPhoto ||
+        _isConfirmingDiscard ||
+        _isConfirmingReload) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
     try {
       if (isEditMode) {
@@ -502,7 +615,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> pickPhoto() async {
-    if (isPickingPhoto) {
+    if (isPickingPhoto || _isSaving || _isPreparingEdit) {
       return;
     }
     if (photos.length >= FishingRecordValidator.maxPhotoCount) {
@@ -592,6 +705,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
           ),
         );
       });
+      _handleDraftChange();
     } on RecordPhotoTooLargeException {
       if (mounted) {
         showMessage('사진은 10 MiB 이하 파일만 첨부할 수 있습니다.');
@@ -623,12 +737,15 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   void removePhoto(int index) {
+    if (_isSaving || _isPreparingEdit) return;
     setState(() {
       photos.removeAt(index);
     });
+    _handleDraftChange();
   }
 
   void addCatchItem() {
+    if (_isSaving || _isPreparingEdit) return;
     if (catchItems.length >= FishingRecordValidator.maxCatchCount) {
       showMessage(
         '조과는 최대 ${FishingRecordValidator.maxCatchCount}개까지 입력할 수 있습니다.',
@@ -636,11 +753,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
       return;
     }
     setState(() {
-      catchItems.add(_CatchItemInput());
+      catchItems.add(_CatchItemInput()..addListener(_handleDraftChange));
     });
+    _handleDraftChange();
   }
 
   void removeCatchItem(int index) {
+    if (_isSaving || _isPreparingEdit) return;
     if (catchItems.length == 1) {
       showMessage('조과 입력칸은 최소 1개가 필요합니다.');
       return;
@@ -650,6 +769,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       catchItems[index].dispose();
       catchItems.removeAt(index);
     });
+    _handleDraftChange();
   }
 
   String formatDateTime(DateTime dateTime) {
@@ -660,6 +780,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> pickStartDateTime() async {
+    if (_isSaving || _isPreparingEdit) return;
     final pickedDate = await showDatePicker(
       context: context,
       initialDate: startAt,
@@ -674,7 +795,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       initialTime: TimeOfDay.fromDateTime(startAt),
     );
 
-    if (pickedTime == null) return;
+    if (pickedTime == null || !mounted) return;
 
     setState(() {
       startAt = DateTime(
@@ -685,9 +806,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
         pickedTime.minute,
       );
     });
+    _handleDraftChange();
   }
 
   Future<void> pickEndDateTime() async {
+    if (_isSaving || _isPreparingEdit) return;
     final pickedDate = await showDatePicker(
       context: context,
       initialDate: endAt,
@@ -702,7 +825,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       initialTime: TimeOfDay.fromDateTime(endAt),
     );
 
-    if (pickedTime == null) return;
+    if (pickedTime == null || !mounted) return;
 
     setState(() {
       endAt = DateTime(
@@ -713,307 +836,326 @@ class _RecordFormPageState extends State<RecordFormPage> {
         pickedTime.minute,
       );
     });
+    _handleDraftChange();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(isEditMode ? '출조 기록 수정' : '출조 기록 작성')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (_isPreparingEdit) const LinearProgressIndicator(),
-            if (isEditMode &&
-                (_editConflictReason != null || _editLoadError != null))
-              Card(
-                color: Theme.of(context).colorScheme.errorContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_editNoticeMessage),
-                      if (_editConflictReason !=
-                          RecordEditConflictReason.sessionChanged)
-                        TextButton(
-                          onPressed: _isPreparingEdit || _isSaving
-                              ? null
-                              : _reloadLatestRecord,
-                          child: const Text('최신 기록 불러오기'),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            if (widget.initialLocation != null ||
-                widget.initialFishName != null) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle_outline,
-                        color: Theme.of(context).colorScheme.primary,
+    return PopScope<bool>(
+      canPop:
+          !_hasUnsavedChanges &&
+          !_isSaving &&
+          !_isPreparingEdit &&
+          !isPickingPhoto,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) unawaited(_requestExit());
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: BackButton(onPressed: _requestExit),
+          title: Text(isEditMode ? '출조 기록 수정' : '출조 기록 작성'),
+        ),
+        body: SafeArea(
+          child: AbsorbPointer(
+            absorbing: _isSaving || _isPreparingEdit,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (_isPreparingEdit || _isSaving)
+                  const LinearProgressIndicator(),
+                if (isEditMode &&
+                    (_editConflictReason != null || _editLoadError != null))
+                  Card(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_editNoticeMessage),
+                          if (_editConflictReason !=
+                              RecordEditConflictReason.sessionChanged)
+                            TextButton(
+                              onPressed: _isPreparingEdit || _isSaving
+                                  ? null
+                                  : _reloadLatestRecord,
+                              child: const Text('최신 기록 불러오기'),
+                            ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          widget.initialFishName != null
-                              ? '도감에서 선택한 어종을 자동 입력했습니다.'
-                              : '지도에서 가져온 정보를 자동 입력했습니다.',
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            _SectionTitle(title: '필수 정보'),
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: locationController,
-              maxLength: FishingRecordValidator.maxLocationLength,
-              decoration: const InputDecoration(
-                labelText: '위치 *',
-                hintText: '예: 부산 영도구 동삼동',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            _DateTimeField(
-              label: '시작 시간 *',
-              value: formatDateTime(startAt),
-              onTap: pickStartDateTime,
-            ),
-            const SizedBox(height: 12),
-
-            _DateTimeField(
-              label: '종료 시간 *',
-              value: formatDateTime(endAt),
-              onTap: pickEndDateTime,
-            ),
-            const SizedBox(height: 16),
-
-            Text('낚시 장르 *', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: genres.map((genre) {
-                return ChoiceChip(
-                  label: Text(genre),
-                  selected: selectedGenre == genre,
-                  onSelected: (_) {
-                    setState(() {
-                      selectedGenre = genre;
-
-                      if (genre != '기타') {
-                        customGenreController.clear();
-                      }
-                    });
-                  },
-                );
-              }).toList(),
-            ),
-
-            if (selectedGenre == '기타') ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: customGenreController,
-                maxLength: FishingRecordValidator.maxGenreNameLength,
-                decoration: const InputDecoration(
-                  labelText: '기타 낚시 장르 *',
-                  hintText: '예: 에깅, 플라이낚시, 문어낚시',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 24),
-
-            _SectionTitle(title: '외부 데이터'),
-            const SizedBox(height: 4),
-            Text(
-              '조회에 실패한 값은 직접 입력하세요.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: tideController,
-              maxLength: FishingRecordValidator.maxTideLength,
-              decoration: const InputDecoration(
-                labelText: '물때 *',
-                hintText: '예: 7물',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            TextField(
-              controller: weatherController,
-              maxLength: FishingRecordValidator.maxWeatherLength,
-              decoration: const InputDecoration(
-                labelText: '날씨 *',
-                hintText: '예: 흐림',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            TextField(
-              controller: airTemperatureController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '기온 *',
-                hintText: '예: 18',
-                suffixText: '℃',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            TextField(
-              controller: waterTemperatureController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '수온 *',
-                hintText: '예: 16.2',
-                suffixText: '℃',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            _SectionTitle(title: '선택 정보'),
-            const SizedBox(height: 12),
-
-            Text('조과', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-
-            ...catchItems.asMap().entries.map((entry) {
-              final index = entry.key;
-              final item = entry.value;
-
-              return _CatchItemCard(
-                index: index,
-                item: item,
-                onRemove: () => removeCatchItem(index),
-              );
-            }),
-
-            OutlinedButton.icon(
-              onPressed: addCatchItem,
-              icon: const Icon(Icons.add),
-              label: const Text('조과 추가'),
-            ),
-
-            const SizedBox(height: 16),
-
-            Text('사진', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-
-            OutlinedButton.icon(
-              onPressed:
-                  isPickingPhoto ||
-                      photos.length >= FishingRecordValidator.maxPhotoCount
-                  ? null
-                  : pickPhoto,
-              icon: isPickingPhoto
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.add_photo_alternate_outlined),
-              label: Text(
-                isPickingPhoto
-                    ? '사진 저장 중'
-                    : '사진 추가 (${photos.length}/${FishingRecordValidator.maxPhotoCount})',
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            if (photos.isEmpty)
-              Text(
-                '첨부된 사진이 없습니다.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-              )
-            else
-              SizedBox(
-                height: 96,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: photos.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final photo = photos[index];
-
-                    return Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: _PhotoPreview(photo: photo),
-                        ),
-                        Positioned(
-                          top: 4,
-                          right: 4,
-                          child: InkWell(
-                            onTap: () => removePhoto(index),
-                            borderRadius: BorderRadius.circular(16),
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.6),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.close,
-                                color: Colors.white,
-                                size: 16,
-                              ),
+                if (widget.initialLocation != null ||
+                    widget.initialFishName != null) ...[
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              widget.initialFishName != null
+                                  ? '도감에서 선택한 어종을 자동 입력했습니다.'
+                                  : '지도에서 가져온 정보를 자동 입력했습니다.',
                             ),
                           ),
-                        ),
-                      ],
-                    );
-                  },
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                _SectionTitle(title: '필수 정보'),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: locationController,
+                  maxLength: FishingRecordValidator.maxLocationLength,
+                  decoration: const InputDecoration(
+                    labelText: '위치 *',
+                    hintText: '예: 부산 영도구 동삼동',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 16),
 
-            const SizedBox(height: 16),
+                _DateTimeField(
+                  label: '시작 시간 *',
+                  value: formatDateTime(startAt),
+                  onTap: pickStartDateTime,
+                ),
+                const SizedBox(height: 12),
 
-            TextField(
-              controller: memoController,
-              maxLength: FishingRecordValidator.maxMemoLength,
-              minLines: 3,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: '메모',
-                hintText: '출조 상황, 입질, 채비 등을 기록하세요.',
-                border: OutlineInputBorder(),
-              ),
+                _DateTimeField(
+                  label: '종료 시간 *',
+                  value: formatDateTime(endAt),
+                  onTap: pickEndDateTime,
+                ),
+                const SizedBox(height: 16),
+
+                Text('낚시 장르 *', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: genres.map((genre) {
+                    return ChoiceChip(
+                      label: Text(genre),
+                      selected: selectedGenre == genre,
+                      onSelected: (_) {
+                        setState(() {
+                          selectedGenre = genre;
+
+                          if (genre != '기타') {
+                            customGenreController.clear();
+                          }
+                        });
+                        _handleDraftChange();
+                      },
+                    );
+                  }).toList(),
+                ),
+
+                if (selectedGenre == '기타') ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: customGenreController,
+                    maxLength: FishingRecordValidator.maxGenreNameLength,
+                    decoration: const InputDecoration(
+                      labelText: '기타 낚시 장르 *',
+                      hintText: '예: 에깅, 플라이낚시, 문어낚시',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                _SectionTitle(title: '외부 데이터'),
+                const SizedBox(height: 4),
+                Text(
+                  '조회에 실패한 값은 직접 입력하세요.',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: tideController,
+                  maxLength: FishingRecordValidator.maxTideLength,
+                  decoration: const InputDecoration(
+                    labelText: '물때 *',
+                    hintText: '예: 7물',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: weatherController,
+                  maxLength: FishingRecordValidator.maxWeatherLength,
+                  decoration: const InputDecoration(
+                    labelText: '날씨 *',
+                    hintText: '예: 흐림',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: airTemperatureController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '기온 *',
+                    hintText: '예: 18',
+                    suffixText: '℃',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: waterTemperatureController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '수온 *',
+                    hintText: '예: 16.2',
+                    suffixText: '℃',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                _SectionTitle(title: '선택 정보'),
+                const SizedBox(height: 12),
+
+                Text('조과', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+
+                ...catchItems.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final item = entry.value;
+
+                  return _CatchItemCard(
+                    index: index,
+                    item: item,
+                    onRemove: () => removeCatchItem(index),
+                  );
+                }),
+
+                OutlinedButton.icon(
+                  onPressed: addCatchItem,
+                  icon: const Icon(Icons.add),
+                  label: const Text('조과 추가'),
+                ),
+
+                const SizedBox(height: 16),
+
+                Text('사진', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+
+                OutlinedButton.icon(
+                  onPressed:
+                      isPickingPhoto ||
+                          photos.length >= FishingRecordValidator.maxPhotoCount
+                      ? null
+                      : pickPhoto,
+                  icon: isPickingPhoto
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add_photo_alternate_outlined),
+                  label: Text(
+                    isPickingPhoto
+                        ? '사진 저장 중'
+                        : '사진 추가 (${photos.length}/${FishingRecordValidator.maxPhotoCount})',
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                if (photos.isEmpty)
+                  Text(
+                    '첨부된 사진이 없습니다.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey.shade600,
+                    ),
+                  )
+                else
+                  SizedBox(
+                    height: 96,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: photos.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final photo = photos[index];
+
+                        return Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: _PhotoPreview(photo: photo),
+                            ),
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: InkWell(
+                                onTap: () => removePhoto(index),
+                                borderRadius: BorderRadius.circular(16),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+
+                const SizedBox(height: 16),
+
+                TextField(
+                  controller: memoController,
+                  maxLength: FishingRecordValidator.maxMemoLength,
+                  minLines: 3,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: '메모',
+                    hintText: '출조 상황, 입질, 채비 등을 기록하세요.',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                FilledButton(
+                  onPressed: isPickingPhoto || _isSaving || _isPreparingEdit
+                      ? null
+                      : saveRecord,
+                  child: Text(_isSaving ? '저장 중…' : '저장'),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
-
-            FilledButton(
-              onPressed: isPickingPhoto || _isSaving || _isPreparingEdit
-                  ? null
-                  : saveRecord,
-              child: Text(_isSaving ? '저장 중…' : '저장'),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1077,6 +1219,12 @@ class _CatchItemInput {
     speciesController.text = catchRecord.speciesName;
     lengthController.text = catchRecord.lengthCm?.toString() ?? '';
     weightController.text = catchRecord.weightG?.toString() ?? '';
+  }
+
+  void addListener(VoidCallback listener) {
+    speciesController.addListener(listener);
+    lengthController.addListener(listener);
+    weightController.addListener(listener);
   }
 
   void dispose() {

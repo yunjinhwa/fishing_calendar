@@ -47,6 +47,18 @@ class FishingRecordRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Publishes records already read and decoded inside a committed transaction.
+  ///
+  /// Call only after that transaction succeeds. This performs no database work;
+  /// related caches must be published before listeners are notified here.
+  void publishCommittedSnapshot({
+    required String ownerKey,
+    required List<FishingRecord> records,
+  }) {
+    _recordsByOwner[ownerKey] = List<FishingRecord>.unmodifiable(records);
+    notifyListeners();
+  }
+
   Future<void> _loadQuarantinedLegacyRecords() async {
     final preferences = await SharedPreferences.getInstance();
     final legacyJson = preferences.getString(_legacyStorageKey);

@@ -262,6 +262,9 @@ void main() {
 
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
+      expect(find.text('저장하지 않고 나가시겠습니까?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, '나가기'));
+      await tester.pumpAndSettle();
       expect(find.byType(RecordDetailPage), findsOneWidget);
       expect(find.text('Account A harbor'), findsNothing);
       expect(find.text('Account B harbor'), findsNothing);
