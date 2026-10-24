@@ -1,10 +1,32 @@
 import 'package:fishing_build/data/models/fishing_record.dart';
+import 'package:fishing_build/data/models/user_plan.dart';
+import 'package:fishing_build/data/repositories/auth_session_repository.dart';
+import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
+import 'package:fishing_build/data/repositories/outbox_repository.dart';
+import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'support/test_database.dart';
 
 void main() {
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    await RecordSyncService.instance.resetForTesting();
+    await resetTestDatabase();
+    AuthSessionRepository.instance.resetAuthGatewayForTesting();
+    FishingRecordRepository.instance.clearCacheOnlyForTesting();
+    OutboxRepository.instance.clearCacheOnlyForTesting();
+    await AuthSessionRepository.instance.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'photo-ui@example.com',
+    );
+    await FishingRecordRepository.instance.addRecord(_recordWithLocalPhoto());
+  });
+
   testWidgets('detail renders a device-local photo preview', (
     WidgetTester tester,
   ) async {

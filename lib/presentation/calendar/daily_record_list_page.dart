@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/models/outbox_item.dart';
@@ -93,6 +95,11 @@ class _DailyRecordListPageState extends State<DailyRecordListPage> {
                           MaterialPageRoute(
                             builder: (_) => RecordDetailPage(record: record),
                           ),
+                        );
+
+                        if (!mounted) return;
+                        unawaited(
+                          _syncService.syncNow(scheduleFollowUpIfBusy: true),
                         );
 
                         if (changed == true && mounted) {

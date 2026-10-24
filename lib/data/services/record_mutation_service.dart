@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:sqflite/sqflite.dart';
+
 import '../../core/validation/fishing_record_validator.dart';
 import '../local/app_database.dart';
 import '../local/local_data_store.dart';
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
+import '../models/record_edit_snapshot.dart';
 import '../repositories/auth_session_repository.dart';
 import '../repositories/fishing_record_repository.dart';
 import '../repositories/outbox_repository.dart';
@@ -26,28 +29,91 @@ class RecordMutationService {
     await _persistMutation(record, OutboxOperationType.create);
   }
 
-  Future<void> updateRecord(FishingRecord record) async {
-    _ensureRecordAccess();
-    _ensureValidRecord(record);
-    if (_recordRepository.getRecordById(record.id) == null) {
-      throw StateError('Record not found: ${record.id}');
+  Future<RecordEditSnapshot> beginEditingRecord(
+    FishingRecord displayedRecord,
+  ) async {
+    final snapshot = await loadRecordForEditing(displayedRecord.id);
+    if (!snapshot.matchesRecord(displayedRecord)) {
+      throw RecordEditConflictException(
+        RecordEditConflictReason.changed,
+        currentSnapshot: snapshot,
+      );
     }
-    await _persistMutation(record, OutboxOperationType.update);
+    return snapshot;
   }
 
-  Future<void> deleteRecord(String recordId) async {
+  Future<RecordEditSnapshot> loadRecordForEditing(String recordId) async {
     _ensureRecordAccess();
-    final record = _recordRepository.getRecordById(recordId);
+    final ownerKey = _authSession.dataOwnerKey;
+    final generation = _authSession.sessionGeneration;
+    return AppDatabase.instance.transaction((transaction) async {
+      final snapshot = await _readEditSnapshot(
+        transaction,
+        ownerKey: ownerKey,
+        generation: generation,
+        recordId: recordId,
+      );
+      _ensureEditSession(ownerKey, generation);
+      return snapshot;
+    });
+  }
+
+  /// An editor supplies the snapshot captured before the user changed fields.
+  /// Programmatic mutations may omit it when there is no open editing session.
+  Future<void> updateRecord(
+    FishingRecord record, {
+    RecordEditSnapshot? expectedSnapshot,
+  }) async {
+    if (expectedSnapshot != null) {
+      _ensureEditSession(
+        expectedSnapshot.ownerKey,
+        expectedSnapshot.sessionGeneration,
+      );
+    }
+    _ensureRecordAccess();
+    _ensureValidRecord(record);
+    if (expectedSnapshot == null &&
+        _recordRepository.getRecordById(record.id) == null) {
+      throw StateError('Record not found: ${record.id}');
+    }
+    await _persistMutation(
+      record,
+      OutboxOperationType.update,
+      expectedSnapshot: expectedSnapshot,
+    );
+  }
+
+  Future<void> deleteRecord(
+    String recordId, {
+    RecordEditSnapshot? expectedSnapshot,
+  }) async {
+    if (expectedSnapshot != null) {
+      _ensureEditSession(
+        expectedSnapshot.ownerKey,
+        expectedSnapshot.sessionGeneration,
+      );
+      if (expectedSnapshot.record.id != recordId) {
+        throw ArgumentError('편집 기준과 삭제할 기록의 ID가 일치하지 않습니다.');
+      }
+    }
+    _ensureRecordAccess();
+    final record =
+        expectedSnapshot?.record ?? _recordRepository.getRecordById(recordId);
     if (record == null) {
       throw StateError('Record not found: $recordId');
     }
-    await _persistMutation(record, OutboxOperationType.delete);
+    await _persistMutation(
+      record,
+      OutboxOperationType.delete,
+      expectedSnapshot: expectedSnapshot,
+    );
   }
 
   Future<void> _persistMutation(
     FishingRecord record,
-    OutboxOperationType operation,
-  ) async {
+    OutboxOperationType operation, {
+    RecordEditSnapshot? expectedSnapshot,
+  }) async {
     final ownerKey = _authSession.dataOwnerKey;
     final generation = _authSession.sessionGeneration;
     final userId = _authSession.memberId;
@@ -56,6 +122,12 @@ class RecordMutationService {
         _authSession.isPlanMigrationPending &&
         operation == OutboxOperationType.create;
     void ensureSession() {
+      if (expectedSnapshot != null) {
+        _ensureEditSession(
+          expectedSnapshot.ownerKey,
+          expectedSnapshot.sessionGeneration,
+        );
+      }
       if (generation != _authSession.sessionGeneration ||
           ownerKey != _authSession.dataOwnerKey ||
           !_authSession.canManageRecords ||
@@ -65,6 +137,30 @@ class RecordMutationService {
     }
 
     await AppDatabase.instance.transaction((transaction) async {
+      ensureSession();
+      if (expectedSnapshot != null) {
+        _ensureEditSession(
+          expectedSnapshot.ownerKey,
+          expectedSnapshot.sessionGeneration,
+        );
+        if (expectedSnapshot.record.id != record.id) {
+          throw ArgumentError('편집 기준과 저장할 기록의 ID가 일치하지 않습니다.');
+        }
+        final current = await _readEditSnapshot(
+          transaction,
+          ownerKey: ownerKey,
+          generation: generation,
+          recordId: record.id,
+        );
+        if (current.optimisticVersionNo !=
+                expectedSnapshot.optimisticVersionNo ||
+            !expectedSnapshot.matchesRecord(current.record)) {
+          throw RecordEditConflictException(
+            RecordEditConflictReason.changed,
+            currentSnapshot: current,
+          );
+        }
+      }
       ensureSession();
       if (usesOutbox) {
         final baseVersion = await _store.reserveNextRecordVersion(
@@ -199,6 +295,45 @@ class RecordMutationService {
     if (!_authSession.canManageRecords) {
       throw StateError('로그인한 회원만 출조 기록을 변경할 수 있습니다.');
     }
+  }
+
+  void _ensureEditSession(String ownerKey, int generation) {
+    if (ownerKey != _authSession.dataOwnerKey ||
+        generation != _authSession.sessionGeneration ||
+        !_authSession.canManageRecords) {
+      throw const RecordEditConflictException(
+        RecordEditConflictReason.sessionChanged,
+      );
+    }
+  }
+
+  Future<RecordEditSnapshot> _readEditSnapshot(
+    DatabaseExecutor transaction, {
+    required String ownerKey,
+    required int generation,
+    required String recordId,
+  }) async {
+    _ensureEditSession(ownerKey, generation);
+    final record = await _store.readRecordForOwner(
+      ownerKey,
+      recordId,
+      executor: transaction,
+    );
+    final metadata = await _store.readRecordSyncMetadata(
+      ownerKey,
+      recordId,
+      executor: transaction,
+    );
+    _ensureEditSession(ownerKey, generation);
+    if (record == null) {
+      throw const RecordEditConflictException(RecordEditConflictReason.deleted);
+    }
+    return RecordEditSnapshot(
+      record: record,
+      ownerKey: ownerKey,
+      sessionGeneration: generation,
+      optimisticVersionNo: metadata?.optimisticVersionNo ?? 0,
+    );
   }
 
   void _ensureValidRecord(FishingRecord record) {

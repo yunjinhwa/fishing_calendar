@@ -82,3 +82,4 @@ Firebase 프로젝트 연결과 실행 방법은 [Firebase Authentication 설정
 기록 동기화 배포와 검증 방법은 [Firestore 기록 동기화 설정](docs/firestore_record_sync.md)을 참고한다.
 계정 플랜 문서 생성과 보안 규칙 배포 방법은 [서버 플랜 entitlement 설정](docs/server_plan_entitlement.md)을 참고한다.
 무료 기간의 수정·삭제를 유료 재전환 시 반영하는 정책과 테스트 방법은 [요금제 전환 중 기록 보존](docs/plan_migration_integrity.md)을 참고한다.
+열린 편집 화면의 변경 감지와 실제 기기 테스트 방법은 [편집 중 기록 변경 보호](docs/record_edit_version.md)를 참고한다.
