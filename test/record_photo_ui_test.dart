@@ -49,6 +49,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: RecordFormPage(editingRecord: _recordWithLocalPhoto())),
     );
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('사진 추가 (1/10)'),
       500,
@@ -66,6 +67,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: RecordFormPage(editingRecord: _recordWithLocalPhoto())),
     );
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('사진 추가 (1/10)'),
       500,

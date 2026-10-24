@@ -83,3 +83,4 @@ Firebase 프로젝트 연결과 실행 방법은 [Firebase Authentication 설정
 계정 플랜 문서 생성과 보안 규칙 배포 방법은 [서버 플랜 entitlement 설정](docs/server_plan_entitlement.md)을 참고한다.
 무료 기간의 수정·삭제를 유료 재전환 시 반영하는 정책과 테스트 방법은 [요금제 전환 중 기록 보존](docs/plan_migration_integrity.md)을 참고한다.
 열린 편집 화면의 변경 감지와 실제 기기 테스트 방법은 [편집 중 기록 변경 보호](docs/record_edit_version.md)를 참고한다.
+저장·삭제 실패 후 재시도와 작성 취소 확인 방법은 [기록 저장 실패와 작성 취소 처리](docs/record_save_recovery.md)를 참고한다.

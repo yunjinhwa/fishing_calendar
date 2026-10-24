@@ -136,7 +136,9 @@ class RecordMutationService {
       }
     }
 
-    await AppDatabase.instance.transaction((transaction) async {
+    final committed = await AppDatabase.instance.transaction((
+      transaction,
+    ) async {
       ensureSession();
       if (expectedSnapshot != null) {
         _ensureEditSession(
@@ -214,11 +216,34 @@ class RecordMutationService {
           replace: operation == OutboxOperationType.update,
         );
       }
+      // Read and decode before committing: any failure must roll back the
+      // mutation too, rather than report failure after a durable save.
+      final records = await _store.readRecordsForOwner(
+        ownerKey,
+        executor: transaction,
+      );
+      final outboxItems = usesOutbox
+          ? await _store.readOutboxItemsForOwner(
+              ownerKey,
+              executor: transaction,
+            )
+          : null;
       ensureSession();
+      return (records: records, outboxItems: outboxItems);
     });
-    await _recordRepository.reloadOwner(ownerKey);
+    // Keep both caches consistent before synchronous record listeners run.
+    final outboxItems = committed.outboxItems;
+    if (outboxItems != null) {
+      _outboxRepository.publishCommittedSnapshot(
+        ownerKey: ownerKey,
+        items: outboxItems,
+      );
+    }
+    _recordRepository.publishCommittedSnapshot(
+      ownerKey: ownerKey,
+      records: committed.records,
+    );
     if (usesOutbox) {
-      await _outboxRepository.reloadOwner(ownerKey);
       if (generation == _authSession.sessionGeneration) {
         unawaited(
           RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),

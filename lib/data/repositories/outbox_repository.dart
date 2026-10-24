@@ -29,6 +29,17 @@ class OutboxRepository {
     _itemsByOwner[ownerKey] = await _store.readOutboxItemsForOwner(ownerKey);
   }
 
+  /// Publishes items already read and decoded inside a committed transaction.
+  ///
+  /// Call only after that transaction succeeds, before notifying record
+  /// listeners, so they observe matching record and outbox caches.
+  void publishCommittedSnapshot({
+    required String ownerKey,
+    required List<OutboxItem> items,
+  }) {
+    _itemsByOwner[ownerKey] = List<OutboxItem>.unmodifiable(items);
+  }
+
   List<OutboxItem> getAllItems() => List.unmodifiable(_items);
 
   List<OutboxItem> getAllItemsForOwner(String ownerKey) => List.unmodifiable(
