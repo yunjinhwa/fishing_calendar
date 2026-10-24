@@ -23,6 +23,7 @@
 - 활성 유료 entitlement를 검증하는 Firestore 기록 / 영수증 보안 규칙
 - 유료 전환 시 기존 기록 이전 대기열 및 미전송 항목 보호
 - 캘린더 화면
+- 여러 날짜에 걸친 출조 기록의 주별 연속 막대 표시
 - 날짜별 출조 기록 목록
 - 출조 기록 작성 화면
 - 계정별 출조 기록 기기 저장 / 조회 / 수정 / 삭제
@@ -84,3 +85,4 @@ Firebase 프로젝트 연결과 실행 방법은 [Firebase Authentication 설정
 무료 기간의 수정·삭제를 유료 재전환 시 반영하는 정책과 테스트 방법은 [요금제 전환 중 기록 보존](docs/plan_migration_integrity.md)을 참고한다.
 열린 편집 화면의 변경 감지와 실제 기기 테스트 방법은 [편집 중 기록 변경 보호](docs/record_edit_version.md)를 참고한다.
 저장·삭제 실패 후 재시도와 작성 취소 확인 방법은 [기록 저장 실패와 작성 취소 처리](docs/record_save_recovery.md)를 참고한다.
+날짜를 넘기는 출조 기록의 표시와 확인 방법은 [캘린더의 연속 기록 표시](docs/calendar_record_range.md)를 참고한다.

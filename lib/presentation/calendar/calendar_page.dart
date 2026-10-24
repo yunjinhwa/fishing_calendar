@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import 'daily_record_list_page.dart';
+import 'calendar_record_layout.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/record_sync_service.dart';
@@ -207,130 +209,241 @@ class _CalendarGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final firstDayOfMonth = DateTime(focusedMonth.year, focusedMonth.month, 1);
-    final lastDayOfMonth = DateTime(
-      focusedMonth.year,
-      focusedMonth.month + 1,
-      0,
+    final layout = CalendarMonthLayout.fromRecords(
+      month: focusedMonth,
+      records: records,
     );
+    final today = DateTime.now();
+    final textScaler = MediaQuery.textScalerOf(context);
+    final dateExtent = math.max(20.0, textScaler.scale(11) + 6);
+    final barHeight = math.max(16.0, textScaler.scale(10) + 6);
+    final barTop = 7 + dateExtent + 3;
+    final overflowTop = barTop + calendarVisibleRecordLanes * (barHeight + 2);
 
-    final leadingEmptyCount = firstDayOfMonth.weekday - 1;
-    final totalDays = lastDayOfMonth.day;
-    final totalCells = leadingEmptyCount + totalDays;
-    final rowCount = (totalCells / 7).ceil();
-    final cellCount = rowCount * 7;
-
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: cellCount,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 7,
-        childAspectRatio: 0.62,
-      ),
-      itemBuilder: (context, index) {
-        final dayNumber = index - leadingEmptyCount + 1;
-
-        if (dayNumber < 1 || dayNumber > totalDays) {
-          return const SizedBox();
-        }
-
-        final date = DateTime(focusedMonth.year, focusedMonth.month, dayNumber);
-        final now = DateTime.now();
-        final isToday =
-            date.year == now.year &&
-            date.month == now.month &&
-            date.day == now.day;
-
-        final dayRecords = records.where((record) {
-          return record.overlapsDate(date);
-        }).toList();
-
-        return Card(
-          margin: const EdgeInsets.all(3),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () async {
-              final changed = await Navigator.of(context).push<bool>(
-                MaterialPageRoute(
-                  builder: (_) => DailyRecordListPage(selectedDate: date),
-                ),
-              );
-
-              if (!context.mounted) return;
-              unawaited(
-                RecordSyncService.instance.syncNow(
-                  scheduleFollowUpIfBusy: true,
-                ),
-              );
-
-              if (changed == true) {
-                onChanged();
-              }
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 10,
-                    backgroundColor: isToday
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.transparent,
-                    child: Text(
-                      '$dayNumber',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isToday
-                            ? Theme.of(context).colorScheme.onPrimary
-                            : Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  ...dayRecords.take(2).map((record) {
-                    final summary = record.summaryTitle;
-
-                    return Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(top: 2),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 3,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        summary,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontSize: 10,
-                          height: 1.0,
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    );
-                  }),
-                  if (dayRecords.length > 2)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        '+${dayRecords.length - 2}',
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                    ),
-                ],
-              ),
-            ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columnWidth = math.max(0.0, constraints.maxWidth - 24) / 7;
+        final rowHeight = math.max(
+          columnWidth / 0.62,
+          overflowTop + textScaler.scale(11) + 9,
+        );
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: layout.weeks.length,
+          itemBuilder: (context, index) => _CalendarWeek(
+            layout: layout,
+            week: layout.weeks[index],
+            today: today,
+            rowHeight: rowHeight,
+            columnWidth: columnWidth,
+            dateExtent: dateExtent,
+            barTop: barTop,
+            barHeight: barHeight,
+            overflowTop: overflowTop,
+            onDateTap: (date) => _openDate(context, date),
           ),
         );
       },
+    );
+  }
+
+  Future<void> _openDate(BuildContext context, DateTime date) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => DailyRecordListPage(selectedDate: date),
+      ),
+    );
+    if (!context.mounted) return;
+    unawaited(RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true));
+    if (changed == true) onChanged();
+  }
+}
+
+class _CalendarWeek extends StatelessWidget {
+  final CalendarMonthLayout layout;
+  final CalendarWeekLayout week;
+  final DateTime today;
+  final double rowHeight;
+  final double columnWidth;
+  final double dateExtent;
+  final double barTop;
+  final double barHeight;
+  final double overflowTop;
+  final ValueChanged<DateTime> onDateTap;
+
+  const _CalendarWeek({
+    required this.layout,
+    required this.week,
+    required this.today,
+    required this.rowHeight,
+    required this.columnWidth,
+    required this.dateExtent,
+    required this.barTop,
+    required this.barHeight,
+    required this.overflowTop,
+    required this.onDateTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: rowHeight,
+      child: Stack(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: List.generate(7, (column) {
+              final day =
+                  week.index * 7 + column - layout.leadingEmptyCount + 1;
+              if (day < 1 || day > layout.daysInMonth) {
+                return const Expanded(child: SizedBox());
+              }
+              final date = DateTime(layout.month.year, layout.month.month, day);
+              final dayRecords = week.segments.where(
+                (segment) =>
+                    segment.startColumn <= column &&
+                    segment.endColumn >= column,
+              );
+              final hidden = week.hiddenCountForColumn(column);
+              final isToday =
+                  date.year == today.year &&
+                  date.month == today.month &&
+                  day == today.day;
+              final colors = Theme.of(context).colorScheme;
+              final label = [
+                '${date.year}년 ${date.month}월 $day일',
+                if (dayRecords.isEmpty) '기록 없음',
+                for (final segment in dayRecords) segment.record.summaryTitle,
+              ].join(', ');
+
+              return Expanded(
+                child: Semantics(
+                  button: true,
+                  label: label,
+                  onTap: () => onDateTap(date),
+                  child: ExcludeSemantics(
+                    child: Card(
+                      margin: const EdgeInsets.all(3),
+                      child: InkWell(
+                        key: ValueKey('calendar-day-${_dateKey(date)}'),
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => onDateTap(date),
+                        child: Stack(
+                          children: [
+                            Positioned(
+                              top: 4,
+                              left: 4,
+                              child: Container(
+                                width: dateExtent,
+                                height: dateExtent,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: isToday
+                                      ? colors.primary
+                                      : Colors.transparent,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Text(
+                                  '$day',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isToday
+                                        ? colors.onPrimary
+                                        : colors.onSurface,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (hidden > 0)
+                              Positioned(
+                                top: overflowTop - 3,
+                                left: 4,
+                                right: 4,
+                                child: Text(
+                                  '+$hidden',
+                                  key: ValueKey(
+                                    'calendar-overflow-${_dateKey(date)}',
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(fontSize: 11, height: 1),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+          for (final segment in week.segments.where(
+            (item) => item.lane < calendarVisibleRecordLanes,
+          ))
+            Positioned(
+              left: segment.startColumn * columnWidth + 4,
+              top: barTop + segment.lane * (barHeight + 2),
+              width:
+                  (segment.endColumn - segment.startColumn + 1) * columnWidth -
+                  8,
+              height: barHeight,
+              // Keep each date tappable, including underneath a spanning bar.
+              child: IgnorePointer(
+                child: ExcludeSemantics(
+                  child: _RecordRangeBar(
+                    markerKey: ValueKey(
+                      'calendar-range-${segment.record.id}-${week.index}',
+                    ),
+                    segment: segment,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _dateKey(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+}
+
+class _RecordRangeBar extends StatelessWidget {
+  final Key markerKey;
+  final CalendarRecordSegment segment;
+
+  const _RecordRangeBar({required this.markerKey, required this.segment});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: markerKey,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(
+        color: Colors.blue.shade200.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.horizontal(
+          left: segment.continuesBefore
+              ? Radius.zero
+              : const Radius.circular(5),
+          right: segment.continuesAfter
+              ? Radius.zero
+              : const Radius.circular(5),
+        ),
+      ),
+      child: Text(
+        segment.record.summaryTitle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontSize: 10,
+          height: 1,
+          color: Colors.blue.shade900,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
