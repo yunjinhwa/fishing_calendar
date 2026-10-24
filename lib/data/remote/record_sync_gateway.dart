@@ -56,6 +56,15 @@ class RecordPushResult {
   const RecordPushResult({required this.versionNo, required this.status});
 }
 
+/// Optional live invalidation for a record currently being viewed or edited.
+/// Events must be authoritative server revisions, not local pending writes.
+abstract interface class RecordRevisionWatchGateway {
+  Stream<RemoteRecordRevision?> watchRecordRevision({
+    required String uid,
+    required String recordId,
+  });
+}
+
 abstract interface class RecordSyncGateway {
   /// Applies one local mutation exactly once for [uid].
   Future<RecordPushResult> pushOutboxItem({

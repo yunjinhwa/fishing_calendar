@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -6,10 +7,13 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/validation/fishing_record_validator.dart';
 import '../../data/models/fishing_record.dart';
+import '../../data/models/record_edit_snapshot.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/photos/record_photo_file_store_utils.dart';
 import '../../data/repositories/auth_session_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/record_mutation_service.dart';
+import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 
 class RecordFormPage extends StatefulWidget {
@@ -54,6 +58,14 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final catchItems = <_CatchItemInput>[_CatchItemInput()];
 
   late final String recordId;
+  late final String _editingOwnerKey;
+  late final int _editingSessionGeneration;
+  RecordEditSnapshot? _editSnapshot;
+  RecordEditConflictReason? _editConflictReason;
+  String? _editLoadError;
+  bool _isPreparingEdit = false;
+  bool _isSaving = false;
+  VoidCallback? _stopRecordWatch;
   bool isPickingPhoto = false;
   int nextPhotoSequence = 0;
 
@@ -71,6 +83,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
     recordId =
         widget.editingRecord?.id ??
         DateTime.now().microsecondsSinceEpoch.toString();
+    _editingOwnerKey = AuthSessionRepository.instance.dataOwnerKey;
+    _editingSessionGeneration =
+        AuthSessionRepository.instance.sessionGeneration;
 
     locationController.text = widget.initialLocation ?? '';
     tideController.text = widget.initialTide ?? '';
@@ -88,6 +103,124 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     if (editingRecord != null) {
       _initializeEditingRecord(editingRecord);
+      AuthSessionRepository.instance.addListener(_handleEditSourceChange);
+      FishingRecordRepository.instance.addListener(_handleEditSourceChange);
+      _stopRecordWatch = RecordSyncService.instance.observeRecord(recordId);
+      _isPreparingEdit = true;
+      unawaited(_prepareEditingRecord(editingRecord));
+    }
+  }
+
+  bool get _isEditingSessionCurrent =>
+      AuthSessionRepository.instance.dataOwnerKey == _editingOwnerKey &&
+      AuthSessionRepository.instance.sessionGeneration ==
+          _editingSessionGeneration;
+
+  String get _editNoticeMessage => _editConflictReason == null
+      ? _editLoadError ?? '기록 정보를 확인한 뒤 다시 시도해 주세요.'
+      : RecordEditConflictException(_editConflictReason!).message;
+
+  Future<void> _prepareEditingRecord(FishingRecord displayedRecord) async {
+    try {
+      final snapshot = await RecordMutationService.instance.beginEditingRecord(
+        displayedRecord,
+      );
+      if (!mounted) return;
+      setState(() {
+        _editSnapshot = snapshot;
+        _isPreparingEdit = false;
+      });
+      _handleEditSourceChange();
+    } on RecordEditConflictException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _editConflictReason = error.reason;
+        _isPreparingEdit = false;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _editLoadError = '기록 정보를 확인하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.';
+        _isPreparingEdit = false;
+      });
+    }
+  }
+
+  void _handleEditSourceChange() {
+    if (!mounted || _isSaving) return;
+    RecordEditConflictReason? reason;
+    if (!_isEditingSessionCurrent) {
+      reason = RecordEditConflictReason.sessionChanged;
+    } else if (_editSnapshot != null && !_isPreparingEdit) {
+      final current = FishingRecordRepository.instance.getRecordById(recordId);
+      if (current == null) {
+        reason = RecordEditConflictReason.deleted;
+      } else if (!_editSnapshot!.matchesRecord(current)) {
+        reason = RecordEditConflictReason.changed;
+      }
+    }
+    if (reason != null && reason != _editConflictReason) {
+      setState(() => _editConflictReason = reason);
+    }
+  }
+
+  Future<void> _reloadLatestRecord() async {
+    if (_isPreparingEdit || _isSaving) return;
+    if (!_isEditingSessionCurrent) {
+      setState(
+        () => _editConflictReason = RecordEditConflictReason.sessionChanged,
+      );
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('최신 기록 불러오기'),
+        content: const Text('최신 기록을 불러오면 현재 입력한 내용이 대체됩니다. 불러오시겠습니까?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('입력 유지'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('불러오기'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (!_isEditingSessionCurrent) {
+      setState(
+        () => _editConflictReason = RecordEditConflictReason.sessionChanged,
+      );
+      return;
+    }
+    setState(() => _isPreparingEdit = true);
+    try {
+      final snapshot = await RecordMutationService.instance
+          .loadRecordForEditing(recordId);
+      if (!mounted) return;
+      if (!_isEditingSessionCurrent) {
+        throw const RecordEditConflictException(
+          RecordEditConflictReason.sessionChanged,
+        );
+      }
+      setState(() {
+        _initializeEditingRecord(snapshot.record);
+        _editSnapshot = snapshot;
+        _editConflictReason = null;
+        _editLoadError = null;
+      });
+    } on RecordEditConflictException catch (error) {
+      if (!mounted) return;
+      setState(() => _editConflictReason = error.reason);
+      showMessage(error.message);
+    } on Object {
+      if (!mounted) return;
+      showMessage('기록을 불러오지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.');
+    } finally {
+      if (mounted) setState(() => _isPreparingEdit = false);
     }
   }
 
@@ -104,6 +237,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     if (genres.contains(record.genreName)) {
       selectedGenre = record.genreName;
+      customGenreController.clear();
     } else {
       selectedGenre = '기타';
       customGenreController.text = record.genreName;
@@ -125,11 +259,18 @@ class _RecordFormPageState extends State<RecordFormPage> {
       catchItems.add(_CatchItemInput());
     }
 
-    photos.addAll(record.photos);
+    photos
+      ..clear()
+      ..addAll(record.photos);
   }
 
   @override
   void dispose() {
+    _stopRecordWatch?.call();
+    if (isEditMode) {
+      AuthSessionRepository.instance.removeListener(_handleEditSourceChange);
+      FishingRecordRepository.instance.removeListener(_handleEditSourceChange);
+    }
     locationController.dispose();
     tideController.dispose();
     weatherController.dispose();
@@ -144,6 +285,34 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> saveRecord() async {
+    if (_isSaving || _isPreparingEdit) return;
+    setState(() => _isSaving = true);
+    try {
+      if (isEditMode) {
+        if (!_isEditingSessionCurrent) {
+          throw const RecordEditConflictException(
+            RecordEditConflictReason.sessionChanged,
+          );
+        }
+        if (_editSnapshot == null) {
+          showMessage(_editNoticeMessage);
+          return;
+        }
+      }
+      await _saveValidatedRecord();
+    } on RecordEditConflictException catch (error) {
+      if (!mounted) return;
+      setState(() => _editConflictReason = error.reason);
+      showMessage(error.message);
+    } on Object {
+      if (!mounted) return;
+      showMessage('기록을 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _saveValidatedRecord() async {
     final allowed = await requireMemberAccess(
       context,
       message: '출조 기록 저장은 로그인 후 사용할 수 있습니다.',
@@ -297,7 +466,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
     }
 
     if (isEditMode) {
-      await RecordMutationService.instance.updateRecord(record);
+      await RecordMutationService.instance.updateRecord(
+        record,
+        expectedSnapshot: _editSnapshot!,
+      );
     } else {
       await RecordMutationService.instance.addRecord(record);
     }
@@ -551,6 +723,29 @@ class _RecordFormPageState extends State<RecordFormPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (_isPreparingEdit) const LinearProgressIndicator(),
+            if (isEditMode &&
+                (_editConflictReason != null || _editLoadError != null))
+              Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_editNoticeMessage),
+                      if (_editConflictReason !=
+                          RecordEditConflictReason.sessionChanged)
+                        TextButton(
+                          onPressed: _isPreparingEdit || _isSaving
+                              ? null
+                              : _reloadLatestRecord,
+                          child: const Text('최신 기록 불러오기'),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             if (widget.initialLocation != null ||
                 widget.initialFishName != null) ...[
               Card(
@@ -813,8 +1008,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
             const SizedBox(height: 24),
 
             FilledButton(
-              onPressed: isPickingPhoto ? null : saveRecord,
-              child: const Text('저장'),
+              onPressed: isPickingPhoto || _isSaving || _isPreparingEdit
+                  ? null
+                  : saveRecord,
+              child: Text(_isSaving ? '저장 중…' : '저장'),
             ),
           ],
         ),

@@ -36,22 +36,27 @@ class LocalDataStore {
   Future<Map<String, List<FishingRecord>>> _recordsFromRows(
     DatabaseExecutor executor,
     String ownerKey,
-    List<Map<String, Object?>> recordRows,
-  ) async {
+    List<Map<String, Object?>> recordRows, {
+    String? recordId,
+  }) async {
     if (recordRows.isEmpty) {
       return <String, List<FishingRecord>>{};
     }
 
     final catchRows = await executor.query(
       AppDatabase.recordCatchesTable,
-      where: 'owner_key = ?',
-      whereArgs: <Object?>[ownerKey],
+      where: recordId == null
+          ? 'owner_key = ?'
+          : 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, ?recordId],
       orderBy: 'record_id ASC, display_order ASC',
     );
     final photoRows = await executor.query(
       AppDatabase.recordPhotosTable,
-      where: 'owner_key = ?',
-      whereArgs: <Object?>[ownerKey],
+      where: recordId == null
+          ? 'owner_key = ?'
+          : 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, ?recordId],
       orderBy: 'record_id ASC, display_order ASC',
     );
 
@@ -117,6 +122,28 @@ class LocalDataStore {
     }
 
     return recordsByOwner;
+  }
+
+  Future<FishingRecord?> readRecordForOwner(
+    String ownerKey,
+    String recordId, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
+    final rows = await database.query(
+      AppDatabase.fishingRecordsTable,
+      where: 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, recordId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final records = await _recordsFromRows(
+      database,
+      ownerKey,
+      rows,
+      recordId: recordId,
+    );
+    return records[ownerKey]!.single;
   }
 
   Future<void> insertRecord(

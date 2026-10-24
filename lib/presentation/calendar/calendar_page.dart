@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'daily_record_list_page.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/services/record_sync_service.dart';
 //import 'calendar_settings_page.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -100,14 +103,20 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
           ),
           _TodaySummaryCard(
-            onTap: () {
+            onTap: () async {
               final today = DateTime.now();
 
-              Navigator.of(context).push(
+              await Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => DailyRecordListPage(
                     selectedDate: DateTime(today.year, today.month, today.day),
                   ),
+                ),
+              );
+              if (!context.mounted) return;
+              unawaited(
+                RecordSyncService.instance.syncNow(
+                  scheduleFollowUpIfBusy: true,
                 ),
               );
             },
@@ -244,6 +253,13 @@ class _CalendarGrid extends StatelessWidget {
               final changed = await Navigator.of(context).push<bool>(
                 MaterialPageRoute(
                   builder: (_) => DailyRecordListPage(selectedDate: date),
+                ),
+              );
+
+              if (!context.mounted) return;
+              unawaited(
+                RecordSyncService.instance.syncNow(
+                  scheduleFollowUpIfBusy: true,
                 ),
               );
 

@@ -10,7 +10,8 @@ import '../models/outbox_item.dart';
 import '../models/record_sync_metadata.dart';
 import 'record_sync_gateway.dart';
 
-class FirestoreRecordSyncGateway implements RecordSyncGateway {
+class FirestoreRecordSyncGateway
+    implements RecordSyncGateway, RecordRevisionWatchGateway {
   FirestoreRecordSyncGateway({FirebaseFirestore? database})
     : _database = database ?? FirebaseFirestore.instance;
 
@@ -19,6 +20,33 @@ class FirestoreRecordSyncGateway implements RecordSyncGateway {
   static const String deletedStatus = 'DELETED';
 
   final FirebaseFirestore _database;
+
+  @override
+  Stream<RemoteRecordRevision?> watchRecordRevision({
+    required String uid,
+    required String recordId,
+  }) async* {
+    _validateDocumentId(uid, fieldName: 'uid');
+    _validateDocumentId(recordId, fieldName: 'recordId');
+    try {
+      await for (final snapshot in _records(
+        uid,
+      ).doc(recordId).snapshots(includeMetadataChanges: true)) {
+        // A cached absence or a local pending deletion must not invalidate the
+        // local cache. Metadata events deliver the subsequent server result.
+        if (snapshot.metadata.isFromCache ||
+            snapshot.metadata.hasPendingWrites) {
+          continue;
+        }
+        final data = snapshot.data();
+        yield data == null
+            ? null
+            : _decodeRevision(data: data, uid: uid, recordId: recordId);
+      }
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirebaseFailure(error, stackTrace);
+    }
+  }
 
   @override
   Future<RecordPushResult> pushOutboxItem({

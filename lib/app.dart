@@ -68,7 +68,7 @@ class _FishingBuildAppState extends State<FishingBuildApp>
     if (authSession.isMember && authSession.canRefreshServerPlan) {
       await PlanPolicyService.instance.refreshServerPlan();
     }
-    await RecordSyncService.instance.syncNow();
+    await RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true);
   }
 
   @override

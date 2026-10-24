@@ -1,12 +1,16 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/models/fishing_record.dart';
+import '../../data/models/record_edit_snapshot.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/record_mutation_service.dart';
+import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 import 'record_form_page.dart';
 
@@ -23,11 +27,68 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
   final _recordRepository = FishingRecordRepository.instance;
 
   late FishingRecord record;
+  late final String _ownerKey;
+  late final int _sessionGeneration;
+  RecordEditConflictReason? _unavailableReason;
+  bool _isDeleting = false;
+  VoidCallback? _stopRecordWatch;
 
   @override
   void initState() {
     super.initState();
-    record = widget.record;
+    _ownerKey = AuthSessionRepository.instance.dataOwnerKey;
+    _sessionGeneration = AuthSessionRepository.instance.sessionGeneration;
+    final current = _recordRepository.getRecordById(widget.record.id);
+    record = current ?? widget.record;
+    if (current == null) _unavailableReason = RecordEditConflictReason.deleted;
+    _recordRepository.addListener(_handleRecordChange);
+    AuthSessionRepository.instance.addListener(_handleRecordChange);
+    _stopRecordWatch = RecordSyncService.instance.observeRecord(record.id);
+  }
+
+  @override
+  void dispose() {
+    _stopRecordWatch?.call();
+    _recordRepository.removeListener(_handleRecordChange);
+    AuthSessionRepository.instance.removeListener(_handleRecordChange);
+    super.dispose();
+  }
+
+  bool get _isCurrentSession =>
+      AuthSessionRepository.instance.dataOwnerKey == _ownerKey &&
+      AuthSessionRepository.instance.sessionGeneration == _sessionGeneration;
+
+  void _handleRecordChange() {
+    if (!mounted) return;
+    if (!_isCurrentSession) {
+      if (_unavailableReason != RecordEditConflictReason.sessionChanged) {
+        setState(
+          () => _unavailableReason = RecordEditConflictReason.sessionChanged,
+        );
+      }
+      return;
+    }
+    final current = _recordRepository.getRecordById(widget.record.id);
+    setState(() {
+      _unavailableReason = current == null
+          ? RecordEditConflictReason.deleted
+          : null;
+      if (current != null) record = current;
+    });
+  }
+
+  void _showMutationError(Object error) {
+    if (!mounted) return;
+    _handleRecordChange();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          error is RecordEditConflictException
+              ? error.message
+              : '기록을 처리하지 못했습니다. 다시 시도해 주세요.',
+        ),
+      ),
+    );
   }
 
   Future<void> editRecord() async {
@@ -39,27 +100,20 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
     if (!allowed || !mounted) {
       return;
     }
+    _handleRecordChange();
+    if (_unavailableReason != null) return;
 
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => RecordFormPage(editingRecord: record)),
     );
 
-    if (saved != true || !mounted) {
-      return;
-    }
-
-    final updatedRecord = _recordRepository.getRecordById(record.id);
-
-    if (updatedRecord == null) {
-      return;
-    }
-
-    setState(() {
-      record = updatedRecord;
-    });
+    if (!mounted) return;
+    unawaited(RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true));
+    if (saved == true) _handleRecordChange();
   }
 
   Future<void> deleteRecord() async {
+    if (_isDeleting) return;
     final allowed = await requireMemberAccess(
       context,
       message: '출조 기록 삭제는 로그인 후 사용할 수 있습니다.',
@@ -68,6 +122,18 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
     if (!allowed || !mounted) {
       return;
     }
+    _handleRecordChange();
+    if (_unavailableReason != null) return;
+    late final RecordEditSnapshot snapshot;
+    try {
+      snapshot = await RecordMutationService.instance.beginEditingRecord(
+        record,
+      );
+    } on Object catch (error) {
+      _showMutationError(error);
+      return;
+    }
+    if (!mounted) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -97,7 +163,19 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
       return;
     }
 
-    await RecordMutationService.instance.deleteRecord(record.id);
+    if (!mounted) return;
+    setState(() => _isDeleting = true);
+    try {
+      await RecordMutationService.instance.deleteRecord(
+        record.id,
+        expectedSnapshot: snapshot,
+      );
+    } on Object catch (error) {
+      _showMutationError(error);
+      return;
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
+    }
 
     if (!mounted) {
       return;
@@ -117,133 +195,163 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
         title: const Text('출조 기록'),
         actions: [
           IconButton(
-            onPressed: editRecord,
+            onPressed: _unavailableReason != null || _isDeleting
+                ? null
+                : editRecord,
             icon: const Icon(Icons.edit_outlined),
             tooltip: '수정',
           ),
           IconButton(
-            onPressed: deleteRecord,
+            onPressed: _unavailableReason != null || _isDeleting
+                ? null
+                : deleteRecord,
             icon: const Icon(Icons.delete_outline),
             tooltip: '삭제',
           ),
         ],
       ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(
-              record.summaryTitle,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-
-            Text(
-              _formatDateTimeRange(record.startAt, record.endAt),
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                const Icon(Icons.place_outlined, size: 18),
-                const SizedBox(width: 6),
-                Expanded(child: Text(record.location)),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            _SectionTitle(title: '외부 데이터'),
-            const SizedBox(height: 8),
-            _InfoCard(
-              children: [
-                _InfoRow(label: '물때', value: record.tide ?? '-'),
-                _InfoRow(label: '날씨', value: record.weather ?? '-'),
-                _InfoRow(
-                  label: '기온',
-                  value: record.airTemperature == null
-                      ? '-'
-                      : '${record.airTemperature}℃',
-                ),
-                _InfoRow(
-                  label: '수온',
-                  value: record.waterTemperature == null
-                      ? '-'
-                      : '${record.waterTemperature}℃',
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            _SectionTitle(title: '조과'),
-            const SizedBox(height: 8),
-
-            if (record.catches.isEmpty)
-              const _EmptyInfoCard(message: '입력된 조과가 없습니다.')
-            else
-              ...record.catches.map(
-                (catchRecord) => _InfoCard(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  children: [
-                    _InfoRow(label: '어종', value: catchRecord.speciesName),
-                    _InfoRow(
-                      label: '크기',
-                      value: catchRecord.lengthCm == null
-                          ? '-'
-                          : '${catchRecord.lengthCm}cm',
-                    ),
-                    _InfoRow(
-                      label: '무게',
-                      value: catchRecord.weightG == null
-                          ? '-'
-                          : '${catchRecord.weightG}g',
-                    ),
-                  ],
+      body: _unavailableReason != null
+          ? SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _unavailableReason ==
+                                RecordEditConflictReason.sessionChanged
+                            ? '계정이 변경되어 이 기록을 표시할 수 없습니다.'
+                            : '이 기록은 삭제되었습니다.',
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        child: const Text('목록으로 돌아가기'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
+            )
+          : SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    record.summaryTitle,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
 
-            const SizedBox(height: 16),
+                  Text(
+                    _formatDateTimeRange(record.startAt, record.endAt),
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 12),
 
-            _SectionTitle(title: '사진'),
-            const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.place_outlined, size: 18),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(record.location)),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
 
-            if (record.photos.isEmpty)
-              const _EmptyInfoCard(message: '첨부된 사진이 없습니다.')
-            else
-              SizedBox(
-                height: 120,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: record.photos.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final photo = record.photos[index];
+                  _SectionTitle(title: '외부 데이터'),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    children: [
+                      _InfoRow(label: '물때', value: record.tide ?? '-'),
+                      _InfoRow(label: '날씨', value: record.weather ?? '-'),
+                      _InfoRow(
+                        label: '기온',
+                        value: record.airTemperature == null
+                            ? '-'
+                            : '${record.airTemperature}℃',
+                      ),
+                      _InfoRow(
+                        label: '수온',
+                        value: record.waterTemperature == null
+                            ? '-'
+                            : '${record.waterTemperature}℃',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
 
-                    return ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: _RecordPhotoPreview(photo: photo),
-                    );
-                  },
-                ),
+                  _SectionTitle(title: '조과'),
+                  const SizedBox(height: 8),
+
+                  if (record.catches.isEmpty)
+                    const _EmptyInfoCard(message: '입력된 조과가 없습니다.')
+                  else
+                    ...record.catches.map(
+                      (catchRecord) => _InfoCard(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        children: [
+                          _InfoRow(label: '어종', value: catchRecord.speciesName),
+                          _InfoRow(
+                            label: '크기',
+                            value: catchRecord.lengthCm == null
+                                ? '-'
+                                : '${catchRecord.lengthCm}cm',
+                          ),
+                          _InfoRow(
+                            label: '무게',
+                            value: catchRecord.weightG == null
+                                ? '-'
+                                : '${catchRecord.weightG}g',
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  const SizedBox(height: 16),
+
+                  _SectionTitle(title: '사진'),
+                  const SizedBox(height: 8),
+
+                  if (record.photos.isEmpty)
+                    const _EmptyInfoCard(message: '첨부된 사진이 없습니다.')
+                  else
+                    SizedBox(
+                      height: 120,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: record.photos.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final photo = record.photos[index];
+
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: _RecordPhotoPreview(photo: photo),
+                          );
+                        },
+                      ),
+                    ),
+
+                  const SizedBox(height: 24),
+
+                  _SectionTitle(title: '메모'),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    children: [
+                      Text(
+                        record.memo?.isNotEmpty == true
+                            ? record.memo!
+                            : '메모가 없습니다.',
+                      ),
+                    ],
+                  ),
+                ],
               ),
-
-            const SizedBox(height: 24),
-
-            _SectionTitle(title: '메모'),
-            const SizedBox(height: 8),
-            _InfoCard(
-              children: [
-                Text(
-                  record.memo?.isNotEmpty == true ? record.memo! : '메모가 없습니다.',
-                ),
-              ],
             ),
-          ],
-        ),
-      ),
     );
   }
 

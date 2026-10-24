@@ -15,6 +15,7 @@ import '../repositories/fishing_record_repository.dart';
 import '../repositories/outbox_repository.dart';
 import 'network_status_service.dart';
 import 'plan_policy_service.dart';
+import 'record_refresh_watcher.dart';
 
 enum RecordSyncState { idle, syncing, succeeded, failed }
 
@@ -91,6 +92,18 @@ class RecordSyncService extends ChangeNotifier {
   bool _wasConnected = false;
   bool _rerunRequested = false;
   String? _statusOwnerKey;
+  int _followUpGeneration = 0;
+  late final _recordRefreshWatcher = RecordRefreshWatcher(
+    authSession: _authSession,
+    store: _localDataStore,
+    gateway: () => _gateway,
+    refresh: () async {
+      await syncNow(scheduleFollowUpIfBusy: true);
+    },
+  );
+
+  VoidCallback observeRecord(String recordId) =>
+      _recordRefreshWatcher.observe(recordId);
 
   bool get _statusBelongsToCurrentOwner =>
       _statusOwnerKey == _authSession.dataOwnerKey;
@@ -110,6 +123,7 @@ class RecordSyncService extends ChangeNotifier {
       return;
     }
     _gateway = gateway;
+    _recordRefreshWatcher.synchronize();
     notifyListeners();
   }
 
@@ -164,8 +178,9 @@ class RecordSyncService extends ChangeNotifier {
   Future<RecordSyncResult> syncNow({bool scheduleFollowUpIfBusy = false}) {
     final inProgress = _syncFuture;
     if (inProgress != null) {
-      if (_state == RecordSyncState.syncing && scheduleFollowUpIfBusy) {
+      if (scheduleFollowUpIfBusy) {
         _rerunRequested = true;
+        _followUpGeneration += 1;
       }
       return inProgress;
     }
@@ -363,6 +378,7 @@ class RecordSyncService extends ChangeNotifier {
           );
         }
 
+        final pullGeneration = _followUpGeneration;
         final serverSnapshot = await gateway.fetchSnapshot(uid: uid);
         if (!_isCurrentSession(uid, ownerKey)) {
           return _skip(RecordSyncSkipReason.sessionChanged);
@@ -370,6 +386,7 @@ class RecordSyncService extends ChangeNotifier {
         if (_outboxRepository.hasUnfinishedItemsForOwner(ownerKey)) {
           continue;
         }
+        if (pullGeneration != _followUpGeneration) continue;
 
         final replaced = await _recordRepository.replaceWithRemoteSnapshot(
           serverSnapshot,
@@ -378,6 +395,7 @@ class RecordSyncService extends ChangeNotifier {
         if (!replaced) {
           continue;
         }
+        if (pullGeneration != _followUpGeneration) continue;
         if (!_isCurrentSession(uid, ownerKey)) {
           return _skip(RecordSyncSkipReason.sessionChanged);
         }
@@ -391,6 +409,7 @@ class RecordSyncService extends ChangeNotifier {
           continue;
         }
 
+        if (pullGeneration != _followUpGeneration) continue;
         _rerunRequested = false;
         final result = RecordSyncResult(
           pushedCount: pushedCount,
@@ -702,6 +721,7 @@ class RecordSyncService extends ChangeNotifier {
 
   @visibleForTesting
   Future<void> resetForTesting() async {
+    _recordRefreshWatcher.clear();
     final running = _syncFuture;
     if (running != null) {
       await running;
@@ -719,10 +739,12 @@ class RecordSyncService extends ChangeNotifier {
     _wasConnected = false;
     _rerunRequested = false;
     _statusOwnerKey = null;
+    _followUpGeneration = 0;
   }
 
   @override
   void dispose() {
+    _recordRefreshWatcher.clear();
     if (_isInitialized) {
       _networkStatusService.removeListener(_handleNetworkStatusChange);
     }
