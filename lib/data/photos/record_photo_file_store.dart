@@ -62,6 +62,17 @@ final class RecordPhotoFileStore implements RecordPhotoFileStoreBackend {
   Future<Uint8List> readBytes(String path) => _backend.readBytes(path);
 
   @override
+  Future<int> deleteUnreferencedFiles({
+    required String ownerId,
+    required Set<String> retainedPaths,
+    bool Function(String path)? isProtected,
+  }) => _backend.deleteUnreferencedFiles(
+    ownerId: ownerId,
+    retainedPaths: retainedPaths,
+    isProtected: isProtected,
+  );
+
+  @override
   Future<void> deleteOwnerFiles(String ownerId) =>
       _backend.deleteOwnerFiles(ownerId);
 }

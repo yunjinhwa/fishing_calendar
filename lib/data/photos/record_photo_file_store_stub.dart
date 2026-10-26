@@ -77,15 +77,43 @@ final class MemoryRecordPhotoFileStoreBackend
   }
 
   @override
+  Future<int> deleteUnreferencedFiles({
+    required String ownerId,
+    required Set<String> retainedPaths,
+    bool Function(String path)? isProtected,
+  }) async {
+    final prefix = _ownerPrefix(ownerId);
+    final retained = retainedPaths.map(_normalizedMemoryPath).toSet();
+    var deleted = 0;
+    for (final path in _files.keys.toList()) {
+      if (!path.startsWith(prefix) ||
+          retained.contains(_normalizedMemoryPath(path)) ||
+          (isProtected?.call(path) ?? false)) {
+        continue;
+      }
+      _files.remove(path);
+      deleted += 1;
+    }
+    return deleted;
+  }
+
+  @override
   Future<void> deleteOwnerFiles(String ownerId) async {
+    final prefix = _ownerPrefix(ownerId);
+    _files.removeWhere((path, _) => path.startsWith(prefix));
+  }
+
+  String _ownerPrefix(String ownerId) {
     final ownerSegment = safeRecordPhotoPathSegment(
       ownerId,
       fieldName: 'ownerId',
     );
-    final prefix =
-        'memory-record-photo:///'
+    return 'memory-record-photo:///'
         '${p.url.join(recordPhotoStorageDirectoryName, ownerSegment)}/';
-    _files.removeWhere((path, _) => path.startsWith(prefix));
+  }
+
+  String _normalizedMemoryPath(String path) {
+    return Uri.parse(path.trim()).normalizePath().toString();
   }
 
   StoredRecordPhotoFile _store({

@@ -103,7 +103,38 @@ final class IoRecordPhotoFileStoreBackend
   }
 
   @override
+  Future<int> deleteUnreferencedFiles({
+    required String ownerId,
+    required Set<String> retainedPaths,
+    bool Function(String path)? isProtected,
+  }) async {
+    final ownerDirectory = await _validatedOwnerDirectory(ownerId);
+    if (ownerDirectory == null) {
+      return 0;
+    }
+    return _deleteManagedFiles(
+      ownerDirectory,
+      ownerRoot: ownerDirectory.path,
+      retainedPaths: retainedPaths.map(_comparisonPath).toSet(),
+      isProtected: isProtected,
+    );
+  }
+
+  @override
   Future<void> deleteOwnerFiles(String ownerId) async {
+    final ownerDirectory = await _validatedOwnerDirectory(ownerId);
+    if (ownerDirectory == null) {
+      return;
+    }
+    await _deleteManagedFiles(
+      ownerDirectory,
+      ownerRoot: ownerDirectory.path,
+      retainedPaths: const <String>{},
+      removeEmptyDirectories: true,
+    );
+  }
+
+  Future<Directory?> _validatedOwnerDirectory(String ownerId) async {
     final rootPath = (await _supportPathProvider()).trim();
     if (rootPath.isEmpty) {
       throw const RecordPhotoFileStoreException(
@@ -124,9 +155,128 @@ final class IoRecordPhotoFileStoreBackend
         'Resolved photo directory is outside the application support path.',
       );
     }
-    if (await ownerDirectory.exists()) {
-      await ownerDirectory.delete(recursive: true);
+    // Check the full ancestor chain, including the application support path.
+    // Merely checking that the lexical target is within root would allow a
+    // symlink or Windows junction to redirect deletion outside that root.
+    var currentPath = p.rootPrefix(target);
+    for (final segment in p.split(target)) {
+      if (p.equals(segment, currentPath)) {
+        continue;
+      }
+      currentPath = p.join(currentPath, segment);
+      final type = await FileSystemEntity.type(currentPath, followLinks: false);
+      if (type == FileSystemEntityType.notFound) {
+        return null;
+      }
+      if (type != FileSystemEntityType.directory ||
+          !await _hasCanonicalDirectoryPath(Directory(currentPath))) {
+        throw const RecordPhotoFileStoreException(
+          'Managed photo directory contains a redirected or invalid path.',
+        );
+      }
     }
+    return ownerDirectory;
+  }
+
+  Future<int> _deleteManagedFiles(
+    Directory directory, {
+    required String ownerRoot,
+    required Set<String> retainedPaths,
+    bool Function(String path)? isProtected,
+    bool removeEmptyDirectories = false,
+  }) async {
+    if (!await _isSafeManagedDirectory(directory, ownerRoot)) {
+      return 0;
+    }
+    var deleted = 0;
+    await for (final entity in directory.list(followLinks: false)) {
+      final type = await FileSystemEntity.type(entity.path, followLinks: false);
+      if (type == FileSystemEntityType.directory) {
+        deleted += await _deleteManagedFiles(
+          Directory(entity.path),
+          ownerRoot: ownerRoot,
+          retainedPaths: retainedPaths,
+          isProtected: isProtected,
+          removeEmptyDirectories: removeEmptyDirectories,
+        );
+      } else if (type == FileSystemEntityType.file) {
+        final file = File(entity.path);
+        if (retainedPaths.contains(_comparisonPath(file.path)) ||
+            !await _isSafeManagedFile(file, ownerRoot)) {
+          continue;
+        }
+        // Keep this synchronous check adjacent to deletion: a draft may have
+        // pinned a photo while the filesystem checks above were awaiting IO.
+        if (isProtected?.call(file.path) ?? false) {
+          continue;
+        }
+        try {
+          await file.delete();
+          deleted += 1;
+        } on FileSystemException {
+          if (await FileSystemEntity.type(file.path, followLinks: false) !=
+              FileSystemEntityType.notFound) {
+            rethrow;
+          }
+        }
+      }
+      // Links (including directory links) and other entity types are neither
+      // followed nor deleted. Resolving canonical paths also rejects junctions
+      // on platforms that report them as ordinary directories.
+    }
+    if (removeEmptyDirectories &&
+        await _isSafeManagedDirectory(directory, ownerRoot) &&
+        await directory.list(followLinks: false).isEmpty) {
+      await directory.delete();
+    }
+    return deleted;
+  }
+
+  Future<bool> _isSafeManagedDirectory(
+    Directory directory,
+    String ownerRoot,
+  ) async {
+    final path = p.normalize(p.absolute(directory.path));
+    if (!p.equals(ownerRoot, path) && !p.isWithin(ownerRoot, path)) {
+      return false;
+    }
+    if (await FileSystemEntity.type(path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      return false;
+    }
+    return _hasCanonicalDirectoryPath(directory);
+  }
+
+  Future<bool> _hasCanonicalDirectoryPath(Directory directory) async {
+    try {
+      return _comparisonPath(await directory.resolveSymbolicLinks()) ==
+          _comparisonPath(directory.path);
+    } on FileSystemException {
+      return false;
+    }
+  }
+
+  Future<bool> _isSafeManagedFile(File file, String ownerRoot) async {
+    if (!p.isWithin(ownerRoot, p.normalize(p.absolute(file.path))) ||
+        !await _isSafeManagedDirectory(file.parent, ownerRoot) ||
+        await FileSystemEntity.type(file.path, followLinks: false) !=
+            FileSystemEntityType.file) {
+      return false;
+    }
+    try {
+      if (_comparisonPath(await file.resolveSymbolicLinks()) !=
+          _comparisonPath(file.path)) {
+        return false;
+      }
+    } on FileSystemException {
+      return false;
+    }
+    return true;
+  }
+
+  String _comparisonPath(String path) {
+    final normalized = p.normalize(p.absolute(path.trim()));
+    return Platform.isWindows ? normalized.toLowerCase() : normalized;
   }
 
   Future<Uint8List> _readFileBytes(String path) async {

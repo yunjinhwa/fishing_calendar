@@ -13,6 +13,7 @@ import 'data/services/account_deletion_service.dart';
 import 'data/services/network_status_service.dart';
 import 'data/services/plan_policy_service.dart';
 import 'data/services/record_mutation_service.dart';
+import 'data/services/record_photo_cleanup_coordinator.dart';
 import 'data/services/record_sync_service.dart';
 
 Future<void> main() async {
@@ -38,6 +39,7 @@ Future<void> main() async {
   await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
   await PlanPolicyService.instance.resumePendingMigration();
 
+  RecordPhotoCleanupCoordinator.instance.initialize();
   RecordSyncService.instance.initialize();
   runApp(const FishingBuildApp());
   unawaited(RecordSyncService.instance.syncNow());

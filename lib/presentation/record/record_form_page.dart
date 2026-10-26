@@ -14,6 +14,7 @@ import '../../data/photos/record_photo_file_store_utils.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/record_mutation_service.dart';
+import '../../data/services/record_photo_cleanup_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 
@@ -54,8 +55,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final customGenreController = TextEditingController();
 
   final imagePicker = ImagePicker();
-  final photoFileStore = RecordPhotoFileStore();
   final photos = <RecordPhoto>[];
+  RecordPhotoDraftLease? _photoDraft;
   final catchItems = <_CatchItemInput>[_CatchItemInput()];
 
   late final String recordId;
@@ -108,12 +109,16 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     if (editingRecord != null) {
       _initializeEditingRecord(editingRecord);
-      AuthSessionRepository.instance.addListener(_handleEditSourceChange);
       FishingRecordRepository.instance.addListener(_handleEditSourceChange);
       _stopRecordWatch = RecordSyncService.instance.observeRecord(recordId);
       _isPreparingEdit = true;
       unawaited(_prepareEditingRecord(editingRecord));
     }
+    AuthSessionRepository.instance.addListener(_handleEditSourceChange);
+    _photoDraft = RecordPhotoCleanupService.instance.createDraft(
+      ownerKey: _editingOwnerKey,
+      paths: _photoPaths,
+    );
     _resetDraftBaseline();
     for (final controller in _textControllers) {
       controller.addListener(_handleDraftChange);
@@ -132,6 +137,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
     memoController,
     customGenreController,
   ];
+
+  Iterable<String> get _photoPaths =>
+      photos.map((photo) => photo.localPath).whereType<String>();
 
   String _captureDraft() => jsonEncode([
     for (final controller in _textControllers) controller.text,
@@ -368,13 +376,16 @@ class _RecordFormPageState extends State<RecordFormPage> {
     photos
       ..clear()
       ..addAll(record.photos);
+    _photoDraft?.updatePaths(_photoPaths);
   }
 
   @override
   void dispose() {
     _stopRecordWatch?.call();
+    final photoDraft = _photoDraft;
+    if (photoDraft != null) unawaited(photoDraft.release());
+    AuthSessionRepository.instance.removeListener(_handleEditSourceChange);
     if (isEditMode) {
-      AuthSessionRepository.instance.removeListener(_handleEditSourceChange);
       FishingRecordRepository.instance.removeListener(_handleEditSourceChange);
     }
     locationController.dispose();
@@ -401,12 +412,12 @@ class _RecordFormPageState extends State<RecordFormPage> {
     FocusScope.of(context).unfocus();
     setState(() => _isSaving = true);
     try {
+      if (!_isEditingSessionCurrent) {
+        throw const RecordEditConflictException(
+          RecordEditConflictReason.sessionChanged,
+        );
+      }
       if (isEditMode) {
-        if (!_isEditingSessionCurrent) {
-          throw const RecordEditConflictException(
-            RecordEditConflictReason.sessionChanged,
-          );
-        }
         if (_editSnapshot == null) {
           showMessage(_editNoticeMessage);
           return;
@@ -433,6 +444,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     if (!allowed || !mounted) {
       return;
+    }
+    if (!_isEditingSessionCurrent) {
+      throw const RecordEditConflictException(
+        RecordEditConflictReason.sessionChanged,
+      );
     }
 
     final location = locationController.text.trim();
@@ -618,6 +634,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
     if (isPickingPhoto || _isSaving || _isPreparingEdit) {
       return;
     }
+    if (!_isEditingSessionCurrent) {
+      showMessage('로그인 계정이 변경되었습니다. 기록 작성 화면을 다시 열어 주세요.');
+      return;
+    }
     if (photos.length >= FishingRecordValidator.maxPhotoCount) {
       showMessage(
         '사진은 최대 ${FishingRecordValidator.maxPhotoCount}장까지 첨부할 수 있습니다.',
@@ -658,11 +678,12 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     try {
       final pickedImage = await imagePicker.pickImage(source: source);
-      if (pickedImage == null) {
+      if (pickedImage == null || !mounted) {
         return;
       }
 
       final byteLength = await pickedImage.length();
+      if (!mounted) return;
       if (byteLength < 1) {
         showMessage('비어 있는 사진 파일은 첨부할 수 없습니다.');
         return;
@@ -673,6 +694,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
       }
 
       final bytes = await pickedImage.readAsBytes();
+      if (!mounted) return;
+      if (!_isEditingSessionCurrent) {
+        showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
+        return;
+      }
       final contentType = detectRecordPhotoContentType(bytes);
       if (contentType == null ||
           !FishingRecordValidator.allowedPhotoContentTypes.contains(
@@ -683,14 +709,18 @@ class _RecordFormPageState extends State<RecordFormPage> {
       }
 
       final photoId = _newPhotoId();
-      final stored = await photoFileStore.persistSelection(
-        ownerId: AuthSessionRepository.instance.dataOwnerKey,
+      final stored = await _photoDraft!.persistSelection(
         recordId: recordId,
         photoId: photoId,
         bytes: bytes,
         contentType: contentType,
       );
       if (!mounted) {
+        return;
+      }
+      if (!_isEditingSessionCurrent) {
+        _photoDraft?.updatePaths(_photoPaths);
+        showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
         return;
       }
 
@@ -705,6 +735,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
           ),
         );
       });
+      _photoDraft?.updatePaths(_photoPaths);
       _handleDraftChange();
     } on RecordPhotoTooLargeException {
       if (mounted) {
@@ -741,6 +772,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     setState(() {
       photos.removeAt(index);
     });
+    _photoDraft?.updatePaths(_photoPaths);
     _handleDraftChange();
   }
 
@@ -863,8 +895,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
               children: [
                 if (_isPreparingEdit || _isSaving)
                   const LinearProgressIndicator(),
-                if (isEditMode &&
-                    (_editConflictReason != null || _editLoadError != null))
+                if (_editConflictReason != null || _editLoadError != null)
                   Card(
                     color: Theme.of(context).colorScheme.errorContainer,
                     child: Padding(
