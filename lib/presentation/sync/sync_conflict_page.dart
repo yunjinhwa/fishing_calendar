@@ -65,7 +65,9 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
       _isManualSyncPending = true;
     });
 
-    final result = await RecordSyncService.instance.syncNow();
+    final result = await RecordSyncService.instance.syncNow(
+      forceFullRefresh: true,
+    );
     if (!mounted) return;
 
     final message = switch (result.skipReason) {

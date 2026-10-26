@@ -952,4 +952,128 @@ if (recordsAfterDeletion.length !== 0 || receiptsAfterDeletion.length !== 0) {
   throw new Error('account deletion cleanup left records or receipts behind');
 }
 
+// Exercise the same ordered, timestamp-inclusive query as the Dart gateway.
+// A batch gives all three documents an equal server timestamp, so using only
+// timestamp startAfter would skip records at the page boundary.
+const incrementalMember = await createUser('incremental-reader');
+await seedEntitlement(incrementalMember.uid);
+const incrementalIds = ['a', 'b', 'c'];
+await commit(
+  'incremental baseline batch',
+  incrementalMember.token,
+  {
+    writes: incrementalIds.flatMap((id) => mutationCommit({
+      uid: incrementalMember.uid,
+      recordId: id,
+      outboxId: `incremental-create-${id}`,
+      operationType: 'create',
+      baseVersionNo: 0,
+      resultingVersionNo: 1,
+    }).writes),
+  },
+  200,
+);
+
+const incrementalDocumentResponse = await request(
+  `/users/${incrementalMember.uid}/records/a`,
+  {token: incrementalMember.token},
+);
+await expectStatus('incremental baseline timestamp', incrementalDocumentResponse, 200);
+const incrementalDocument = await incrementalDocumentResponse.json();
+const incrementalTime = incrementalDocument.fields.serverUpdatedAt;
+const incrementalHeadResponse = await request(
+  `/users/${incrementalMember.uid}:runQuery`,
+  {
+    token: incrementalMember.token,
+    method: 'POST',
+    body: {
+      structuredQuery: {
+        from: [{collectionId: 'records'}],
+        orderBy: [
+          {field: {fieldPath: 'serverUpdatedAt'}, direction: 'DESCENDING'},
+          {field: {fieldPath: '__name__'}, direction: 'DESCENDING'},
+        ],
+        limit: 1,
+      },
+    },
+  },
+);
+await expectStatus('incremental server head query', incrementalHeadResponse, 200);
+const incrementalHead = (await incrementalHeadResponse.json())
+  .find((row) => row.document)?.document;
+if (incrementalHead?.name.split('/').at(-1) !== 'c') {
+  throw new Error('incremental head did not include the same-time highest ID');
+}
+await commit(
+  'a later write cannot extend the captured incremental page range',
+  incrementalMember.token,
+  mutationCommit({
+    uid: incrementalMember.uid,
+    recordId: 'z-after-head',
+    outboxId: 'incremental-after-head',
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+  }),
+  200,
+);
+
+async function incrementalQuery({after, token = incrementalMember.token} = {}) {
+  const response = await request(`/users/${incrementalMember.uid}:runQuery`, {
+    token,
+    method: 'POST',
+    body: {
+      structuredQuery: {
+        from: [{collectionId: 'records'}],
+        orderBy: [
+          {field: {fieldPath: 'serverUpdatedAt'}, direction: 'ASCENDING'},
+          {field: {fieldPath: '__name__'}, direction: 'ASCENDING'},
+        ],
+        startAt: {
+          values: after
+            ? [after.fields.serverUpdatedAt, {referenceValue: after.name}]
+            : [incrementalTime],
+          before: after === undefined,
+        },
+        endAt: {
+          values: [
+            incrementalHead.fields.serverUpdatedAt,
+            {referenceValue: incrementalHead.name},
+          ],
+          before: false,
+        },
+        limit: 2,
+      },
+    },
+  });
+  return response;
+}
+
+const incrementalFirstResponse = await incrementalQuery();
+await expectStatus('incremental timestamp-inclusive first page', incrementalFirstResponse, 200);
+const incrementalFirst = (await incrementalFirstResponse.json())
+  .filter((row) => row.document).map((row) => row.document);
+if (incrementalFirst.map((doc) => doc.name.split('/').at(-1)).join(',') !== 'a,b') {
+  throw new Error('incremental first page did not preserve document ID ordering');
+}
+const incrementalNextResponse = await incrementalQuery({after: incrementalFirst.at(-1)});
+await expectStatus('incremental tuple-exclusive next page', incrementalNextResponse, 200);
+const incrementalNext = (await incrementalNextResponse.json())
+  .filter((row) => row.document).map((row) => row.document);
+if (incrementalNext.map((doc) => doc.name.split('/').at(-1)).join(',') !== 'c') {
+  throw new Error('incremental next page lost a same-timestamp document');
+}
+const incrementalReplayResponse = await incrementalQuery();
+await expectStatus('incremental restart replays the checkpoint bucket', incrementalReplayResponse, 200);
+const incrementalReplay = (await incrementalReplayResponse.json())
+  .filter((row) => row.document).map((row) => row.document);
+if (incrementalReplay[0]?.name.split('/').at(-1) !== 'a') {
+  throw new Error('incremental replay failed to include a lower document ID');
+}
+await expectStatus(
+  'incremental query does not bypass ownership rules',
+  await incrementalQuery({token: intruder.token}),
+  403,
+);
+
 console.log('Firestore rules smoke test passed.');

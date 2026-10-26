@@ -1,18 +1,23 @@
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
 import '../models/record_sync_metadata.dart';
+import '../models/record_sync_checkpoint.dart';
+
+export '../models/record_sync_checkpoint.dart';
 
 class RemoteRecordRevision {
   final String recordId;
   final int versionNo;
   final RemoteRecordStatus status;
   final FishingRecord? record;
+  final RecordSyncCursor? cursor;
 
   const RemoteRecordRevision({
     required this.recordId,
     required this.versionNo,
     required this.status,
     required this.record,
+    this.cursor,
   }) : assert(versionNo >= 1),
        assert(
          (status == RemoteRecordStatus.active && record != null) ||
@@ -23,8 +28,9 @@ class RemoteRecordRevision {
 /// Complete server view for one member, including deletion tombstones.
 class RemoteRecordSnapshot {
   final List<RemoteRecordRevision> revisions;
+  final RecordSyncCursor? cursor;
 
-  const RemoteRecordSnapshot({required this.revisions});
+  const RemoteRecordSnapshot({required this.revisions, this.cursor});
 
   static const empty = RemoteRecordSnapshot(
     revisions: <RemoteRecordRevision>[],
@@ -47,6 +53,31 @@ class RemoteRecordSnapshot {
     }
     return null;
   }
+}
+
+class RemoteRecordChangePage {
+  final List<RemoteRecordRevision> revisions;
+  final bool hasMore;
+
+  const RemoteRecordChangePage({
+    required this.revisions,
+    required this.hasMore,
+  });
+}
+
+/// Optional bounded delta reads. [since] is inclusive by timestamp; [after]
+/// is exclusive by timestamp and ID while walking pages within one pull.
+abstract interface class IncrementalRecordSyncGateway {
+  /// Captures the inclusive upper bound for one finite pull.
+  Future<RecordSyncCursor> fetchLatestCursor({required String uid});
+
+  Future<RemoteRecordChangePage> fetchChanges({
+    required String uid,
+    required RecordSyncCursor since,
+    required RecordSyncCursor through,
+    RecordSyncCursor? after,
+    int limit = 100,
+  });
 }
 
 class RecordPushResult {

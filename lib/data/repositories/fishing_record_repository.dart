@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../local/app_database.dart';
 import '../local/local_data_migration_service.dart';
@@ -21,6 +22,7 @@ class FishingRecordRepository extends ChangeNotifier {
 
   final LocalDataStore _store = LocalDataStore.instance;
   final Map<String, List<FishingRecord>> _recordsByOwner = {};
+  final Set<String> _loadedOwners = {};
   List<FishingRecord>? _quarantinedLegacyRecords;
   bool _hasQuarantinedLegacyData = false;
 
@@ -38,12 +40,14 @@ class FishingRecordRepository extends ChangeNotifier {
     await LocalDataMigrationService.instance.migrateIfNeeded();
     final ownerKey = _ownerKey;
     _recordsByOwner[ownerKey] = await _store.readRecordsForOwner(ownerKey);
+    _loadedOwners.add(ownerKey);
     await _loadQuarantinedLegacyRecords();
     notifyListeners();
   }
 
   Future<void> reloadOwner(String ownerKey) async {
     _recordsByOwner[ownerKey] = await _store.readRecordsForOwner(ownerKey);
+    _loadedOwners.add(ownerKey);
     notifyListeners();
   }
 
@@ -56,6 +60,7 @@ class FishingRecordRepository extends ChangeNotifier {
     required List<FishingRecord> records,
   }) {
     _recordsByOwner[ownerKey] = List<FishingRecord>.unmodifiable(records);
+    _loadedOwners.add(ownerKey);
     notifyListeners();
   }
 
@@ -154,69 +159,271 @@ class FishingRecordRepository extends ChangeNotifier {
     await reloadOwner(ownerKey);
   }
 
-  /// Replaces the current owner's cache with an authoritative remote snapshot.
-  ///
-  /// Photos are device-local, so the current device's files are preserved
-  /// while server-backed record fields are replaced.
+  Future<RecordSyncCheckpoint?> readSyncCheckpoint(String ownerKey) async {
+    final database = await AppDatabase.instance.database;
+    try {
+      final value = await _store.readMetadata(
+        database,
+        RecordSyncCheckpoint.metadataKey(ownerKey),
+      );
+      if (value == null) return null;
+      return RecordSyncCheckpoint.decode(value);
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
+  }
+
+  /// Applies an authoritative full view without rewriting unchanged records.
+  /// A checkpoint, when supplied, is committed with the records it describes.
   Future<bool> replaceWithRemoteSnapshot(
     RemoteRecordSnapshot snapshot, {
     String? ownerKey,
+    RecordSyncCheckpoint? checkpoint,
+    bool Function()? isCurrentSession,
   }) async {
     final resolvedOwnerKey = ownerKey ?? _ownerKey;
-    final localById = <String, FishingRecord>{
-      for (final record in getAllRecordsForOwner(resolvedOwnerKey))
-        record.id: record,
-    };
-    final resolvedRecords = snapshot.activeRecords
-        .map(
-          (remoteRecord) =>
-              _preserveLocalPhotos(remoteRecord, localById[remoteRecord.id]),
-        )
-        .toList(growable: false);
-
-    var replaced = false;
-    await AppDatabase.instance.transaction((transaction) async {
-      final unfinishedRows = await transaction.rawQuery(
-        '''
-        SELECT COUNT(*) AS unfinished_count
-        FROM ${AppDatabase.outboxItemsTable}
-        WHERE owner_key = ? AND status != ?
-        ''',
-        <Object?>[resolvedOwnerKey, OutboxStatus.succeeded.name],
-      );
-      final unfinishedCount = (unfinishedRows.single['unfinished_count'] as num)
-          .toInt();
-      if (unfinishedCount > 0) {
-        return;
-      }
-
-      await _store.deleteAllRecords(transaction, ownerKey: resolvedOwnerKey);
-      for (final record in resolvedRecords) {
-        await _store.insertRecord(
-          transaction,
-          ownerKey: resolvedOwnerKey,
-          record: record,
-        );
-      }
-      await _store.replaceRecordSyncMetadata(
-        transaction,
-        ownerKey: resolvedOwnerKey,
-        items: snapshot.revisions.map(
-          (revision) => RecordSyncMetadata(
-            recordId: revision.recordId,
-            serverVersionNo: revision.versionNo,
-            optimisticVersionNo: revision.versionNo,
-            remoteStatus: revision.status,
-          ),
-        ),
-      );
-      replaced = true;
-    });
-    if (replaced) {
-      await reloadOwner(resolvedOwnerKey);
-    }
-    return replaced;
+    final result = await _applyRemoteChanges(
+      ownerKey: resolvedOwnerKey,
+      revisions: snapshot.revisions,
+      checkpoint: checkpoint,
+      isCurrentSession: isCurrentSession ?? () => true,
+      fullSnapshot: true,
+    );
+    return result.applied;
   }
+
+  /// Updates only IDs received in a delta page. Local intent and session guards
+  /// are checked inside the transaction, before the page cursor can advance.
+  Future<RecordPageApplyResult> applyRemotePage({
+    required String ownerKey,
+    required List<RemoteRecordRevision> revisions,
+    required RecordSyncCheckpoint checkpoint,
+    required bool Function() isCurrentSession,
+  }) => _applyRemoteChanges(
+    ownerKey: ownerKey,
+    revisions: revisions,
+    checkpoint: checkpoint,
+    isCurrentSession: isCurrentSession,
+    fullSnapshot: false,
+  );
+
+  Future<RecordPageApplyResult> _applyRemoteChanges({
+    required String ownerKey,
+    required List<RemoteRecordRevision> revisions,
+    required RecordSyncCheckpoint? checkpoint,
+    required bool Function() isCurrentSession,
+    required bool fullSnapshot,
+  }) async {
+    void ensureSession() {
+      if (!isCurrentSession()) throw const _RemotePullCancelled();
+    }
+
+    final changes = <String, FishingRecord?>{};
+    List<FishingRecord>? cacheBase;
+    var applied = false;
+    try {
+      await AppDatabase.instance.transaction((transaction) async {
+        ensureSession();
+        if (!await _canApplyRemoteChanges(transaction, ownerKey)) return;
+        ensureSession();
+
+        Map<String, FishingRecord>? localById;
+        if (fullSnapshot || !_loadedOwners.contains(ownerKey)) {
+          cacheBase = await _store.readRecordsForOwner(
+            ownerKey,
+            executor: transaction,
+          );
+          localById = {for (final record in cacheBase!) record.id: record};
+        }
+
+        Map<String, RecordSyncMetadata>? metadataById;
+        if (fullSnapshot) {
+          final rows = await transaction.query(
+            AppDatabase.recordSyncStatesTable,
+            where: 'owner_key = ?',
+            whereArgs: <Object?>[ownerKey],
+          );
+          metadataById = {
+            for (final row in rows)
+              row['record_id']! as String: RecordSyncMetadata(
+                recordId: row['record_id']! as String,
+                serverVersionNo: (row['server_version_no']! as num).toInt(),
+                optimisticVersionNo: (row['optimistic_version_no']! as num)
+                    .toInt(),
+                remoteStatus: RemoteRecordStatus.values.byName(
+                  row['remote_status']! as String,
+                ),
+              ),
+          };
+        }
+
+        for (final revision in revisions) {
+          ensureSession();
+          final current = localById != null
+              ? localById[revision.recordId]
+              : await _store.readRecordForOwner(
+                  ownerKey,
+                  revision.recordId,
+                  executor: transaction,
+                );
+          final metadata = metadataById != null
+              ? metadataById[revision.recordId]
+              : await _store.readRecordSyncMetadata(
+                  ownerKey,
+                  revision.recordId,
+                  executor: transaction,
+                );
+          ensureSession();
+          if (metadata != null &&
+              revision.versionNo < metadata.serverVersionNo) {
+            continue;
+          }
+          if (revision.status == RemoteRecordStatus.active) {
+            final record = _preserveLocalPhotos(revision.record!, current);
+            if (current == null || !_sameRecord(current, record)) {
+              await _store.insertRecord(
+                transaction,
+                ownerKey: ownerKey,
+                record: record,
+                replace: current != null,
+              );
+              changes[revision.recordId] = record;
+              localById?[revision.recordId] = record;
+            }
+          } else if (current != null) {
+            await _store.deleteRecord(
+              transaction,
+              ownerKey: ownerKey,
+              recordId: revision.recordId,
+            );
+            changes[revision.recordId] = null;
+            localById?.remove(revision.recordId);
+          }
+          if (metadata == null ||
+              metadata.serverVersionNo != revision.versionNo ||
+              metadata.optimisticVersionNo != revision.versionNo ||
+              metadata.remoteStatus != revision.status) {
+            await _store.writeRecordSyncMetadata(
+              transaction,
+              ownerKey: ownerKey,
+              metadata: RecordSyncMetadata(
+                recordId: revision.recordId,
+                serverVersionNo: revision.versionNo,
+                optimisticVersionNo: revision.versionNo,
+                remoteStatus: revision.status,
+              ),
+              resetOptimisticVersion: true,
+            );
+          }
+        }
+
+        if (fullSnapshot) {
+          final knownIds = revisions
+              .map((revision) => revision.recordId)
+              .toSet();
+          for (final id in localById!.keys.toList(growable: false)) {
+            if (knownIds.contains(id)) continue;
+            await _store.deleteRecord(
+              transaction,
+              ownerKey: ownerKey,
+              recordId: id,
+            );
+            changes[id] = null;
+            localById.remove(id);
+          }
+          for (final id in metadataById!.keys) {
+            if (knownIds.contains(id)) continue;
+            await transaction.delete(
+              AppDatabase.recordSyncStatesTable,
+              where: 'owner_key = ? AND record_id = ?',
+              whereArgs: <Object?>[ownerKey, id],
+            );
+          }
+        }
+
+        if (checkpoint != null) {
+          final key = RecordSyncCheckpoint.metadataKey(ownerKey);
+          final previous = await _store.readMetadata(transaction, key);
+          var next = checkpoint;
+          if (!fullSnapshot && previous != null) {
+            try {
+              final priorCheckpoint = RecordSyncCheckpoint.decode(previous);
+              if (next.cursor.compareTo(priorCheckpoint.cursor) < 0) {
+                next = priorCheckpoint;
+              }
+            } on FormatException {
+              // A valid page can replace malformed old progress safely.
+            } on TypeError {
+              // A valid page can replace malformed old progress safely.
+            }
+          }
+          if (previous != next.encode()) {
+            await _store.writeMetadata(
+              transaction,
+              key: key,
+              value: next.encode(),
+            );
+          }
+        }
+        ensureSession();
+        applied = true;
+      });
+    } on _RemotePullCancelled {
+      return const RecordPageApplyResult(applied: false, changedCount: 0);
+    }
+    if (!applied) {
+      return const RecordPageApplyResult(applied: false, changedCount: 0);
+    }
+
+    if (changes.isNotEmpty || !_loadedOwners.contains(ownerKey)) {
+      final records = <String, FishingRecord>{
+        for (final record in cacheBase ?? getAllRecordsForOwner(ownerKey))
+          record.id: record,
+      };
+      for (final entry in changes.entries) {
+        if (entry.value == null) {
+          records.remove(entry.key);
+        } else {
+          records[entry.key] = entry.value!;
+        }
+      }
+      _recordsByOwner[ownerKey] = List.unmodifiable(records.values);
+      _loadedOwners.add(ownerKey);
+      notifyListeners();
+    }
+    return RecordPageApplyResult(applied: true, changedCount: changes.length);
+  }
+
+  Future<bool> _canApplyRemoteChanges(
+    DatabaseExecutor executor,
+    String ownerKey,
+  ) async {
+    for (final (table, extraWhere, arguments)
+        in <(String, String, List<Object?>)>[
+          (
+            AppDatabase.outboxItemsTable,
+            'status != ?',
+            [OutboxStatus.succeeded.name],
+          ),
+          (AppDatabase.recordConflictsTable, 'status != ?', ['resolved']),
+          (AppDatabase.localRecordChangesTable, '1 = 1', []),
+        ]) {
+      final rows = await executor.query(
+        table,
+        columns: const ['record_id'],
+        where: 'owner_key = ? AND ($extraWhere)',
+        whereArgs: <Object?>[ownerKey, ...arguments],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) return false;
+    }
+    return true;
+  }
+
+  bool _sameRecord(FishingRecord left, FishingRecord right) =>
+      jsonEncode(left.toJson()) == jsonEncode(right.toJson());
 
   FishingRecord _preserveLocalPhotos(
     FishingRecord remoteRecord,
@@ -246,6 +453,11 @@ class FishingRecordRepository extends ChangeNotifier {
     final ownerKey = _ownerKey;
     await AppDatabase.instance.transaction((transaction) async {
       await _store.deleteAllRecords(transaction, ownerKey: ownerKey);
+      await transaction.delete(
+        AppDatabase.localMetadataTable,
+        where: 'metadata_key = ?',
+        whereArgs: <Object?>[RecordSyncCheckpoint.metadataKey(ownerKey)],
+      );
     });
     await reloadOwner(ownerKey);
   }
@@ -295,8 +507,23 @@ class FishingRecordRepository extends ChangeNotifier {
   @visibleForTesting
   void clearCacheOnlyForTesting() {
     _recordsByOwner.clear();
+    _loadedOwners.clear();
     _quarantinedLegacyRecords = null;
     _hasQuarantinedLegacyData = false;
     notifyListeners();
   }
+}
+
+class RecordPageApplyResult {
+  final bool applied;
+  final int changedCount;
+
+  const RecordPageApplyResult({
+    required this.applied,
+    required this.changedCount,
+  });
+}
+
+class _RemotePullCancelled implements Exception {
+  const _RemotePullCancelled();
 }
