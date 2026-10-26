@@ -7,6 +7,7 @@ import '../models/fishing_record.dart';
 import '../models/local_record_change.dart';
 import '../models/outbox_item.dart';
 import '../models/record_sync_metadata.dart';
+import '../models/record_sync_checkpoint.dart';
 import 'app_database.dart';
 
 class LocalDataStore {
@@ -258,6 +259,10 @@ class LocalDataStore {
         whereArgs: <Object?>[ownerKey],
       );
     }
+    await deleteMetadata(
+      executor,
+      key: RecordSyncCheckpoint.metadataKey(ownerKey),
+    );
   }
 
   Future<void> writeLocalRecordChange(
@@ -328,6 +333,22 @@ class LocalDataStore {
       orderBy: 'insertion_order ASC',
     );
     return _outboxItemsFromRows(rows)[ownerKey] ?? <OutboxItem>[];
+  }
+
+  Future<OutboxItem?> readOutboxItemForOwner(
+    String ownerKey,
+    String itemId, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
+    final rows = await database.query(
+      AppDatabase.outboxItemsTable,
+      where: 'owner_key = ? AND outbox_id = ?',
+      whereArgs: <Object?>[ownerKey, itemId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return _outboxItemsFromRows(rows)[ownerKey]!.single;
   }
 
   Map<String, List<OutboxItem>> _outboxItemsFromRows(
@@ -590,13 +611,13 @@ class LocalDataStore {
     required ConflictItem conflict,
   }) => insertConflict(executor, conflict: conflict, replace: true);
 
-  Future<void> completeResolvingConflictForOutbox(
+  Future<int> completeResolvingConflictForOutbox(
     DatabaseExecutor executor, {
     required String ownerKey,
     required String outboxId,
     required DateTime resolvedAt,
   }) async {
-    await executor.update(
+    return executor.update(
       AppDatabase.recordConflictsTable,
       <String, Object?>{
         'status': ConflictStatus.resolved.name,

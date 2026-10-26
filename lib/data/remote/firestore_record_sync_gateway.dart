@@ -11,7 +11,10 @@ import '../models/record_sync_metadata.dart';
 import 'record_sync_gateway.dart';
 
 class FirestoreRecordSyncGateway
-    implements RecordSyncGateway, RecordRevisionWatchGateway {
+    implements
+        RecordSyncGateway,
+        RecordRevisionWatchGateway,
+        IncrementalRecordSyncGateway {
   FirestoreRecordSyncGateway({FirebaseFirestore? database})
     : _database = database ?? FirebaseFirestore.instance;
 
@@ -174,30 +177,13 @@ class FirestoreRecordSyncGateway
       final querySnapshot = await _records(
         uid,
       ).get(const GetOptions(source: Source.server));
-      final revisions = <RemoteRecordRevision>[];
-
-      for (final document in querySnapshot.docs) {
-        revisions.add(
-          _decodeRevision(
-            data: document.data(),
-            uid: uid,
-            recordId: document.id,
-          ),
-        );
-      }
-
-      revisions.sort((left, right) {
-        final leftStart = left.record?.startAt;
-        final rightStart = right.record?.startAt;
-        if (leftStart == null && rightStart == null) {
-          return left.recordId.compareTo(right.recordId);
-        }
-        if (leftStart == null) return 1;
-        if (rightStart == null) return -1;
-        return leftStart.compareTo(rightStart);
-      });
-      return RemoteRecordSnapshot(
-        revisions: List<RemoteRecordRevision>.unmodifiable(revisions),
+      // Keep the initial read unordered: orderBy would silently omit legacy
+      // documents without serverUpdatedAt rather than fail validation.
+      return _decodeSnapshot(
+        uid: uid,
+        documents: querySnapshot.docs.map(
+          (document) => MapEntry(document.id, document.data()),
+        ),
       );
     } on RecordSyncGatewayException {
       rethrow;
@@ -211,6 +197,195 @@ class FirestoreRecordSyncGateway
         causeStackTrace: stackTrace,
       );
     }
+  }
+
+  @override
+  Future<RecordSyncCursor> fetchLatestCursor({required String uid}) async {
+    _validateDocumentId(uid, fieldName: 'uid');
+    try {
+      final result = await _records(uid)
+          .orderBy('serverUpdatedAt', descending: true)
+          .orderBy(FieldPath.documentId, descending: true)
+          .limit(1)
+          .get(const GetOptions(source: Source.server));
+      if (result.docs.isEmpty) return RecordSyncCursor.origin;
+      final document = result.docs.single;
+      return _decodeRevision(
+        uid: uid,
+        recordId: document.id,
+        data: document.data(),
+      ).cursor!;
+    } on RecordSyncGatewayException {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirebaseFailure(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'read-failed',
+        message: '서버 기록의 최신 변경 위치를 확인하지 못했습니다.',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  @override
+  Future<RemoteRecordChangePage> fetchChanges({
+    required String uid,
+    required RecordSyncCursor since,
+    required RecordSyncCursor through,
+    RecordSyncCursor? after,
+    int limit = 100,
+  }) async {
+    _validateChangeRequest(
+      uid: uid,
+      since: since,
+      through: through,
+      after: after,
+      limit: limit,
+    );
+    if (through.compareTo(RecordSyncCursor.origin) == 0) {
+      return const RemoteRecordChangePage(revisions: [], hasMore: false);
+    }
+    try {
+      var query = _records(
+        uid,
+      ).orderBy('serverUpdatedAt').orderBy(FieldPath.documentId);
+      if (after == null) {
+        // Replay the entire checkpoint timestamp bucket on every new pull.
+        // A record with a lower ID may have changed at that same timestamp.
+        query = query.startAt([Timestamp(since.seconds, since.nanoseconds)]);
+      } else {
+        query = query.startAfter([
+          Timestamp(after.seconds, after.nanoseconds),
+          after.recordId,
+        ]);
+      }
+      query = query.endAt([
+        Timestamp(through.seconds, through.nanoseconds),
+        through.recordId,
+      ]);
+      final result = await query
+          .limit(limit)
+          .get(const GetOptions(source: Source.server));
+      final revisions = <RemoteRecordRevision>[];
+      var previous = after;
+      for (final document in result.docs) {
+        final revision = _decodeRevision(
+          uid: uid,
+          recordId: document.id,
+          data: document.data(),
+        );
+        final cursor = revision.cursor!;
+        if (_compareTimestamp(cursor, since) < 0 ||
+            cursor.compareTo(through) > 0 ||
+            (previous != null && cursor.compareTo(previous) <= 0)) {
+          throw const RecordSyncGatewayException(
+            code: 'invalid-server-data',
+            message: '서버 변경 기록의 순서가 올바르지 않습니다.',
+          );
+        }
+        revisions.add(revision);
+        previous = cursor;
+      }
+      return RemoteRecordChangePage(
+        revisions: List.unmodifiable(revisions),
+        hasMore: revisions.length == limit,
+      );
+    } on RecordSyncGatewayException {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirebaseFailure(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'read-failed',
+        message: '서버의 변경된 기록을 불러오지 못했습니다.',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  static void _validateChangeRequest({
+    required String uid,
+    required RecordSyncCursor since,
+    required RecordSyncCursor through,
+    required RecordSyncCursor? after,
+    required int limit,
+  }) {
+    _validateDocumentId(uid, fieldName: 'uid');
+    if (limit < 1 || limit > 500) {
+      throw const RecordSyncGatewayException(
+        code: 'invalid-page-size',
+        message: '변경 기록 조회 개수가 올바르지 않습니다.',
+      );
+    }
+    try {
+      RecordSyncCursor.fromJson(since.toJson());
+      RecordSyncCursor.fromJson(through.toJson());
+      if (since.recordId.isNotEmpty) {
+        _validateDocumentId(since.recordId, fieldName: 'recordId');
+      }
+      if (through.recordId.isNotEmpty) {
+        _validateDocumentId(through.recordId, fieldName: 'recordId');
+      }
+      if (since.compareTo(through) > 0) {
+        throw const FormatException('Checkpoint exceeds the server head.');
+      }
+      if (after != null) {
+        RecordSyncCursor.fromJson(after.toJson());
+        _validateDocumentId(after.recordId, fieldName: 'recordId');
+        if (_compareTimestamp(after, since) < 0 ||
+            after.compareTo(through) > 0) {
+          throw const FormatException('Page cursor precedes its checkpoint.');
+        }
+      }
+    } on FormatException catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'invalid-cursor',
+        message: '기록 동기화 조회 위치가 올바르지 않습니다.',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  static int _compareTimestamp(RecordSyncCursor left, RecordSyncCursor right) {
+    final comparison = left.seconds.compareTo(right.seconds);
+    return comparison != 0
+        ? comparison
+        : left.nanoseconds.compareTo(right.nanoseconds);
+  }
+
+  static RemoteRecordSnapshot _decodeSnapshot({
+    required String uid,
+    required Iterable<MapEntry<String, Map<String, dynamic>>> documents,
+  }) {
+    var cursor = RecordSyncCursor.origin;
+    final revisions = <RemoteRecordRevision>[];
+    for (final document in documents) {
+      final revision = _decodeRevision(
+        uid: uid,
+        recordId: document.key,
+        data: document.value,
+      );
+      if (revision.cursor!.compareTo(cursor) > 0) cursor = revision.cursor!;
+      revisions.add(revision);
+    }
+    revisions.sort((left, right) {
+      final leftStart = left.record?.startAt;
+      final rightStart = right.record?.startAt;
+      if (leftStart == null && rightStart == null) {
+        return left.recordId.compareTo(right.recordId);
+      }
+      if (leftStart == null) return 1;
+      if (rightStart == null) return -1;
+      return leftStart.compareTo(rightStart);
+    });
+    return RemoteRecordSnapshot(
+      revisions: List.unmodifiable(revisions),
+      cursor: cursor,
+    );
   }
 
   @override
@@ -243,7 +418,7 @@ class FirestoreRecordSyncGateway
     }
   }
 
-  RemoteRecordRevision _decodeRevision({
+  static RemoteRecordRevision _decodeRevision({
     required String uid,
     required String recordId,
     required Map<String, dynamic> data,
@@ -266,6 +441,7 @@ class FirestoreRecordSyncGateway
       recordId: recordId,
       status: status as String,
     );
+    final updatedAt = data['serverUpdatedAt']! as Timestamp;
     return RemoteRecordRevision(
       recordId: recordId,
       versionNo: data['versionNo']! as int,
@@ -273,6 +449,11 @@ class FirestoreRecordSyncGateway
           ? RemoteRecordStatus.active
           : RemoteRecordStatus.deleted,
       record: status == activeStatus ? _decodeCloudRecord(data) : null,
+      cursor: RecordSyncCursor(
+        seconds: updatedAt.seconds,
+        nanoseconds: updatedAt.nanoseconds,
+        recordId: recordId,
+      ),
     );
   }
 
@@ -425,7 +606,35 @@ class FirestoreRecordSyncGateway
   static FishingRecord decodeCloudRecordForTesting(Map<String, dynamic> data) =>
       _decodeCloudRecord(data);
 
-  void _validateDocumentId(String value, {required String fieldName}) {
+  @visibleForTesting
+  static RemoteRecordRevision decodeRevisionForTesting({
+    required String uid,
+    required String recordId,
+    required Map<String, dynamic> data,
+  }) => _decodeRevision(uid: uid, recordId: recordId, data: data);
+
+  @visibleForTesting
+  static RemoteRecordSnapshot decodeSnapshotForTesting({
+    required String uid,
+    required Map<String, Map<String, dynamic>> documents,
+  }) => _decodeSnapshot(uid: uid, documents: documents.entries);
+
+  @visibleForTesting
+  static void validateChangeRequestForTesting({
+    required String uid,
+    required RecordSyncCursor since,
+    required RecordSyncCursor through,
+    RecordSyncCursor? after,
+    int limit = 100,
+  }) => _validateChangeRequest(
+    uid: uid,
+    since: since,
+    through: through,
+    after: after,
+    limit: limit,
+  );
+
+  static void _validateDocumentId(String value, {required String fieldName}) {
     final maxLength = fieldName == 'recordId'
         ? FishingRecordValidator.maxDocumentIdLength
         : 300;

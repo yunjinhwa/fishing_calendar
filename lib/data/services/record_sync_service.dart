@@ -91,6 +91,7 @@ class RecordSyncService extends ChangeNotifier {
   bool _isInitialized = false;
   bool _wasConnected = false;
   bool _rerunRequested = false;
+  bool _forceFullRequested = false;
   String? _statusOwnerKey;
   int _followUpGeneration = 0;
   late final _recordRefreshWatcher = RecordRefreshWatcher(
@@ -175,10 +176,14 @@ class RecordSyncService extends ChangeNotifier {
     await syncNow(scheduleFollowUpIfBusy: true);
   }
 
-  Future<RecordSyncResult> syncNow({bool scheduleFollowUpIfBusy = false}) {
+  Future<RecordSyncResult> syncNow({
+    bool scheduleFollowUpIfBusy = false,
+    bool forceFullRefresh = false,
+  }) {
+    if (forceFullRefresh) _forceFullRequested = true;
     final inProgress = _syncFuture;
     if (inProgress != null) {
-      if (scheduleFollowUpIfBusy) {
+      if (scheduleFollowUpIfBusy || forceFullRefresh) {
         _rerunRequested = true;
         _followUpGeneration += 1;
       }
@@ -216,6 +221,11 @@ class RecordSyncService extends ChangeNotifier {
 
     final uid = _authSession.memberId!;
     final ownerKey = _authSession.dataOwnerKey;
+    final generation = _authSession.sessionGeneration;
+    bool sessionIsCurrent() =>
+        _isCurrentSession(uid, ownerKey) &&
+        generation == _authSession.sessionGeneration &&
+        identical(gateway, _gateway);
     _statusOwnerKey = ownerKey;
     _state = RecordSyncState.syncing;
     _lastError = null;
@@ -226,13 +236,13 @@ class RecordSyncService extends ChangeNotifier {
       // Preserve local free-plan edits/deletions before any old request is
       // retried or an authoritative server snapshot can replace the cache.
       await PlanPolicyService.instance.resumePendingMigration();
-      if (!_isCurrentSession(uid, ownerKey)) {
+      if (!sessionIsCurrent()) {
         return _skip(RecordSyncSkipReason.sessionChanged);
       }
       final firstRealSync = !await _hasCompletedFirstSync(uid);
       if (firstRealSync) {
         final serverBeforePush = await gateway.fetchSnapshot(uid: uid);
-        if (!_isCurrentSession(uid, ownerKey)) {
+        if (!sessionIsCurrent()) {
           return _skip(RecordSyncSkipReason.sessionChanged);
         }
         await _prepareFirstRealSync(
@@ -240,7 +250,7 @@ class RecordSyncService extends ChangeNotifier {
           ownerKey: ownerKey,
           serverSnapshot: serverBeforePush,
         );
-        if (!_isCurrentSession(uid, ownerKey)) {
+        if (!sessionIsCurrent()) {
           return _skip(RecordSyncSkipReason.sessionChanged);
         }
       }
@@ -251,7 +261,7 @@ class RecordSyncService extends ChangeNotifier {
           if (queuedItem == null) {
             break;
           }
-          if (!_isCurrentSession(uid, ownerKey)) {
+          if (!sessionIsCurrent()) {
             return _skip(RecordSyncSkipReason.sessionChanged);
           }
 
@@ -275,7 +285,7 @@ class RecordSyncService extends ChangeNotifier {
           );
           notifyListeners();
 
-          if (!_isCurrentSession(uid, ownerKey)) {
+          if (!sessionIsCurrent()) {
             return _skip(RecordSyncSkipReason.sessionChanged);
           }
 
@@ -286,7 +296,7 @@ class RecordSyncService extends ChangeNotifier {
               item: queuedItem,
             );
           } on RecordVersionConflictException catch (error) {
-            if (_isCurrentSession(uid, ownerKey)) {
+            if (sessionIsCurrent()) {
               await _recordConflict(
                 ownerKey: ownerKey,
                 blockingItem: queuedItem,
@@ -301,7 +311,7 @@ class RecordSyncService extends ChangeNotifier {
           } on Object catch (error) {
             if (error is RecordSyncGatewayException &&
                 error.code == 'idempotency-conflict') {
-              if (!_isCurrentSession(uid, ownerKey)) {
+              if (!sessionIsCurrent()) {
                 return _skip(RecordSyncSkipReason.sessionChanged);
               }
               // Older builds could replace the body of a committed request.
@@ -312,7 +322,7 @@ class RecordSyncService extends ChangeNotifier {
                 uid: uid,
                 recordId: queuedItem.recordId,
               );
-              if (!_isCurrentSession(uid, ownerKey)) {
+              if (!sessionIsCurrent()) {
                 return _skip(RecordSyncSkipReason.sessionChanged);
               }
               await _recordConflict(
@@ -333,7 +343,7 @@ class RecordSyncService extends ChangeNotifier {
               );
             }
             final message = _messageFor(error);
-            if (_isCurrentSession(uid, ownerKey)) {
+            if (sessionIsCurrent()) {
               await _outboxRepository.updateItemStatusForOwner(
                 ownerKey: ownerKey,
                 itemId: queuedItem.id,
@@ -348,23 +358,24 @@ class RecordSyncService extends ChangeNotifier {
             );
           }
 
-          if (!_isCurrentSession(uid, ownerKey)) {
+          if (!sessionIsCurrent()) {
             return _skip(RecordSyncSkipReason.sessionChanged);
           }
           await _completeSuccessfulPush(
             ownerKey: ownerKey,
             item: queuedItem,
             result: pushResult,
+            isCurrentSession: sessionIsCurrent,
           );
           pushedCount += 1;
           notifyListeners();
         }
 
-        if (!_isCurrentSession(uid, ownerKey)) {
+        if (!sessionIsCurrent()) {
           return _skip(RecordSyncSkipReason.sessionChanged);
         }
         await PlanPolicyService.instance.completeMigrationIfPossible();
-        if (!_isCurrentSession(uid, ownerKey)) {
+        if (!sessionIsCurrent()) {
           return _skip(RecordSyncSkipReason.sessionChanged);
         }
         if (_outboxRepository.hasUnfinishedItemsForOwner(ownerKey)) {
@@ -379,29 +390,31 @@ class RecordSyncService extends ChangeNotifier {
         }
 
         final pullGeneration = _followUpGeneration;
-        final serverSnapshot = await gateway.fetchSnapshot(uid: uid);
-        if (!_isCurrentSession(uid, ownerKey)) {
-          return _skip(RecordSyncSkipReason.sessionChanged);
-        }
-        if (_outboxRepository.hasUnfinishedItemsForOwner(ownerKey)) {
-          continue;
-        }
-        if (pullGeneration != _followUpGeneration) continue;
-
-        final replaced = await _recordRepository.replaceWithRemoteSnapshot(
-          serverSnapshot,
+        final pull = await _pullRemote(
+          gateway: gateway,
+          uid: uid,
           ownerKey: ownerKey,
+          isCurrent: () =>
+              sessionIsCurrent() && pullGeneration == _followUpGeneration,
         );
-        if (!replaced) {
-          continue;
-        }
-        if (pullGeneration != _followUpGeneration) continue;
-        if (!_isCurrentSession(uid, ownerKey)) {
+        if (!sessionIsCurrent()) {
           return _skip(RecordSyncSkipReason.sessionChanged);
         }
+        if (!pull.applied) {
+          if (pullGeneration != _followUpGeneration ||
+              _outboxRepository.hasUnfinishedItemsForOwner(ownerKey)) {
+            continue;
+          }
+          return _fail(
+            pushedCount: pushedCount,
+            failedCount: 1,
+            message: '보호 중인 로컬 변경이나 충돌이 있습니다. 대기열과 충돌 상태를 확인해 주세요.',
+          );
+        }
+        if (pullGeneration != _followUpGeneration) continue;
         if (firstRealSync) {
           await _markFirstSyncCompleted(uid);
-          if (!_isCurrentSession(uid, ownerKey)) {
+          if (!sessionIsCurrent()) {
             return _skip(RecordSyncSkipReason.sessionChanged);
           }
         }
@@ -413,7 +426,7 @@ class RecordSyncService extends ChangeNotifier {
         _rerunRequested = false;
         final result = RecordSyncResult(
           pushedCount: pushedCount,
-          pulledCount: serverSnapshot.activeRecords.length,
+          pulledCount: pull.changedCount,
         );
         _state = RecordSyncState.succeeded;
         _lastResult = result;
@@ -423,6 +436,9 @@ class RecordSyncService extends ChangeNotifier {
         return result;
       }
     } on Object catch (error) {
+      if (!sessionIsCurrent()) {
+        return _skip(RecordSyncSkipReason.sessionChanged);
+      }
       return _fail(
         pushedCount: pushedCount,
         failedCount: 1,
@@ -431,25 +447,142 @@ class RecordSyncService extends ChangeNotifier {
     }
   }
 
+  Future<({bool applied, int changedCount})> _pullRemote({
+    required RecordSyncGateway gateway,
+    required String uid,
+    required String ownerKey,
+    required bool Function() isCurrent,
+  }) async {
+    final incremental = gateway is IncrementalRecordSyncGateway
+        ? gateway as IncrementalRecordSyncGateway
+        : null;
+    var checkpoint = incremental == null
+        ? null
+        : await _recordRepository.readSyncCheckpoint(ownerKey);
+    if (!isCurrent()) return (applied: false, changedCount: 0);
+    final now = _now().toUtc();
+    final needsFull =
+        incremental == null ||
+        checkpoint == null ||
+        _forceFullRequested ||
+        now.isBefore(checkpoint.lastFullSyncAt) ||
+        now.difference(checkpoint.lastFullSyncAt) >= const Duration(hours: 24);
+    RecordSyncCursor? upper;
+    if (!needsFull) {
+      upper = await incremental.fetchLatestCursor(uid: uid);
+      if (!isCurrent()) return (applied: false, changedCount: 0);
+    }
+    if (needsFull || upper!.compareTo(checkpoint.cursor) < 0) {
+      final snapshot = await gateway.fetchSnapshot(uid: uid);
+      if (!isCurrent()) return (applied: false, changedCount: 0);
+      if (incremental != null && snapshot.cursor == null) {
+        throw const RecordSyncGatewayException(
+          code: 'invalid-checkpoint',
+          message: '서버 기록의 동기화 기준을 확인하지 못했습니다.',
+        );
+      }
+      final applied = await _recordRepository.replaceWithRemoteSnapshot(
+        snapshot,
+        ownerKey: ownerKey,
+        isCurrentSession: isCurrent,
+        checkpoint: incremental == null
+            ? null
+            : RecordSyncCheckpoint(
+                cursor: snapshot.cursor!,
+                lastFullSyncAt: now,
+              ),
+      );
+      if (applied && isCurrent()) _forceFullRequested = false;
+      return (applied: applied, changedCount: snapshot.activeRecords.length);
+    }
+
+    var activeCheckpoint = checkpoint;
+    final through = upper;
+    final since = activeCheckpoint.cursor;
+    RecordSyncCursor? after;
+    var changedCount = 0;
+    while (true) {
+      if (!isCurrent() ||
+          _outboxRepository.hasUnfinishedItemsForOwner(ownerKey)) {
+        return (applied: false, changedCount: changedCount);
+      }
+      final page = await incremental.fetchChanges(
+        uid: uid,
+        since: since,
+        through: through,
+        after: after,
+      );
+      if (!isCurrent()) return (applied: false, changedCount: changedCount);
+      var previous = after;
+      final seenIds = <String>{};
+      for (final revision in page.revisions) {
+        final cursor = revision.cursor;
+        final lower = RecordSyncCursor(
+          seconds: since.seconds,
+          nanoseconds: since.nanoseconds,
+          recordId: '',
+        );
+        if (cursor == null ||
+            cursor.recordId != revision.recordId ||
+            cursor.compareTo(lower) < 0 ||
+            cursor.compareTo(through) > 0 ||
+            (previous != null && cursor.compareTo(previous) <= 0) ||
+            !seenIds.add(revision.recordId)) {
+          throw const RecordSyncGatewayException(
+            code: 'invalid-change-page',
+            message: '서버 기록의 변경 순서를 확인하지 못했습니다.',
+          );
+        }
+        previous = cursor;
+      }
+      if (page.hasMore && page.revisions.isEmpty) {
+        throw const RecordSyncGatewayException(
+          code: 'invalid-change-page',
+          message: '서버 기록을 이어서 불러오지 못했습니다.',
+        );
+      }
+      final next =
+          previous != null && previous.compareTo(activeCheckpoint.cursor) > 0
+          ? previous
+          : activeCheckpoint.cursor;
+      final nextCheckpoint = RecordSyncCheckpoint(
+        cursor: next,
+        lastFullSyncAt: activeCheckpoint.lastFullSyncAt,
+      );
+      final applied = await _recordRepository.applyRemotePage(
+        ownerKey: ownerKey,
+        revisions: page.revisions,
+        checkpoint: nextCheckpoint,
+        isCurrentSession: isCurrent,
+      );
+      if (!applied.applied) return (applied: false, changedCount: changedCount);
+      changedCount += applied.changedCount;
+      activeCheckpoint = nextCheckpoint;
+      if (!page.hasMore) {
+        return (applied: true, changedCount: changedCount);
+      }
+      after = previous;
+    }
+  }
+
   Future<void> _completeSuccessfulPush({
     required String ownerKey,
     required OutboxItem item,
     required RecordPushResult result,
+    required bool Function() isCurrentSession,
   }) async {
-    final allItems = _outboxRepository.getAllItemsForOwner(ownerKey);
-    final itemIndex = allItems.indexWhere(
-      (candidate) => candidate.id == item.id,
+    final pendingItems = _outboxRepository.getUnfinishedItemsForRecord(
+      ownerKey: ownerKey,
+      recordId: item.recordId,
     );
-    final persistedItem = itemIndex >= 0 ? allItems[itemIndex] : item;
     var optimisticVersionNo = result.versionNo;
     final laterLegacyItems = <OutboxItem>[];
+    final itemIndex = pendingItems.indexWhere(
+      (candidate) => candidate.id == item.id,
+    );
     if (itemIndex >= 0) {
       var nextBaseVersion = result.versionNo;
-      for (final candidate in allItems.skip(itemIndex + 1)) {
-        if (candidate.recordId != item.recordId ||
-            candidate.status == OutboxStatus.succeeded) {
-          continue;
-        }
+      for (final candidate in pendingItems.skip(itemIndex + 1)) {
         if (candidate.baseVersionNo == null) {
           laterLegacyItems.add(
             candidate.copyWith(baseVersionNo: nextBaseVersion),
@@ -462,24 +595,42 @@ class RecordSyncService extends ChangeNotifier {
       optimisticVersionNo = nextBaseVersion;
     }
 
-    await AppDatabase.instance.transaction((transaction) async {
-      await _localDataStore.insertOutboxItem(
-        transaction,
-        ownerKey: ownerKey,
-        item: persistedItem.copyWith(
-          status: OutboxStatus.succeeded,
-          lastTriedAt: _now(),
-          clearErrorMessage: true,
-        ),
-        replace: true,
+    final committed = await AppDatabase.instance.transaction((
+      transaction,
+    ) async {
+      if (!isCurrentSession()) throw StateError('Sync session changed.');
+      final count = await transaction.update(
+        AppDatabase.outboxItemsTable,
+        {
+          'status': OutboxStatus.succeeded.name,
+          'last_tried_at': _now().toIso8601String(),
+          'error_message': null,
+        },
+        where: 'owner_key = ? AND outbox_id = ?',
+        whereArgs: <Object?>[ownerKey, item.id],
+      );
+      if (count == 0) throw StateError('Completed request no longer exists.');
+      final changedItems = <OutboxItem>[];
+      changedItems.add(
+        (await _localDataStore.readOutboxItemForOwner(
+          ownerKey,
+          item.id,
+          executor: transaction,
+        ))!,
       );
       for (final legacyItem in laterLegacyItems) {
-        await _localDataStore.insertOutboxItem(
-          transaction,
-          ownerKey: ownerKey,
-          item: legacyItem,
-          replace: true,
+        await transaction.update(
+          AppDatabase.outboxItemsTable,
+          {'base_version_no': legacyItem.baseVersionNo},
+          where: 'owner_key = ? AND outbox_id = ? AND base_version_no IS NULL',
+          whereArgs: <Object?>[ownerKey, legacyItem.id],
         );
+        final changed = await _localDataStore.readOutboxItemForOwner(
+          ownerKey,
+          legacyItem.id,
+          executor: transaction,
+        );
+        if (changed != null) changedItems.add(changed);
       }
       await _localDataStore.writeRecordSyncMetadata(
         transaction,
@@ -491,15 +642,23 @@ class RecordSyncService extends ChangeNotifier {
           remoteStatus: result.status,
         ),
       );
-      await _localDataStore.completeResolvingConflictForOutbox(
-        transaction,
-        ownerKey: ownerKey,
-        outboxId: item.id,
-        resolvedAt: _now(),
-      );
+      final changedConflicts = await _localDataStore
+          .completeResolvingConflictForOutbox(
+            transaction,
+            ownerKey: ownerKey,
+            outboxId: item.id,
+            resolvedAt: _now(),
+          );
+      if (!isCurrentSession()) throw StateError('Sync session changed.');
+      return (items: changedItems, conflictsChanged: changedConflicts > 0);
     });
-    await _outboxRepository.reloadOwner(ownerKey);
-    await _conflictRepository.reloadOwner(ownerKey);
+    _outboxRepository.publishCommittedItems(
+      ownerKey: ownerKey,
+      items: committed.items,
+    );
+    if (committed.conflictsChanged) {
+      await _conflictRepository.reloadOwner(ownerKey);
+    }
   }
 
   Future<void> _recordConflict({
@@ -545,14 +704,10 @@ class RecordSyncService extends ChangeNotifier {
   }
 
   OutboxItem _latestUnfinishedItemForRecord(String ownerKey, String recordId) {
-    final matches = _outboxRepository
-        .getAllItemsForOwner(ownerKey)
-        .where(
-          (item) =>
-              item.recordId == recordId &&
-              item.status != OutboxStatus.succeeded,
-        )
-        .toList(growable: false);
+    final matches = _outboxRepository.getUnfinishedItemsForRecord(
+      ownerKey: ownerKey,
+      recordId: recordId,
+    );
     return matches.isEmpty ? _firstUnfinishedItem(ownerKey)! : matches.last;
   }
 
@@ -658,14 +813,8 @@ class RecordSyncService extends ChangeNotifier {
         _authSession.dataOwnerKey == ownerKey;
   }
 
-  OutboxItem? _firstUnfinishedItem(String ownerKey) {
-    for (final item in _outboxRepository.getAllItemsForOwner(ownerKey)) {
-      if (item.status != OutboxStatus.succeeded) {
-        return item;
-      }
-    }
-    return null;
-  }
+  OutboxItem? _firstUnfinishedItem(String ownerKey) =>
+      _outboxRepository.firstUnfinishedItemForOwner(ownerKey);
 
   String _syncMarkerKey(String uid) => '$_syncMarkerPrefix:$uid';
 
@@ -738,6 +887,7 @@ class RecordSyncService extends ChangeNotifier {
     _isInitialized = false;
     _wasConnected = false;
     _rerunRequested = false;
+    _forceFullRequested = false;
     _statusOwnerKey = null;
     _followUpGeneration = 0;
   }
