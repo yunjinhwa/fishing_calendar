@@ -52,6 +52,16 @@ abstract interface class RecordPhotoFileStoreBackend {
 
   Future<Uint8List> readBytes(String path);
 
+  /// Deletes only regular files in this owner's managed photo directory.
+  ///
+  /// [isProtected] is checked immediately before each deletion so an active
+  /// editor can protect a photo selected after the cleanup snapshot was read.
+  Future<int> deleteUnreferencedFiles({
+    required String ownerId,
+    required Set<String> retainedPaths,
+    bool Function(String path)? isProtected,
+  });
+
   Future<void> deleteOwnerFiles(String ownerId);
 }
 

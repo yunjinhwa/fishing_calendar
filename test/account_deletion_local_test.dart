@@ -347,6 +347,13 @@ void main() {
 
 final class _FailingPhotoFileStore implements RecordPhotoFileStoreBackend {
   @override
+  Future<int> deleteUnreferencedFiles({
+    required String ownerId,
+    required Set<String> retainedPaths,
+    bool Function(String path)? isProtected,
+  }) async => 0;
+
+  @override
   Future<void> deleteOwnerFiles(String ownerId) {
     throw const RecordPhotoFileStoreException('simulated cleanup failure');
   }
@@ -370,6 +377,13 @@ final class _FailingPhotoFileStore implements RecordPhotoFileStoreBackend {
 }
 
 final class _NoOpPhotoFileStore implements RecordPhotoFileStoreBackend {
+  @override
+  Future<int> deleteUnreferencedFiles({
+    required String ownerId,
+    required Set<String> retainedPaths,
+    bool Function(String path)? isProtected,
+  }) async => 0;
+
   @override
   Future<void> deleteOwnerFiles(String ownerId) async {}
 
