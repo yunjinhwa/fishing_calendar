@@ -14,7 +14,8 @@ class FirestoreRecordSyncGateway
     implements
         RecordSyncGateway,
         RecordRevisionWatchGateway,
-        IncrementalRecordSyncGateway {
+        IncrementalRecordSyncGateway,
+        RecordRangeQueryGateway {
   FirestoreRecordSyncGateway({FirebaseFirestore? database})
     : _database = database ?? FirebaseFirestore.instance;
 
@@ -304,6 +305,174 @@ class FirestoreRecordSyncGateway
         causeStackTrace: stackTrace,
       );
     }
+  }
+
+  @override
+  Future<RemoteRecordRangePage> fetchRange({
+    required String uid,
+    required DateTime from,
+    required DateTime to,
+    RecordRangeCursor? after,
+    int limit = 100,
+  }) async {
+    _validateRangeRequest(
+      uid: uid,
+      from: from,
+      to: to,
+      after: after,
+      limit: limit,
+    );
+    try {
+      var query = _records(uid)
+          .where('recordStatus', isEqualTo: activeStatus)
+          .where('endAt', isGreaterThan: Timestamp.fromDate(from))
+          .where('startAt', isLessThan: Timestamp.fromDate(to))
+          .orderBy('endAt')
+          .orderBy('startAt')
+          .orderBy(FieldPath.documentId);
+      if (after != null) {
+        query = query.startAfter([
+          Timestamp(after.endSeconds, after.endNanoseconds),
+          Timestamp(after.startSeconds, after.startNanoseconds),
+          after.recordId,
+        ]);
+      }
+      final result = await query
+          .limit(limit)
+          .get(const GetOptions(source: Source.server));
+      return _decodeRangePage(
+        uid: uid,
+        from: from,
+        to: to,
+        after: after,
+        limit: limit,
+        documents: result.docs.map(
+          (document) => MapEntry(document.id, document.data()),
+        ),
+      );
+    } on RecordSyncGatewayException {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirebaseFailure(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'read-failed',
+        message: '선택한 기간의 서버 기록을 불러오지 못했습니다.',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  static void _validateRangeRequest({
+    required String uid,
+    required DateTime from,
+    required DateTime to,
+    required RecordRangeCursor? after,
+    required int limit,
+  }) {
+    _validateDocumentId(uid, fieldName: 'uid');
+    if (limit < 1 || limit > 500) {
+      throw const RecordSyncGatewayException(
+        code: 'invalid-page-size',
+        message: '기간별 기록 조회 개수가 올바르지 않습니다.',
+      );
+    }
+    try {
+      if (!from.isBefore(to)) {
+        throw const FormatException('Range must have a positive duration.');
+      }
+      Timestamp.fromDate(from);
+      Timestamp.fromDate(to);
+    } on Object catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'invalid-range',
+        message: '기록 조회 기간이 올바르지 않습니다.',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+    if (after == null) return;
+    try {
+      RecordRangeCursor.fromJson(after.toJson());
+      _validateDocumentId(after.recordId, fieldName: 'recordId');
+      if (Timestamp(
+                after.endSeconds,
+                after.endNanoseconds,
+              ).compareTo(Timestamp.fromDate(from)) <=
+              0 ||
+          Timestamp(
+                after.startSeconds,
+                after.startNanoseconds,
+              ).compareTo(Timestamp.fromDate(to)) >=
+              0) {
+        throw const FormatException('Range cursor is outside its query.');
+      }
+    } on FormatException catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'invalid-cursor',
+        message: '기간별 기록 조회 위치가 올바르지 않습니다.',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  static RemoteRecordRangePage _decodeRangePage({
+    required String uid,
+    required DateTime from,
+    required DateTime to,
+    required RecordRangeCursor? after,
+    required int limit,
+    required Iterable<MapEntry<String, Map<String, dynamic>>> documents,
+  }) {
+    final revisions = <RemoteRecordRevision>[];
+    RecordRangeCursor? nextCursor;
+    var previous = after;
+    final rangeStart = Timestamp.fromDate(from);
+    final rangeEnd = Timestamp.fromDate(to);
+    for (final document in documents) {
+      final data = document.value;
+      final revision = _decodeRevision(
+        uid: uid,
+        recordId: document.key,
+        data: data,
+      );
+      final startAt = data['startAt'];
+      final endAt = data['endAt'];
+      if (revision.status != RemoteRecordStatus.active ||
+          startAt is! Timestamp ||
+          endAt is! Timestamp ||
+          startAt.compareTo(rangeEnd) >= 0 ||
+          endAt.compareTo(rangeStart) <= 0 ||
+          revisions.length >= limit) {
+        throw const RecordSyncGatewayException(
+          code: 'invalid-server-data',
+          message: '서버의 기간별 기록 데이터가 올바르지 않습니다.',
+        );
+      }
+      final cursor = RecordRangeCursor(
+        endSeconds: endAt.seconds,
+        endNanoseconds: endAt.nanoseconds,
+        startSeconds: startAt.seconds,
+        startNanoseconds: startAt.nanoseconds,
+        recordId: document.key,
+      );
+      if (previous != null && cursor.compareTo(previous) <= 0) {
+        throw const RecordSyncGatewayException(
+          code: 'invalid-server-data',
+          message: '서버의 기간별 기록 순서가 올바르지 않습니다.',
+        );
+      }
+      revisions.add(revision);
+      nextCursor = cursor;
+      previous = cursor;
+    }
+    return RemoteRecordRangePage(
+      revisions: List.unmodifiable(revisions),
+      nextCursor: nextCursor,
+      hasMore: revisions.length == limit,
+    );
   }
 
   static void _validateChangeRequest({
@@ -633,6 +802,47 @@ class FirestoreRecordSyncGateway
     after: after,
     limit: limit,
   );
+
+  @visibleForTesting
+  static void validateRangeRequestForTesting({
+    required String uid,
+    required DateTime from,
+    required DateTime to,
+    RecordRangeCursor? after,
+    int limit = 100,
+  }) => _validateRangeRequest(
+    uid: uid,
+    from: from,
+    to: to,
+    after: after,
+    limit: limit,
+  );
+
+  @visibleForTesting
+  static RemoteRecordRangePage decodeRangePageForTesting({
+    required String uid,
+    required DateTime from,
+    required DateTime to,
+    required Map<String, Map<String, dynamic>> documents,
+    RecordRangeCursor? after,
+    int limit = 100,
+  }) {
+    _validateRangeRequest(
+      uid: uid,
+      from: from,
+      to: to,
+      after: after,
+      limit: limit,
+    );
+    return _decodeRangePage(
+      uid: uid,
+      from: from,
+      to: to,
+      after: after,
+      limit: limit,
+      documents: documents.entries,
+    );
+  }
 
   static void _validateDocumentId(String value, {required String fieldName}) {
     final maxLength = fieldName == 'recordId'

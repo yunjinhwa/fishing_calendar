@@ -2,8 +2,10 @@ import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
 import '../models/record_sync_metadata.dart';
 import '../models/record_sync_checkpoint.dart';
+import '../models/record_range_cursor.dart';
 
 export '../models/record_sync_checkpoint.dart';
+export '../models/record_range_cursor.dart';
 
 class RemoteRecordRevision {
   final String recordId;
@@ -76,6 +78,30 @@ abstract interface class IncrementalRecordSyncGateway {
     required RecordSyncCursor since,
     required RecordSyncCursor through,
     RecordSyncCursor? after,
+    int limit = 100,
+  });
+}
+
+class RemoteRecordRangePage {
+  final List<RemoteRecordRevision> revisions;
+  final RecordRangeCursor? nextCursor;
+  final bool hasMore;
+
+  const RemoteRecordRangePage({
+    required this.revisions,
+    required this.nextCursor,
+    required this.hasMore,
+  });
+}
+
+/// Optional authoritative reads for records overlapping [from, to).
+/// The page cursor never advances the incremental synchronization checkpoint.
+abstract interface class RecordRangeQueryGateway {
+  Future<RemoteRecordRangePage> fetchRange({
+    required String uid,
+    required DateTime from,
+    required DateTime to,
+    RecordRangeCursor? after,
     int limit = 100,
   });
 }

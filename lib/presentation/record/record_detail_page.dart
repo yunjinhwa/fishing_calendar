@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/models/record_edit_snapshot.dart';
+import '../../data/models/record_cache_policy.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/auth_session_repository.dart';
@@ -33,12 +34,17 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
   bool _isPreparingDelete = false;
   bool _isDeleting = false;
   VoidCallback? _stopRecordWatch;
+  VoidCallback? _releaseCacheRecord;
 
   @override
   void initState() {
     super.initState();
     _ownerKey = AuthSessionRepository.instance.dataOwnerKey;
     _sessionGeneration = AuthSessionRepository.instance.sessionGeneration;
+    _releaseCacheRecord = RecordCachePolicy.instance.holdRecord(
+      _ownerKey,
+      widget.record.id,
+    );
     final current = _recordRepository.getRecordById(widget.record.id);
     record = current ?? widget.record;
     if (current == null) _unavailableReason = RecordEditConflictReason.deleted;
@@ -49,6 +55,7 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
 
   @override
   void dispose() {
+    _releaseCacheRecord?.call();
     _stopRecordWatch?.call();
     _recordRepository.removeListener(_handleRecordChange);
     AuthSessionRepository.instance.removeListener(_handleRecordChange);

@@ -6,12 +6,17 @@ import 'package:flutter/material.dart';
 import 'daily_record_list_page.dart';
 import 'calendar_record_layout.dart';
 import '../../data/models/fishing_record.dart';
+import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/services/paid_record_cache_service.dart';
+import '../../data/services/network_status_service.dart';
 import '../../data/services/record_sync_service.dart';
 //import 'calendar_settings_page.dart';
 
 class CalendarPage extends StatefulWidget {
-  const CalendarPage({super.key});
+  const CalendarPage({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
@@ -20,17 +25,67 @@ class CalendarPage extends StatefulWidget {
 class _CalendarPageState extends State<CalendarPage> {
   DateTime focusedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   final _recordRepository = FishingRecordRepository.instance;
+  final _auth = AuthSessionRepository.instance;
+  final _cache = PaidRecordCacheService.instance;
+  VoidCallback? _releaseMonth;
+  int? _heldGeneration;
+  bool _loadScheduled = false;
 
   @override
   void initState() {
     super.initState();
     _recordRepository.addListener(_refreshRecords);
+    _auth.addListener(_onSessionChanged);
+    _cache.addListener(_onCacheChanged);
+    _updateMonthLease();
+  }
+
+  @override
+  void didUpdateWidget(CalendarPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive != widget.isActive) _updateMonthLease();
   }
 
   @override
   void dispose() {
     _recordRepository.removeListener(_refreshRecords);
+    _auth.removeListener(_onSessionChanged);
+    _cache.removeListener(_onCacheChanged);
+    _releaseMonth?.call();
     super.dispose();
+  }
+
+  void _onSessionChanged() {
+    if (_heldGeneration != _auth.sessionGeneration) _updateMonthLease();
+    _scheduleMonthLoad();
+    _refreshRecords();
+  }
+
+  void _onCacheChanged() {
+    _refreshRecords();
+    // A recovered connection may finish an earlier offline request.
+    if (_cache.stateFor(focusedMonth) == CachedMonthState.offline &&
+        !NetworkStatusService.instance.isDisconnected) {
+      _scheduleMonthLoad();
+    }
+  }
+
+  void _updateMonthLease() {
+    _releaseMonth?.call();
+    _releaseMonth = null;
+    _heldGeneration = _auth.sessionGeneration;
+    if (!widget.isActive || !_auth.canManageRecords) return;
+    _releaseMonth = _cache.holdMonth(focusedMonth);
+    _scheduleMonthLoad();
+  }
+
+  void _scheduleMonthLoad() {
+    if (_loadScheduled || !widget.isActive) return;
+    _loadScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadScheduled = false;
+      if (mounted && widget.isActive) unawaited(_cache.loadMonth(focusedMonth));
+    });
   }
 
   void _refreshRecords() {
@@ -45,12 +100,14 @@ class _CalendarPageState extends State<CalendarPage> {
     setState(() {
       focusedMonth = DateTime(focusedMonth.year, focusedMonth.month - 1);
     });
+    _updateMonthLease();
   }
 
   void goToNextMonth() {
     setState(() {
       focusedMonth = DateTime(focusedMonth.year, focusedMonth.month + 1);
     });
+    _updateMonthLease();
   }
 
   void goToCurrentMonth() {
@@ -59,6 +116,7 @@ class _CalendarPageState extends State<CalendarPage> {
     setState(() {
       focusedMonth = DateTime(today.year, today.month);
     });
+    _updateMonthLease();
   }
 
   @override
@@ -94,6 +152,11 @@ class _CalendarPageState extends State<CalendarPage> {
             onPrevious: goToPreviousMonth,
             onNext: goToNextMonth,
           ),
+          _MonthLoadStatus(
+            state: _cache.stateFor(focusedMonth),
+            onRetry: () =>
+                unawaited(_cache.loadMonth(focusedMonth, force: true)),
+          ),
           const _WeekHeader(),
           Expanded(
             child: _CalendarGrid(
@@ -123,6 +186,40 @@ class _CalendarPageState extends State<CalendarPage> {
               );
             },
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonthLoadStatus extends StatelessWidget {
+  const _MonthLoadStatus({required this.state, required this.onRetry});
+
+  final CachedMonthState state;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == CachedMonthState.loading) {
+      return const LinearProgressIndicator();
+    }
+    if (state != CachedMonthState.offline && state != CachedMonthState.failed) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              state == CachedMonthState.offline
+                  ? '과거 기록을 모두 보려면 인터넷에 연결해 주세요.'
+                  : '과거 기록을 불러오지 못했습니다.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          if (state == CachedMonthState.failed)
+            TextButton(onPressed: onRetry, child: const Text('다시 불러오기')),
         ],
       ),
     );

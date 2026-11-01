@@ -123,12 +123,14 @@ class RecordPhotoCleanupService {
       }
     }
     // Read every owner: imported legacy data may share a local file path.
-    final photos = await executor.query(
+    for (final table in const [
       AppDatabase.recordPhotosTable,
-      columns: const ['local_path'],
-    );
-    for (final photo in photos) {
-      _addPath(retained, photo['local_path']);
+      AppDatabase.recordPhotoArchivesTable,
+    ]) {
+      final photos = await executor.query(table, columns: const ['local_path']);
+      for (final photo in photos) {
+        _addPath(retained, photo['local_path']);
+      }
     }
 
     final outbox = await executor.query(

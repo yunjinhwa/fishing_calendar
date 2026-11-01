@@ -66,10 +66,13 @@ class _AppShellState extends State<AppShell> {
     return [
       _TabNavigator(
         navigatorKey: calendarNavigatorKey,
-        child: CalendarPage(key: ValueKey('calendar-$calendarRefreshKey')),
+        child: CalendarPage(
+          key: ValueKey('calendar-$calendarRefreshKey'),
+          isActive: selectedIndex == 0,
+        ),
       ),
       const MapPage(),
-      const RecordPage(),
+      RecordPage(isActive: selectedIndex == 2),
       const FishDictionaryPage(),
       MyPage(networkStatusService: widget.networkStatusService),
     ];
@@ -209,11 +212,26 @@ class _TabNavigator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Navigator(
-      key: navigatorKey,
-      onGenerateRoute: (settings) {
-        return MaterialPageRoute(builder: (_) => child);
-      },
+    return _TabPage(
+      page: child,
+      child: Navigator(
+        key: navigatorKey,
+        onGenerateRoute: (settings) {
+          return MaterialPageRoute(
+            builder: (context) =>
+                context.dependOnInheritedWidgetOfExactType<_TabPage>()!.page,
+          );
+        },
+      ),
     );
   }
+}
+
+class _TabPage extends InheritedWidget {
+  const _TabPage({required this.page, required super.child});
+
+  final Widget page;
+
+  @override
+  bool updateShouldNotify(_TabPage oldWidget) => page != oldWidget.page;
 }

@@ -10,12 +10,13 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'fishing_calendar.db';
-  static const int databaseVersion = 4;
+  static const int databaseVersion = 5;
 
   static const String localMetadataTable = 'local_metadata';
   static const String fishingRecordsTable = 'fishing_records';
   static const String recordCatchesTable = 'record_catches';
   static const String recordPhotosTable = 'record_photos';
+  static const String recordPhotoArchivesTable = 'record_photo_archives';
   static const String outboxItemsTable = 'outbox_items';
   static const String recordSyncStatesTable = 'record_sync_states';
   static const String recordConflictsTable = 'record_conflicts';
@@ -129,6 +130,7 @@ class AppDatabase {
     ''');
 
     batch.execute(_createRecordPhotosTableSql(recordPhotosTable));
+    batch.execute(_createRecordPhotoArchivesTableSql);
 
     batch.execute(_createOutboxItemsTableSql(outboxItemsTable));
     batch.execute(_createRecordSyncStatesTableSql(recordSyncStatesTable));
@@ -287,7 +289,46 @@ class AppDatabase {
     if (oldVersion < 4) {
       await database.execute(_createLocalRecordChangesTableSql);
     }
+    if (oldVersion < 5) {
+      await database.execute(_createRecordPhotoArchivesTableSql);
+      final photosTableExists = (await database.rawQuery(
+        '''
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        LIMIT 1
+        ''',
+        <Object?>[recordPhotosTable],
+      )).isNotEmpty;
+      if (photosTableExists) {
+        await database.execute('''
+          INSERT OR IGNORE INTO $recordPhotoArchivesTable (
+            owner_key, record_id, photo_id, local_path,
+            content_type, file_size, checksum, display_order
+          )
+          SELECT owner_key, record_id, photo_id, local_path,
+            content_type, file_size, checksum, display_order
+          FROM $recordPhotosTable
+        ''');
+      }
+    }
   }
+
+  // Photos are device-local originals, independent of the record body cache.
+  static const String _createRecordPhotoArchivesTableSql =
+      '''
+    CREATE TABLE IF NOT EXISTS $recordPhotoArchivesTable (
+      owner_key TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      photo_id TEXT NOT NULL,
+      local_path TEXT NOT NULL,
+      content_type TEXT,
+      file_size INTEGER CHECK (file_size IS NULL OR file_size > 0),
+      checksum TEXT,
+      display_order INTEGER NOT NULL,
+      PRIMARY KEY (owner_key, record_id, photo_id),
+      UNIQUE (owner_key, record_id, display_order)
+    )
+  ''';
 
   static const String _createLocalRecordChangesTableSql =
       '''

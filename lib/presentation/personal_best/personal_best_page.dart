@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/personal_best_record.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/personal_best_repository.dart';
+import '../record/record_history_scope.dart';
 import 'personal_best_detail_page.dart';
 
 class PersonalBestPage extends StatefulWidget {
@@ -45,61 +46,63 @@ class _PersonalBestPageState extends State<PersonalBestPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('내 기록어')),
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Row(
-                children: [
-                  ChoiceChip(
-                    label: const Text('크기순'),
-                    selected: sortType == PersonalBestSortType.length,
-                    onSelected: (_) {
-                      setState(() {
-                        sortType = PersonalBestSortType.length;
-                      });
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: const Text('무게순'),
-                    selected: sortType == PersonalBestSortType.weight,
-                    onSelected: (_) {
-                      setState(() {
-                        sortType = PersonalBestSortType.weight;
-                      });
-                    },
-                  ),
-                ],
-              ),
-            ),
-
-            Expanded(
-              child: records.isEmpty
-                  ? const _EmptyPersonalBestView()
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: records.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final record = records[index];
-
-                        return _PersonalBestCard(
-                          record: record,
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    PersonalBestDetailPage(record: record),
-                              ),
-                            );
-                          },
-                        );
+        child: RecordHistoryScope(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('크기순'),
+                      selected: sortType == PersonalBestSortType.length,
+                      onSelected: (_) {
+                        setState(() {
+                          sortType = PersonalBestSortType.length;
+                        });
                       },
                     ),
-            ),
-          ],
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('무게순'),
+                      selected: sortType == PersonalBestSortType.weight,
+                      onSelected: (_) {
+                        setState(() {
+                          sortType = PersonalBestSortType.weight;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              Expanded(
+                child: records.isEmpty
+                    ? const _EmptyPersonalBestView()
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: records.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final record = records[index];
+
+                          return _PersonalBestCard(
+                            record: record,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      PersonalBestDetailPage(record: record),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );

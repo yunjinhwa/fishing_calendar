@@ -539,7 +539,7 @@ void main() {
       await database.setVersion(3);
       await AppDatabase.instance.close();
       final upgraded = await AppDatabase.instance.database;
-      expect(await upgraded.getVersion(), 4);
+      expect(await upgraded.getVersion(), AppDatabase.databaseVersion);
       await recordRepository.reloadOwner(authSession.dataOwnerKey);
       expect(
         recordRepository.getRecordById(record.id)?.location,

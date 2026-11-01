@@ -1076,4 +1076,120 @@ await expectStatus(
   403,
 );
 
+// Historical month reads use both interval endpoints, rather than filtering
+// by start date alone. Equal end/start tuples must still paginate by ID.
+const rangeMember = await createUser('historical-range-reader');
+await seedEntitlement(rangeMember.uid);
+const rangeFrom = timestampValue('2026-10-01T00:00:00Z');
+const rangeTo = timestampValue('2026-11-01T00:00:00Z');
+const rangeFixtures = [
+  ['a', '2026-10-12T18:00:00Z', '2026-10-13T03:00:00Z'],
+  ['b', '2026-10-12T18:00:00Z', '2026-10-13T03:00:00Z'],
+  ['c', '2026-10-12T18:00:00Z', '2026-10-13T03:00:00Z'],
+  ['spanning', '2026-09-29T18:00:00Z', '2026-11-02T03:00:00Z'],
+  ['ends-at-from', '2026-09-30T18:00:00Z', '2026-10-01T00:00:00Z'],
+  ['starts-at-to', '2026-11-01T00:00:00Z', '2026-11-01T03:00:00Z'],
+  ['deleted', '2026-10-12T18:00:00Z', '2026-10-13T03:00:00Z'],
+];
+for (const [id, startAt, endAt] of rangeFixtures) {
+  const body = mutationCommit({
+    uid: rangeMember.uid,
+    recordId: id,
+    outboxId: `range-create-${id}`,
+    operationType: 'create',
+    baseVersionNo: 0,
+    resultingVersionNo: 1,
+  });
+  body.writes[0].update.fields.startAt = timestampValue(startAt);
+  body.writes[0].update.fields.endAt = timestampValue(endAt);
+  await commit(`range fixture ${id}`, rangeMember.token, body, 200);
+}
+const rangeDeletedResponse = await request(
+  `/users/${rangeMember.uid}/records/deleted`,
+  {token: rangeMember.token},
+);
+await expectStatus('range tombstone source', rangeDeletedResponse, 200);
+const rangeDeleted = await rangeDeletedResponse.json();
+await commit(
+  'range tombstone fixture',
+  rangeMember.token,
+  mutationCommit({
+    uid: rangeMember.uid,
+    recordId: 'deleted',
+    outboxId: 'range-delete-deleted',
+    operationType: 'delete',
+    baseVersionNo: 1,
+    resultingVersionNo: 2,
+    recordStatus: 'DELETED',
+    createdAt: rangeDeleted.fields.createdAt,
+  }),
+  200,
+);
+
+async function rangeQuery({after, token = rangeMember.token} = {}) {
+  return request(`/users/${rangeMember.uid}:runQuery`, {
+    token,
+    method: 'POST',
+    body: {
+      structuredQuery: {
+        from: [{collectionId: 'records'}],
+        where: {
+          compositeFilter: {
+            op: 'AND',
+            filters: [
+              {fieldFilter: {
+                field: {fieldPath: 'recordStatus'},
+                op: 'EQUAL', value: stringValue('ACTIVE'),
+              }},
+              {fieldFilter: {
+                field: {fieldPath: 'endAt'},
+                op: 'GREATER_THAN', value: rangeFrom,
+              }},
+              {fieldFilter: {
+                field: {fieldPath: 'startAt'},
+                op: 'LESS_THAN', value: rangeTo,
+              }},
+            ],
+          },
+        },
+        orderBy: [
+          {field: {fieldPath: 'endAt'}, direction: 'ASCENDING'},
+          {field: {fieldPath: 'startAt'}, direction: 'ASCENDING'},
+          {field: {fieldPath: '__name__'}, direction: 'ASCENDING'},
+        ],
+        ...(after ? {startAt: {
+          values: [after.fields.endAt, after.fields.startAt, {referenceValue: after.name}],
+          before: false,
+        }} : {}),
+        limit: 2,
+      },
+    },
+  });
+}
+
+const rangeFirstResponse = await rangeQuery();
+await expectStatus('range first page with two inequality fields', rangeFirstResponse, 200);
+const rangeFirst = (await rangeFirstResponse.json())
+  .filter((row) => row.document).map((row) => row.document);
+if (rangeFirst.map((doc) => doc.name.split('/').at(-1)).join(',') !== 'a,b') {
+  throw new Error('range first page did not preserve end/start/ID ordering');
+}
+const rangeSecondResponse = await rangeQuery({after: rangeFirst.at(-1)});
+await expectStatus('range tuple-exclusive second page', rangeSecondResponse, 200);
+const rangeSecond = (await rangeSecondResponse.json())
+  .filter((row) => row.document).map((row) => row.document);
+if (rangeSecond.map((doc) => doc.name.split('/').at(-1)).join(',') !== 'c,spanning') {
+  throw new Error('range query lost a tied or month-spanning record');
+}
+const rangeEmptyResponse = await rangeQuery({after: rangeSecond.at(-1)});
+await expectStatus('range exhausted page excludes boundaries and tombstones', rangeEmptyResponse, 200);
+if ((await rangeEmptyResponse.json()).some((row) => row.document)) {
+  throw new Error('range query returned an endpoint boundary or deletion tombstone');
+}
+await expectStatus(
+  'range query does not bypass ownership rules',
+  await rangeQuery({token: intruder.token}),
+  403,
+);
+
 console.log('Firestore rules smoke test passed.');
