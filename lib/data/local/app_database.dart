@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'fishing_calendar.db';
-  static const int databaseVersion = 5;
+  static const int databaseVersion = 6;
 
   static const String localMetadataTable = 'local_metadata';
   static const String fishingRecordsTable = 'fishing_records';
@@ -101,6 +101,8 @@ class AppDatabase {
         owner_key TEXT NOT NULL,
         record_id TEXT NOT NULL,
         location TEXT NOT NULL,
+        $_latitudeColumnSql,
+        $_longitudeColumnSql,
         start_at TEXT NOT NULL,
         end_at TEXT NOT NULL,
         genre_name TEXT NOT NULL,
@@ -311,7 +313,48 @@ class AppDatabase {
         ''');
       }
     }
+    if (oldVersion < 6) {
+      final columns = await database.rawQuery(
+        'PRAGMA table_info($fishingRecordsTable)',
+      );
+      // Earlier migration fixtures can contain only the table being upgraded.
+      // Every actual application database has this table, and nullable columns
+      // preserve all existing records and their dependent rows in place.
+      if (columns.isNotEmpty) {
+        final names = columns.map((column) => column['name']).toSet();
+        if (!names.contains('latitude')) {
+          await database.execute(
+            'ALTER TABLE $fishingRecordsTable ADD COLUMN $_latitudeColumnSql',
+          );
+        }
+        if (!names.contains('longitude')) {
+          await database.execute(
+            'ALTER TABLE $fishingRecordsTable ADD COLUMN $_longitudeColumnSql',
+          );
+        }
+      }
+    }
   }
+
+  static const _latitudeColumnSql = '''
+    latitude REAL CHECK (
+      latitude IS NULL OR (
+        typeof(latitude) IN ('integer', 'real')
+        AND latitude BETWEEN -90 AND 90
+      )
+    )
+  ''';
+
+  static const _longitudeColumnSql = '''
+    longitude REAL CHECK (
+      (latitude IS NULL AND longitude IS NULL)
+      OR (
+        latitude IS NOT NULL AND longitude IS NOT NULL
+        AND typeof(longitude) IN ('integer', 'real')
+        AND longitude BETWEEN -180 AND 180
+      )
+    )
+  ''';
 
   // Photos are device-local originals, independent of the record body cache.
   static const String _createRecordPhotoArchivesTableSql =

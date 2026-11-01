@@ -309,6 +309,8 @@ class ConflictResolutionService {
     return FishingRecord(
       id: remoteRecord.id,
       location: remoteRecord.location,
+      latitude: remoteRecord.latitude,
+      longitude: remoteRecord.longitude,
       startAt: remoteRecord.startAt,
       endAt: remoteRecord.endAt,
       genreName: remoteRecord.genreName,

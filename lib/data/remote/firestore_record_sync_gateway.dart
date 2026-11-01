@@ -20,6 +20,7 @@ class FirestoreRecordSyncGateway
     : _database = database ?? FirebaseFirestore.instance;
 
   static const int schemaVersion = 1;
+  static const int coordinateSchemaVersion = 2;
   static const String activeStatus = 'ACTIVE';
   static const String deletedStatus = 'DELETED';
 
@@ -677,12 +678,17 @@ class FirestoreRecordSyncGateway
     required int versionNo,
     required Timestamp? createdAt,
   }) {
+    final hasCoordinates = record.latitude != null || record.longitude != null;
     return <String, Object?>{
-      'schemaVersion': schemaVersion,
+      'schemaVersion': hasCoordinates ? coordinateSchemaVersion : schemaVersion,
       'ownerUid': uid,
       'recordId': record.id,
       'recordStatus': activeStatus,
       'location': record.location,
+      if (hasCoordinates) ...{
+        'latitude': record.latitude,
+        'longitude': record.longitude,
+      },
       'startAt': Timestamp.fromDate(record.startAt.toUtc()),
       'endAt': Timestamp.fromDate(record.endAt.toUtc()),
       'genreName': record.genreName,
@@ -724,6 +730,8 @@ class FirestoreRecordSyncGateway
       final record = FishingRecord(
         id: data['recordId'] as String,
         location: data['location'] as String,
+        latitude: (data['latitude'] as num?)?.toDouble(),
+        longitude: (data['longitude'] as num?)?.toDouble(),
         startAt: startAt.toDate(),
         endAt: endAt.toDate(),
         genreName: data['genreName'] as String,
@@ -888,6 +896,10 @@ class FirestoreRecordSyncGateway
                   )
                   .toList(growable: false),
               'memo': record.memo,
+              if (record.latitude != null || record.longitude != null) ...{
+                'latitude': record.latitude,
+                'longitude': record.longitude,
+              },
             },
     };
     return sha256.convert(utf8.encode(jsonEncode(mutation))).toString();
@@ -991,14 +1003,21 @@ class FirestoreRecordSyncGateway
       'memo',
       'photoUploadPending',
     };
+    final hasCoordinates =
+        status == activeStatus &&
+        data['schemaVersion'] == coordinateSchemaVersion;
     final expectedKeys = status == activeStatus
-        ? <String>{...baseKeys, ...activeOnlyKeys}
+        ? <String>{
+            ...baseKeys,
+            ...activeOnlyKeys,
+            if (hasCoordinates) ...{'latitude', 'longitude'},
+          }
         : baseKeys;
     final version = data['versionNo'];
     final lastOutboxId = data['lastOutboxId'];
     final validBase =
         _hasExactKeys(data, expectedKeys) &&
-        data['schemaVersion'] == schemaVersion &&
+        (data['schemaVersion'] == schemaVersion || hasCoordinates) &&
         data['ownerUid'] == uid &&
         data['recordId'] == recordId &&
         version is int &&
@@ -1010,8 +1029,21 @@ class FirestoreRecordSyncGateway
         lastOutboxId.isNotEmpty &&
         !lastOutboxId.contains('/') &&
         lastOutboxId.length <= 300;
+    final latitude = data['latitude'];
+    final longitude = data['longitude'];
+    final validCoordinates =
+        !hasCoordinates ||
+        (latitude is num &&
+            latitude.isFinite &&
+            latitude >= -90 &&
+            latitude <= 90 &&
+            longitude is num &&
+            longitude.isFinite &&
+            longitude >= -180 &&
+            longitude <= 180);
     final validActive =
-        status != activeStatus || data['photoUploadPending'] is bool;
+        status != activeStatus ||
+        (data['photoUploadPending'] is bool && validCoordinates);
     if (!validBase || !validActive) {
       throw const RecordSyncGatewayException(
         code: 'invalid-server-data',

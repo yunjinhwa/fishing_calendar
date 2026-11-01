@@ -27,6 +27,7 @@
 - 날짜별 출조 기록 목록
 - 출조 기록 작성 화면
 - 계정별 출조 기록 기기 저장 / 조회 / 수정 / 삭제
+- 선택적 위치 좌표 저장·수정·제거 및 SQLite·Firestore 동기화
 - 출조 기록 필수값 검증 및 사진 첨부
 - 지도 mock 화면
 - 위치 대체 입력 화면
@@ -92,3 +93,4 @@ Firebase 프로젝트 연결과 실행 방법은 [Firebase Authentication 설정
 사진 보존 기준과 정리 확인 방법은 [로컬 사진 파일 정리](docs/local_photo_cleanup.md)를 참고한다.
 증분 조회·전체 재검증과 테스트 방법은 [기록 증분 동기화](docs/incremental_record_sync.md)를 참고한다.
 31일 보관 기준·과거 기록 조회·요금제 전환 테스트는 [유료 기록 캐시 정책](docs/paid_cache_policy.md)을 참고한다.
+선택적 위도·경도와 기존 기록 호환, 규칙 배포 및 테스트는 [위치 좌표 저장](docs/location_coordinates.md)을 참고한다.

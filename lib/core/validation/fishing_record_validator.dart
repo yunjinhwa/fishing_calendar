@@ -37,6 +37,11 @@ class FishingRecordValidator {
     if (record.location.length > maxLocationLength) {
       return '위치는 $maxLocationLength자 이하로 입력하세요.';
     }
+    final coordinateError = validateCoordinates(
+      record.latitude,
+      record.longitude,
+    );
+    if (coordinateError != null) return coordinateError;
     if (!record.startAt.isBefore(record.endAt)) {
       return '종료 시간은 시작 시간보다 늦어야 합니다.';
     }
@@ -129,4 +134,18 @@ class FishingRecordValidator {
   }
 
   static bool _isFinite(double? value) => value == null || value.isFinite;
+
+  static String? validateCoordinates(double? latitude, double? longitude) {
+    if (latitude == null && longitude == null) return null;
+    if (latitude == null || longitude == null) {
+      return '위도와 경도를 함께 입력하세요.';
+    }
+    if (!latitude.isFinite || latitude < -90 || latitude > 90) {
+      return '위도는 -90부터 90 사이의 유한한 숫자로 입력하세요.';
+    }
+    if (!longitude.isFinite || longitude < -180 || longitude > 180) {
+      return '경도는 -180부터 180 사이의 유한한 숫자로 입력하세요.';
+    }
+    return null;
+  }
 }

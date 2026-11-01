@@ -214,6 +214,8 @@ class FakeRecordSyncGateway implements RecordSyncGateway {
     return FishingRecord(
       id: record.id,
       location: record.location,
+      latitude: record.latitude,
+      longitude: record.longitude,
       startAt: record.startAt,
       endAt: record.endAt,
       genreName: record.genreName,
