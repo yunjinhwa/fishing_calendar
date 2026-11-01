@@ -15,6 +15,7 @@ import 'data/services/plan_policy_service.dart';
 import 'data/services/record_mutation_service.dart';
 import 'data/services/record_photo_cleanup_coordinator.dart';
 import 'data/services/record_sync_service.dart';
+import 'data/services/paid_record_cache_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +40,7 @@ Future<void> main() async {
   await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
   await PlanPolicyService.instance.resumePendingMigration();
 
+  PaidRecordCacheService.instance.initialize();
   RecordPhotoCleanupCoordinator.instance.initialize();
   RecordSyncService.instance.initialize();
   runApp(const FishingBuildApp());

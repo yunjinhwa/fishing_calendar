@@ -23,6 +23,7 @@ class LocalIdentityMigrationResult {
   final int migratedSyncStateCount;
   final int migratedConflictCount;
   final int migratedLocalChangeCount;
+  final int migratedPhotoArchiveCount;
 
   const LocalIdentityMigrationResult({
     required this.status,
@@ -33,6 +34,7 @@ class LocalIdentityMigrationResult {
     this.migratedSyncStateCount = 0,
     this.migratedConflictCount = 0,
     this.migratedLocalChangeCount = 0,
+    this.migratedPhotoArchiveCount = 0,
   });
 
   int get migratedItemCount =>
@@ -40,7 +42,8 @@ class LocalIdentityMigrationResult {
       migratedOutboxCount +
       migratedSyncStateCount +
       migratedConflictCount +
-      migratedLocalChangeCount;
+      migratedLocalChangeCount +
+      migratedPhotoArchiveCount;
 }
 
 sealed class LocalIdentityMigrationConflict implements Exception {
@@ -239,6 +242,14 @@ class LocalIdentityMigrationService {
       ''',
       <Object?>[targetOwnerKey, sourceOwnerKey],
     );
+    // Cached body rows cascade their child photos, but independent originals
+    // also exist for evicted records and must move with the identity claim.
+    final migratedPhotoArchiveCount = await transaction.update(
+      AppDatabase.recordPhotoArchivesTable,
+      <String, Object?>{'owner_key': targetOwnerKey},
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[sourceOwnerKey],
+    );
     final migratedOutboxCount = await transaction.rawUpdate(
       '''
       UPDATE ${AppDatabase.outboxItemsTable}
@@ -286,7 +297,8 @@ class LocalIdentityMigrationService {
             migratedOutboxCount > 0 ||
             migratedSyncStateCount > 0 ||
             migratedConflictCount > 0 ||
-            migratedLocalChangeCount > 0
+            migratedLocalChangeCount > 0 ||
+            migratedPhotoArchiveCount > 0
         ? LocalIdentityMigrationStatus.migrated
         : existingClaim == null
         ? LocalIdentityMigrationStatus.claimedWithoutData
@@ -301,6 +313,7 @@ class LocalIdentityMigrationService {
       migratedSyncStateCount: migratedSyncStateCount,
       migratedConflictCount: migratedConflictCount,
       migratedLocalChangeCount: migratedLocalChangeCount,
+      migratedPhotoArchiveCount: migratedPhotoArchiveCount,
     );
   }
 
@@ -385,6 +398,7 @@ class LocalIdentityMigrationService {
   }) async {
     const tables = [
       AppDatabase.fishingRecordsTable,
+      AppDatabase.recordPhotoArchivesTable,
       AppDatabase.outboxItemsTable,
       AppDatabase.recordSyncStatesTable,
       AppDatabase.localRecordChangesTable,

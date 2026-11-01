@@ -8,6 +8,7 @@ import '../models/conflict_item.dart';
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
 import '../models/record_sync_metadata.dart';
+import '../models/record_cache_policy.dart';
 import '../remote/record_sync_gateway.dart';
 import '../repositories/auth_session_repository.dart';
 import '../repositories/conflict_repository.dart';
@@ -149,6 +150,80 @@ class RecordSyncService extends ChangeNotifier {
       throw StateError('계정이 변경되어 충돌 해결을 중단했습니다.');
     }
     return revision;
+  }
+
+  Future<RemoteRecordRangePage> fetchRecordRange({
+    required DateTime from,
+    required DateTime to,
+    RecordRangeCursor? after,
+  }) async {
+    final gateway = _gateway;
+    final uid = _authSession.memberId;
+    final owner = _authSession.dataOwnerKey;
+    final generation = _authSession.sessionGeneration;
+    if (!_authSession.canUseCloudSync || uid == null) {
+      throw const RecordSyncGatewayException(
+        code: 'paid-plan-required',
+        message: '유료 회원으로 로그인한 뒤 과거 기록을 조회해 주세요.',
+      );
+    }
+    if (_networkStatusService.isDisconnected) {
+      throw const RecordSyncGatewayException(
+        code: 'offline',
+        message: '과거 기록을 조회하려면 인터넷에 연결해 주세요.',
+      );
+    }
+    if (gateway is! RecordRangeQueryGateway) {
+      throw const RecordSyncGatewayException(
+        code: 'range-unavailable',
+        message: '과거 기록 조회를 사용할 수 없습니다.',
+      );
+    }
+    final page = await (gateway as RecordRangeQueryGateway).fetchRange(
+      uid: uid,
+      from: from,
+      to: to,
+      after: after,
+    );
+    if (!_isCurrentSession(uid, owner) ||
+        generation != _authSession.sessionGeneration ||
+        !identical(gateway, _gateway)) {
+      throw const RecordSyncGatewayException(
+        code: 'session-changed',
+        message: '계정이 변경되어 과거 기록 조회를 중단했습니다.',
+      );
+    }
+    return page;
+  }
+
+  /// Explicit whole-history views do not advance incremental pull progress.
+  Future<RemoteRecordSnapshot> fetchHistorySnapshot() async {
+    final gateway = _gateway;
+    final uid = _authSession.memberId;
+    final owner = _authSession.dataOwnerKey;
+    final generation = _authSession.sessionGeneration;
+    if (!_authSession.canUseCloudSync || uid == null || gateway == null) {
+      throw const RecordSyncGatewayException(
+        code: 'history-unavailable',
+        message: '과거 기록 조회를 사용할 수 없습니다.',
+      );
+    }
+    if (_networkStatusService.isDisconnected) {
+      throw const RecordSyncGatewayException(
+        code: 'offline',
+        message: '과거 기록을 조회하려면 인터넷에 연결해 주세요.',
+      );
+    }
+    final snapshot = await gateway.fetchSnapshot(uid: uid);
+    if (!_isCurrentSession(uid, owner) ||
+        generation != _authSession.sessionGeneration ||
+        !identical(gateway, _gateway)) {
+      throw const RecordSyncGatewayException(
+        code: 'session-changed',
+        message: '계정이 변경되어 과거 기록 조회를 중단했습니다.',
+      );
+    }
+    return snapshot;
   }
 
   void initialize() {
@@ -481,16 +556,27 @@ class RecordSyncService extends ChangeNotifier {
           message: '서버 기록의 동기화 기준을 확인하지 못했습니다.',
         );
       }
-      final applied = await _recordRepository.replaceWithRemoteSnapshot(
-        snapshot,
-        ownerKey: ownerKey,
-        isCurrentSession: isCurrent,
-        checkpoint: incremental == null
-            ? null
-            : RecordSyncCheckpoint(
-                cursor: snapshot.cursor!,
-                lastFullSyncAt: now,
-              ),
+      final applied = await _withStableCachePins<bool>(
+        isCurrent: isCurrent,
+        didApply: (result) => result,
+        apply: (applicationIsCurrent) =>
+            _recordRepository.replaceWithRemoteSnapshot(
+              snapshot,
+              ownerKey: ownerKey,
+              isCurrentSession: applicationIsCurrent,
+              retainRecord:
+                  RecordCachePolicy.instance.enabled &&
+                      _authSession.canUseCloudSync
+                  ? (record) =>
+                        RecordCachePolicy.instance.keepsRecord(ownerKey, record)
+                  : null,
+              checkpoint: incremental == null
+                  ? null
+                  : RecordSyncCheckpoint(
+                      cursor: snapshot.cursor!,
+                      lastFullSyncAt: now,
+                    ),
+            ),
       );
       if (applied && isCurrent()) _forceFullRequested = false;
       return (applied: applied, changedCount: snapshot.activeRecords.length);
@@ -549,11 +635,20 @@ class RecordSyncService extends ChangeNotifier {
         cursor: next,
         lastFullSyncAt: activeCheckpoint.lastFullSyncAt,
       );
-      final applied = await _recordRepository.applyRemotePage(
-        ownerKey: ownerKey,
-        revisions: page.revisions,
-        checkpoint: nextCheckpoint,
-        isCurrentSession: isCurrent,
+      final applied = await _withStableCachePins<RecordPageApplyResult>(
+        isCurrent: isCurrent,
+        didApply: (result) => result.applied,
+        apply: (applicationIsCurrent) => _recordRepository.applyRemotePage(
+          ownerKey: ownerKey,
+          revisions: page.revisions,
+          checkpoint: nextCheckpoint,
+          isCurrentSession: applicationIsCurrent,
+          retainRecord:
+              RecordCachePolicy.instance.enabled && _authSession.canUseCloudSync
+              ? (record) =>
+                    RecordCachePolicy.instance.keepsRecord(ownerKey, record)
+              : null,
+        ),
       );
       if (!applied.applied) return (applied: false, changedCount: changedCount);
       changedCount += applied.changedCount;
@@ -562,6 +657,26 @@ class RecordSyncService extends ChangeNotifier {
         return (applied: true, changedCount: changedCount);
       }
       after = previous;
+    }
+  }
+
+  /// A view opened during a DB await can change retention. Roll back and apply
+  /// the same response again with its new pins, without another network read.
+  Future<T> _withStableCachePins<T>({
+    required bool Function() isCurrent,
+    required bool Function(T) didApply,
+    required Future<T> Function(bool Function()) apply,
+  }) async {
+    while (true) {
+      final revision = RecordCachePolicy.instance.revision;
+      final result = await apply(
+        () => isCurrent() && revision == RecordCachePolicy.instance.revision,
+      );
+      if (didApply(result) ||
+          !isCurrent() ||
+          revision == RecordCachePolicy.instance.revision) {
+        return result;
+      }
     }
   }
 

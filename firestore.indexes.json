@@ -1,4 +1,14 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "records",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "recordStatus", "order": "ASCENDING"},
+        {"fieldPath": "endAt", "order": "ASCENDING"},
+        {"fieldPath": "startAt", "order": "ASCENDING"}
+      ]
+    }
+  ],
   "fieldOverrides": []
 }

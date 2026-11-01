@@ -191,6 +191,13 @@ class LocalDataStore {
       recordRow,
       conflictAlgorithm: conflictAlgorithm,
     );
+    // Replacement must also reflect explicit photo removal. This table has no
+    // cascading foreign key because cache eviction must retain its originals.
+    await deleteArchivedPhotosForRecord(
+      executor,
+      ownerKey: ownerKey,
+      recordId: record.id,
+    );
 
     for (var index = 0; index < record.catches.length; index++) {
       final catchRecord = record.catches[index];
@@ -206,7 +213,7 @@ class LocalDataStore {
 
     for (var index = 0; index < record.photos.length; index++) {
       final photo = record.photos[index];
-      await executor.insert(AppDatabase.recordPhotosTable, <String, Object?>{
+      final photoRow = <String, Object?>{
         'owner_key': ownerKey,
         'record_id': record.id,
         'photo_id': photo.id,
@@ -215,20 +222,82 @@ class LocalDataStore {
         'file_size': photo.sizeBytes,
         'checksum': photo.checksum,
         'display_order': index,
-      });
+      };
+      await executor.insert(AppDatabase.recordPhotosTable, photoRow);
+      await executor.insert(AppDatabase.recordPhotoArchivesTable, photoRow);
     }
+  }
+
+  Future<List<RecordPhoto>> readArchivedPhotosForRecord(
+    String ownerKey,
+    String recordId, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
+    final rows = await database.query(
+      AppDatabase.recordPhotoArchivesTable,
+      where: 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, recordId],
+      orderBy: 'display_order ASC',
+    );
+    return rows
+        .map(
+          (row) => RecordPhoto(
+            id: row['photo_id']! as String,
+            localPath: row['local_path']! as String,
+            contentType: row['content_type'] as String?,
+            sizeBytes: (row['file_size'] as num?)?.toInt(),
+            checksum: row['checksum'] as String?,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<Set<String>> readArchivedRecordIdsForOwner(
+    String ownerKey, {
+    DatabaseExecutor? executor,
+  }) async {
+    final database = executor ?? await AppDatabase.instance.database;
+    final rows = await database.query(
+      AppDatabase.recordPhotoArchivesTable,
+      columns: const <String>['record_id'],
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[ownerKey],
+      distinct: true,
+    );
+    return rows.map((row) => row['record_id']! as String).toSet();
+  }
+
+  Future<void> deleteArchivedPhotosForRecord(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required String recordId,
+  }) async {
+    await executor.delete(
+      AppDatabase.recordPhotoArchivesTable,
+      where: 'owner_key = ? AND record_id = ?',
+      whereArgs: <Object?>[ownerKey, recordId],
+    );
   }
 
   Future<void> deleteRecord(
     DatabaseExecutor executor, {
     required String ownerKey,
     required String recordId,
+    bool preservePhotos = false,
   }) async {
     await executor.delete(
       AppDatabase.fishingRecordsTable,
       where: 'owner_key = ? AND record_id = ?',
       whereArgs: <Object?>[ownerKey, recordId],
     );
+    if (!preservePhotos) {
+      await deleteArchivedPhotosForRecord(
+        executor,
+        ownerKey: ownerKey,
+        recordId: recordId,
+      );
+    }
   }
 
   Future<void> deleteAllRecords(
@@ -237,6 +306,11 @@ class LocalDataStore {
   }) async {
     await executor.delete(
       AppDatabase.fishingRecordsTable,
+      where: 'owner_key = ?',
+      whereArgs: <Object?>[ownerKey],
+    );
+    await executor.delete(
+      AppDatabase.recordPhotoArchivesTable,
       where: 'owner_key = ?',
       whereArgs: <Object?>[ownerKey],
     );
@@ -251,6 +325,7 @@ class LocalDataStore {
       AppDatabase.localRecordChangesTable,
       AppDatabase.recordSyncStatesTable,
       AppDatabase.outboxItemsTable,
+      AppDatabase.recordPhotoArchivesTable,
       AppDatabase.fishingRecordsTable,
     ]) {
       await executor.delete(

@@ -5,16 +5,19 @@ import '../../data/repositories/fishing_record_repository.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_detail_page.dart';
 import '../record/record_form_page.dart';
+import '../record/record_history_scope.dart';
 
 enum RecordSortType { newest, oldest }
 
 class RecordSearchPage extends StatefulWidget {
   final bool showAppBar;
   final String appBarTitle;
+  final bool isActive;
 
   const RecordSearchPage({
     super.key,
     this.showAppBar = true,
+    this.isActive = true,
     this.appBarTitle = '기록 검색',
   });
 
@@ -191,97 +194,102 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
             )
           : null,
       body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: _SearchFilterArea(
-                searchController: searchController,
-                genres: genres,
-                selectedGenre: selectedGenre,
-                startDate: startDate,
-                endDate: endDate,
-                sortType: sortType,
-                onSearchChanged: () {
-                  setState(() {});
-                },
-                onGenreChanged: (genre) {
-                  setState(() {
-                    selectedGenre = genre;
-                  });
-                },
-                onStartDateTap: pickStartDate,
-                onEndDateTap: pickEndDate,
-                onSortChanged: (value) {
-                  setState(() {
-                    sortType = value;
-                  });
-                },
-                onStartDateClear: () {
-                  setState(() {
-                    startDate = null;
-                  });
-                },
-                onEndDateClear: () {
-                  setState(() {
-                    endDate = null;
-                  });
-                },
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: Row(
-                  children: [
-                    Text(
-                      '검색 결과 ${records.length}건',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const Spacer(),
-                    if (records.isNotEmpty)
-                      Text(
-                        sortType == RecordSortType.newest ? '최신순' : '오래된순',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            if (records.isEmpty)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: _EmptySearchResultView(),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.all(16),
-                sliver: SliverList.separated(
-                  itemCount: records.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final record = records[index];
-
-                    return _RecordSearchResultCard(
-                      record: record,
-                      onTap: () async {
-                        final changed = await Navigator.of(context).push<bool>(
-                          MaterialPageRoute(
-                            builder: (_) => RecordDetailPage(record: record),
-                          ),
-                        );
-
-                        if (changed == true && context.mounted) {
-                          setState(() {});
-                        }
-                      },
-                    );
+        child: RecordHistoryScope(
+          isActive: widget.isActive,
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: _SearchFilterArea(
+                  searchController: searchController,
+                  genres: genres,
+                  selectedGenre: selectedGenre,
+                  startDate: startDate,
+                  endDate: endDate,
+                  sortType: sortType,
+                  onSearchChanged: () {
+                    setState(() {});
+                  },
+                  onGenreChanged: (genre) {
+                    setState(() {
+                      selectedGenre = genre;
+                    });
+                  },
+                  onStartDateTap: pickStartDate,
+                  onEndDateTap: pickEndDate,
+                  onSortChanged: (value) {
+                    setState(() {
+                      sortType = value;
+                    });
+                  },
+                  onStartDateClear: () {
+                    setState(() {
+                      startDate = null;
+                    });
+                  },
+                  onEndDateClear: () {
+                    setState(() {
+                      endDate = null;
+                    });
                   },
                 ),
               ),
-          ],
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Row(
+                    children: [
+                      Text(
+                        '검색 결과 ${records.length}건',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (records.isNotEmpty)
+                        Text(
+                          sortType == RecordSortType.newest ? '최신순' : '오래된순',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              if (records.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptySearchResultView(),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.all(16),
+                  sliver: SliverList.separated(
+                    itemCount: records.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final record = records[index];
+
+                      return _RecordSearchResultCard(
+                        record: record,
+                        onTap: () async {
+                          final changed = await Navigator.of(context)
+                              .push<bool>(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      RecordDetailPage(record: record),
+                                ),
+                              );
+
+                          if (changed == true && context.mounted) {
+                            setState(() {});
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -182,6 +182,7 @@ class FishingRecordRepository extends ChangeNotifier {
     String? ownerKey,
     RecordSyncCheckpoint? checkpoint,
     bool Function()? isCurrentSession,
+    bool Function(FishingRecord)? retainRecord,
   }) async {
     final resolvedOwnerKey = ownerKey ?? _ownerKey;
     final result = await _applyRemoteChanges(
@@ -190,6 +191,7 @@ class FishingRecordRepository extends ChangeNotifier {
       checkpoint: checkpoint,
       isCurrentSession: isCurrentSession ?? () => true,
       fullSnapshot: true,
+      retainRecord: retainRecord,
     );
     return result.applied;
   }
@@ -201,13 +203,173 @@ class FishingRecordRepository extends ChangeNotifier {
     required List<RemoteRecordRevision> revisions,
     required RecordSyncCheckpoint checkpoint,
     required bool Function() isCurrentSession,
+    bool Function(FishingRecord)? retainRecord,
   }) => _applyRemoteChanges(
     ownerKey: ownerKey,
     revisions: revisions,
     checkpoint: checkpoint,
     isCurrentSession: isCurrentSession,
     fullSnapshot: false,
+    retainRecord: retainRecord,
   );
+
+  /// Hydrates an explicitly requested range without advancing global pull
+  /// progress. Local intent is protected per ID so an unrelated pending record
+  /// cannot prevent reading the rest of a historical month.
+  Future<RecordPageApplyResult> applyRemoteRange({
+    required String ownerKey,
+    required List<RemoteRecordRevision> revisions,
+    required bool Function() isCurrentSession,
+  }) => _applyRemoteChanges(
+    ownerKey: ownerKey,
+    revisions: revisions,
+    checkpoint: null,
+    isCurrentSession: isCurrentSession,
+    fullSnapshot: false,
+    protectLocalsPerRecord: true,
+  );
+
+  /// Captures the bodies present before a range query. A later authoritative
+  /// pull can change their versions, so reconciliation must compare this map
+  /// with the current durable metadata before evicting a missing body.
+  /// A cancelled session returns an empty, non-destructive snapshot.
+  Future<Map<String, int>> captureRemoteRangeVersions({
+    required String ownerKey,
+    required DateTime from,
+    required DateTime to,
+    required bool Function() isCurrentSession,
+  }) async {
+    if (!from.isBefore(to)) throw ArgumentError('Invalid record query range.');
+    try {
+      return await AppDatabase.instance.transaction((transaction) async {
+        if (!isCurrentSession()) throw const _RemotePullCancelled();
+        final rows = await _readRangeBodyVersions(transaction, ownerKey);
+        if (!isCurrentSession()) throw const _RemotePullCancelled();
+        return Map<String, int>.unmodifiable({
+          for (final row in rows)
+            if (_rowOverlapsRange(row, from, to) &&
+                (row['server_version_no']! as num) > 0)
+              row['record_id']! as String: (row['server_version_no']! as num)
+                  .toInt(),
+        });
+      });
+    } on _RemotePullCancelled {
+      return const <String, int>{};
+    }
+  }
+
+  /// Removes only unchanged cached bodies missing from a completed range read.
+  /// Absence cannot distinguish a deletion from a date change: originals,
+  /// server versions, and the global pull checkpoint therefore remain intact.
+  Future<RecordPageApplyResult> reconcileRemoteRange({
+    required String ownerKey,
+    required DateTime from,
+    required DateTime to,
+    required Set<String> knownRecordIds,
+    required Map<String, int> expectedVersions,
+    required bool Function() isCurrentSession,
+  }) async {
+    if (!from.isBefore(to)) throw ArgumentError('Invalid record query range.');
+    final knownIds = Set<String>.of(knownRecordIds);
+    final expected = Map<String, int>.of(expectedVersions);
+    final evictedIds = <String>{};
+    List<FishingRecord>? cacheBase;
+    void ensureSession() {
+      if (!isCurrentSession()) throw const _RemotePullCancelled();
+    }
+
+    try {
+      await AppDatabase.instance.transaction((transaction) async {
+        ensureSession();
+        final rows = await _readRangeBodyVersions(transaction, ownerKey);
+        ensureSession();
+        final protectedIds = <String>{};
+        for (final (table, condition) in [
+          (AppDatabase.outboxItemsTable, "status != 'succeeded'"),
+          (AppDatabase.recordConflictsTable, "status != 'resolved'"),
+          (AppDatabase.localRecordChangesTable, '1 = 1'),
+        ]) {
+          final protectedRows = await transaction.query(
+            table,
+            columns: const ['record_id'],
+            where: 'owner_key = ? AND ($condition)',
+            whereArgs: [ownerKey],
+          );
+          protectedIds.addAll(
+            protectedRows.map((row) => row['record_id']! as String),
+          );
+        }
+        ensureSession();
+        for (final row in rows) {
+          ensureSession();
+          final id = row['record_id']! as String;
+          final version = (row['server_version_no']! as num).toInt();
+          if (knownIds.contains(id) ||
+              protectedIds.contains(id) ||
+              expected[id] != version ||
+              version < 1 ||
+              row['optimistic_version_no'] != version ||
+              row['remote_status'] != RemoteRecordStatus.active.name ||
+              !_rowOverlapsRange(row, from, to)) {
+            continue;
+          }
+          await _store.deleteRecord(
+            transaction,
+            ownerKey: ownerKey,
+            recordId: id,
+            preservePhotos: true,
+          );
+          evictedIds.add(id);
+        }
+        if (evictedIds.isNotEmpty && !_loadedOwners.contains(ownerKey)) {
+          cacheBase = await _store.readRecordsForOwner(
+            ownerKey,
+            executor: transaction,
+          );
+        }
+        ensureSession();
+      });
+    } on _RemotePullCancelled {
+      return const RecordPageApplyResult(applied: false, changedCount: 0);
+    }
+    if (evictedIds.isNotEmpty) {
+      _recordsByOwner[ownerKey] = List.unmodifiable(
+        cacheBase ??
+            getAllRecordsForOwner(
+              ownerKey,
+            ).where((record) => !evictedIds.contains(record.id)),
+      );
+      _loadedOwners.add(ownerKey);
+      notifyListeners();
+    }
+    return RecordPageApplyResult(
+      applied: true,
+      changedCount: evictedIds.length,
+    );
+  }
+
+  Future<List<Map<String, Object?>>> _readRangeBodyVersions(
+    DatabaseExecutor executor,
+    String ownerKey,
+  ) => executor.rawQuery(
+    '''
+    SELECT r.record_id, r.start_at, r.end_at,
+      s.server_version_no, s.optimistic_version_no, s.remote_status
+    FROM ${AppDatabase.fishingRecordsTable} AS r
+    INNER JOIN ${AppDatabase.recordSyncStatesTable} AS s
+      ON s.owner_key = r.owner_key AND s.record_id = r.record_id
+    WHERE r.owner_key = ?
+  ''',
+    [ownerKey],
+  );
+
+  bool _rowOverlapsRange(
+    Map<String, Object?> row,
+    DateTime from,
+    DateTime to,
+  ) =>
+      DateTime.parse(row['start_at']! as String).isBefore(to) &&
+      DateTime.parse(row['end_at']! as String).isAfter(from);
 
   Future<RecordPageApplyResult> _applyRemoteChanges({
     required String ownerKey,
@@ -215,6 +377,8 @@ class FishingRecordRepository extends ChangeNotifier {
     required RecordSyncCheckpoint? checkpoint,
     required bool Function() isCurrentSession,
     required bool fullSnapshot,
+    bool Function(FishingRecord)? retainRecord,
+    bool protectLocalsPerRecord = false,
   }) async {
     void ensureSession() {
       if (!isCurrentSession()) throw const _RemotePullCancelled();
@@ -226,7 +390,10 @@ class FishingRecordRepository extends ChangeNotifier {
     try {
       await AppDatabase.instance.transaction((transaction) async {
         ensureSession();
-        if (!await _canApplyRemoteChanges(transaction, ownerKey)) return;
+        if (!protectLocalsPerRecord &&
+            !await _canApplyRemoteChanges(transaction, ownerKey)) {
+          return;
+        }
         ensureSession();
 
         Map<String, FishingRecord>? localById;
@@ -261,6 +428,15 @@ class FishingRecordRepository extends ChangeNotifier {
 
         for (final revision in revisions) {
           ensureSession();
+          if (protectLocalsPerRecord &&
+              !await _canApplyRemoteChanges(
+                transaction,
+                ownerKey,
+                recordId: revision.recordId,
+              )) {
+            continue;
+          }
+          ensureSession();
           final current = localById != null
               ? localById[revision.recordId]
               : await _store.readRecordForOwner(
@@ -281,8 +457,24 @@ class FishingRecordRepository extends ChangeNotifier {
             continue;
           }
           if (revision.status == RemoteRecordStatus.active) {
-            final record = _preserveLocalPhotos(revision.record!, current);
-            if (current == null || !_sameRecord(current, record)) {
+            final record = await _restoreLocalPhotos(
+              transaction,
+              ownerKey: ownerKey,
+              remoteRecord: revision.record!,
+              localRecord: current,
+            );
+            if (!(retainRecord?.call(record) ?? true)) {
+              if (current != null) {
+                await _store.deleteRecord(
+                  transaction,
+                  ownerKey: ownerKey,
+                  recordId: revision.recordId,
+                  preservePhotos: true,
+                );
+                changes[revision.recordId] = null;
+                localById?.remove(revision.recordId);
+              }
+            } else if (current == null || !_sameRecord(current, record)) {
               await _store.insertRecord(
                 transaction,
                 ownerKey: ownerKey,
@@ -292,14 +484,26 @@ class FishingRecordRepository extends ChangeNotifier {
               changes[revision.recordId] = record;
               localById?[revision.recordId] = record;
             }
-          } else if (current != null) {
-            await _store.deleteRecord(
-              transaction,
-              ownerKey: ownerKey,
-              recordId: revision.recordId,
-            );
-            changes[revision.recordId] = null;
-            localById?.remove(revision.recordId);
+          } else {
+            if (current != null) {
+              await _store.deleteRecord(
+                transaction,
+                ownerKey: ownerKey,
+                recordId: revision.recordId,
+              );
+              changes[revision.recordId] = null;
+              localById?.remove(revision.recordId);
+            } else if ((await _store.readArchivedPhotosForRecord(
+              ownerKey,
+              revision.recordId,
+              executor: transaction,
+            )).isNotEmpty) {
+              await _store.deleteArchivedPhotosForRecord(
+                transaction,
+                ownerKey: ownerKey,
+                recordId: revision.recordId,
+              );
+            }
           }
           if (metadata == null ||
               metadata.serverVersionNo != revision.versionNo ||
@@ -339,6 +543,18 @@ class FishingRecordRepository extends ChangeNotifier {
               AppDatabase.recordSyncStatesTable,
               where: 'owner_key = ? AND record_id = ?',
               whereArgs: <Object?>[ownerKey, id],
+            );
+          }
+          final archivedIds = await _store.readArchivedRecordIdsForOwner(
+            ownerKey,
+            executor: transaction,
+          );
+          for (final id in archivedIds) {
+            if (knownIds.contains(id)) continue;
+            await _store.deleteArchivedPhotosForRecord(
+              transaction,
+              ownerKey: ownerKey,
+              recordId: id,
             );
           }
         }
@@ -398,8 +614,9 @@ class FishingRecordRepository extends ChangeNotifier {
 
   Future<bool> _canApplyRemoteChanges(
     DatabaseExecutor executor,
-    String ownerKey,
-  ) async {
+    String ownerKey, {
+    String? recordId,
+  }) async {
     for (final (table, extraWhere, arguments)
         in <(String, String, List<Object?>)>[
           (
@@ -413,8 +630,10 @@ class FishingRecordRepository extends ChangeNotifier {
       final rows = await executor.query(
         table,
         columns: const ['record_id'],
-        where: 'owner_key = ? AND ($extraWhere)',
-        whereArgs: <Object?>[ownerKey, ...arguments],
+        where: recordId == null
+            ? 'owner_key = ? AND ($extraWhere)'
+            : 'owner_key = ? AND record_id = ? AND ($extraWhere)',
+        whereArgs: <Object?>[ownerKey, ?recordId, ...arguments],
         limit: 1,
       );
       if (rows.isNotEmpty) return false;
@@ -425,6 +644,24 @@ class FishingRecordRepository extends ChangeNotifier {
   bool _sameRecord(FishingRecord left, FishingRecord right) =>
       jsonEncode(left.toJson()) == jsonEncode(right.toJson());
 
+  Future<FishingRecord> _restoreLocalPhotos(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+    required FishingRecord remoteRecord,
+    required FishingRecord? localRecord,
+  }) async {
+    if (localRecord != null) {
+      return _preserveLocalPhotos(remoteRecord, localRecord);
+    }
+    final archived = await _store.readArchivedPhotosForRecord(
+      ownerKey,
+      remoteRecord.id,
+      executor: executor,
+    );
+    if (archived.isEmpty) return remoteRecord;
+    return _withLocalPhotos(remoteRecord, archived);
+  }
+
   FishingRecord _preserveLocalPhotos(
     FishingRecord remoteRecord,
     FishingRecord? localRecord,
@@ -433,6 +670,13 @@ class FishingRecordRepository extends ChangeNotifier {
       return remoteRecord;
     }
 
+    return _withLocalPhotos(remoteRecord, localRecord.photos);
+  }
+
+  FishingRecord _withLocalPhotos(
+    FishingRecord remoteRecord,
+    List<RecordPhoto> photos,
+  ) {
     return FishingRecord(
       id: remoteRecord.id,
       location: remoteRecord.location,
@@ -444,7 +688,7 @@ class FishingRecordRepository extends ChangeNotifier {
       airTemperature: remoteRecord.airTemperature,
       waterTemperature: remoteRecord.waterTemperature,
       catches: remoteRecord.catches,
-      photos: localRecord.photos,
+      photos: photos,
       memo: remoteRecord.memo,
     );
   }

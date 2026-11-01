@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/validation/fishing_record_validator.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/models/record_edit_snapshot.dart';
+import '../../data/models/record_cache_policy.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/photos/record_photo_file_store_utils.dart';
 import '../../data/repositories/auth_session_repository.dart';
@@ -57,6 +58,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final imagePicker = ImagePicker();
   final photos = <RecordPhoto>[];
   RecordPhotoDraftLease? _photoDraft;
+  VoidCallback? _releaseCacheRecord;
   final catchItems = <_CatchItemInput>[_CatchItemInput()];
 
   late final String recordId;
@@ -92,6 +94,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
     _editingOwnerKey = AuthSessionRepository.instance.dataOwnerKey;
     _editingSessionGeneration =
         AuthSessionRepository.instance.sessionGeneration;
+    _releaseCacheRecord = RecordCachePolicy.instance.holdRecord(
+      _editingOwnerKey,
+      recordId,
+    );
 
     locationController.text = widget.initialLocation ?? '';
     tideController.text = widget.initialTide ?? '';
@@ -381,6 +387,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   @override
   void dispose() {
+    _releaseCacheRecord?.call();
     _stopRecordWatch?.call();
     final photoDraft = _photoDraft;
     if (photoDraft != null) unawaited(photoDraft.release());
