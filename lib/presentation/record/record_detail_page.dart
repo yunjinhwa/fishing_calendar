@@ -291,6 +291,14 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                         Expanded(child: Text(record.location)),
                       ],
                     ),
+                    if (record.latitude != null &&
+                        record.longitude != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '위도 ${record.latitude} · 경도 ${record.longitude}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                     const SizedBox(height: 24),
 
                     _SectionTitle(title: '외부 데이터'),

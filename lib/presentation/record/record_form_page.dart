@@ -23,6 +23,8 @@ class RecordFormPage extends StatefulWidget {
   final FishingRecord? editingRecord;
 
   final String? initialLocation;
+  final double? initialLatitude;
+  final double? initialLongitude;
   final String? initialTide;
   final String? initialWeather;
   final double? initialAirTemperature;
@@ -33,6 +35,8 @@ class RecordFormPage extends StatefulWidget {
     super.key,
     this.editingRecord,
     this.initialLocation,
+    this.initialLatitude,
+    this.initialLongitude,
     this.initialTide,
     this.initialWeather,
     this.initialAirTemperature,
@@ -48,6 +52,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool get isEditMode => widget.editingRecord != null;
 
   final locationController = TextEditingController();
+  final latitudeController = TextEditingController();
+  final longitudeController = TextEditingController();
   final tideController = TextEditingController();
   final weatherController = TextEditingController();
   final airTemperatureController = TextEditingController();
@@ -100,6 +106,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
     );
 
     locationController.text = widget.initialLocation ?? '';
+    latitudeController.text = widget.initialLatitude?.toString() ?? '';
+    longitudeController.text = widget.initialLongitude?.toString() ?? '';
     tideController.text = widget.initialTide ?? '';
     weatherController.text = widget.initialWeather ?? '';
     airTemperatureController.text =
@@ -136,6 +144,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   Iterable<TextEditingController> get _textControllers => [
     locationController,
+    latitudeController,
+    longitudeController,
     tideController,
     weatherController,
     airTemperatureController,
@@ -341,6 +351,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   void _initializeEditingRecord(FishingRecord record) {
     locationController.text = record.location;
+    latitudeController.text = record.latitude?.toString() ?? '';
+    longitudeController.text = record.longitude?.toString() ?? '';
     tideController.text = record.tide ?? '';
     weatherController.text = record.weather ?? '';
     airTemperatureController.text = record.airTemperature?.toString() ?? '';
@@ -396,6 +408,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
       FishingRecordRepository.instance.removeListener(_handleEditSourceChange);
     }
     locationController.dispose();
+    latitudeController.dispose();
+    longitudeController.dispose();
     tideController.dispose();
     weatherController.dispose();
     airTemperatureController.dispose();
@@ -468,6 +482,28 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     if (location.isEmpty) {
       showMessage('위치를 입력하세요.');
+      return;
+    }
+
+    final latitudeText = latitudeController.text.trim();
+    final longitudeText = longitudeController.text.trim();
+    final latitude = latitudeText.isEmpty
+        ? null
+        : double.tryParse(latitudeText);
+    final longitude = longitudeText.isEmpty
+        ? null
+        : double.tryParse(longitudeText);
+    if ((latitudeText.isNotEmpty && latitude == null) ||
+        (longitudeText.isNotEmpty && longitude == null)) {
+      showMessage('위도와 경도는 숫자로 입력하세요.');
+      return;
+    }
+    final coordinateError = FishingRecordValidator.validateCoordinates(
+      latitude,
+      longitude,
+    );
+    if (coordinateError != null) {
+      showMessage(coordinateError);
       return;
     }
 
@@ -581,6 +617,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
     final record = FishingRecord(
       id: recordId,
       location: location,
+      latitude: latitude,
+      longitude: longitude,
       startAt: startAt,
       endAt: endAt,
       genreName: genreName,
@@ -960,6 +998,71 @@ class _RecordFormPageState extends State<RecordFormPage> {
                     hintText: '예: 부산 영도구 동삼동',
                     border: OutlineInputBorder(),
                   ),
+                ),
+                const SizedBox(height: 16),
+
+                ExpansionTile(
+                  key: const ValueKey('record-coordinates'),
+                  tilePadding: EdgeInsets.zero,
+                  title: const Text('위도·경도 (선택)'),
+                  initiallyExpanded:
+                      latitudeController.text.isNotEmpty ||
+                      longitudeController.text.isNotEmpty,
+                  maintainState: true,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        '좌표를 아는 경우 두 값을 함께 입력하세요. 장소 이름만 입력해도 저장할 수 있습니다.',
+                      ),
+                    ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const ValueKey('record-latitude'),
+                            controller: latitudeController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                              signed: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: '위도',
+                              helperText: '-90 ~ 90',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            key: const ValueKey('record-longitude'),
+                            controller: longitudeController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                              signed: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: '경도',
+                              helperText: '-180 ~ 180',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () {
+                          latitudeController.clear();
+                          longitudeController.clear();
+                        },
+                        child: const Text('좌표 지우기'),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
 

@@ -201,7 +201,7 @@ service cloud.firestore {
     }
 
     function validRecordBase(data, uid, recordId) {
-      return data.schemaVersion == 1
+      return data.schemaVersion in [1, 2]
         && data.ownerUid == uid
         && data.recordId == recordId
         && data.recordId.matches('^[^/]{1,200}$')
@@ -221,9 +221,20 @@ service cloud.firestore {
           'location', 'startAt', 'endAt', 'genreName', 'tide', 'weather',
           'airTemperature', 'waterTemperature', 'catches', 'memo',
           'photoUploadPending', 'versionNo', 'clientModifiedAt',
-          'createdAt', 'serverUpdatedAt', 'lastOutboxId'
+          'createdAt', 'serverUpdatedAt', 'lastOutboxId',
+          'latitude', 'longitude'
         ])
         && validRecordBase(data, uid, recordId)
+        && (
+          (data.schemaVersion == 1
+            && !data.keys().hasAny(['latitude', 'longitude']))
+          || (data.schemaVersion == 2
+            && data.keys().hasAll(['latitude', 'longitude'])
+            && data.latitude is number
+            && data.latitude >= -90 && data.latitude <= 90
+            && data.longitude is number
+            && data.longitude >= -180 && data.longitude <= 180)
+        )
         && data.recordStatus == 'ACTIVE'
         && data.location is string
         && data.location.size() > 0
@@ -253,6 +264,7 @@ service cloud.firestore {
           'lastOutboxId'
         ])
         && validRecordBase(data, uid, recordId)
+        && data.schemaVersion == 1
         && data.recordStatus == 'DELETED';
     }
 

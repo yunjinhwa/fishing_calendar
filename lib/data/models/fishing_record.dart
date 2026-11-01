@@ -1,6 +1,10 @@
 class FishingRecord {
   final String id;
   final String location;
+
+  /// Optional WGS84 coordinates. Both values are absent for text-only places.
+  final double? latitude;
+  final double? longitude;
   final DateTime startAt;
   final DateTime endAt;
   final String genreName;
@@ -17,6 +21,8 @@ class FishingRecord {
   FishingRecord({
     required this.id,
     required this.location,
+    this.latitude,
+    this.longitude,
     required this.startAt,
     required this.endAt,
     required this.genreName,
@@ -36,6 +42,8 @@ class FishingRecord {
     return FishingRecord(
       id: json['id'] as String,
       location: json['location'] as String,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
       startAt: DateTime.parse(json['startAt'] as String),
       endAt: DateTime.parse(json['endAt'] as String),
       genreName: json['genreName'] as String,
@@ -58,6 +66,11 @@ class FishingRecord {
     return {
       'id': id,
       'location': location,
+      // Omit absent coordinates to preserve existing durable payloads.
+      if (latitude != null || longitude != null) ...{
+        'latitude': latitude,
+        'longitude': longitude,
+      },
       'startAt': startAt.toIso8601String(),
       'endAt': endAt.toIso8601String(),
       'genreName': genreName,

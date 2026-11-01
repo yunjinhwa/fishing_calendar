@@ -106,13 +106,18 @@ function activeRecordFields({
   versionNo,
   createdAt,
   location = '규칙 테스트 방파제',
+  latitude,
+  longitude,
 }) {
+  const hasCoordinates = latitude !== undefined || longitude !== undefined;
   return {
-    schemaVersion: integerValue(1),
+    schemaVersion: integerValue(hasCoordinates ? 2 : 1),
     ownerUid: stringValue(uid),
     recordId: stringValue(recordId),
     recordStatus: stringValue('ACTIVE'),
     location: stringValue(location),
+    ...(latitude === undefined ? {} : {latitude: {doubleValue: latitude}}),
+    ...(longitude === undefined ? {} : {longitude: {doubleValue: longitude}}),
     startAt: timestampValue('2026-09-22T00:00:00Z'),
     endAt: timestampValue('2026-09-22T02:00:00Z'),
     genreName: stringValue('바다낚시'),
@@ -204,6 +209,8 @@ function mutationCommit({
   createdAt,
   recordStatus = 'ACTIVE',
   location,
+  latitude,
+  longitude,
   includeRecord = true,
   includeReceipt = true,
   mutationFingerprint,
@@ -228,6 +235,8 @@ function mutationCommit({
         versionNo: resultingVersionNo,
         createdAt,
         location,
+        latitude,
+        longitude,
       });
   const writes = [];
   if (includeRecord) {
@@ -1191,5 +1200,110 @@ await expectStatus(
   await rangeQuery({token: intruder.token}),
   403,
 );
+
+// A v1 record remains valid without coordinates. v2 records carry a complete
+// bounded numeric pair and retain all ownership/version/receipt restrictions.
+const coordinatesMember = await createUser('location-coordinate-reader');
+await seedEntitlement(coordinatesMember.uid);
+const coordinateRecordId = 'coordinate-schema-transition';
+await commit(
+  'coordinate migration begins with a legacy v1 record',
+  coordinatesMember.token,
+  mutationCommit({
+    uid: coordinatesMember.uid, recordId: coordinateRecordId,
+    outboxId: 'coordinate-legacy-create', operationType: 'create',
+    baseVersionNo: 0, resultingVersionNo: 1,
+  }),
+  200,
+);
+const coordinateInitialResponse = await request(
+  `/users/${coordinatesMember.uid}/records/${coordinateRecordId}`,
+  {token: coordinatesMember.token},
+);
+await expectStatus('coordinate migration legacy read', coordinateInitialResponse, 200);
+const coordinateCreatedAt = (await coordinateInitialResponse.json()).fields.createdAt;
+for (const [baseVersionNo, coordinates] of [
+  [1, {latitude: 37.5665, longitude: 126.9780}],
+  [2, {}],
+  [3, {latitude: 0, longitude: 0}],
+]) {
+  await commit(
+    `coordinate schema transition version ${baseVersionNo + 1}`,
+    coordinatesMember.token,
+    mutationCommit({
+      uid: coordinatesMember.uid, recordId: coordinateRecordId,
+      outboxId: `coordinate-update-${baseVersionNo}`, operationType: 'update',
+      baseVersionNo, resultingVersionNo: baseVersionNo + 1,
+      createdAt: coordinateCreatedAt, ...coordinates,
+    }),
+    200,
+  );
+  const result = await request(
+    `/users/${coordinatesMember.uid}/records/${coordinateRecordId}`,
+    {token: coordinatesMember.token},
+  );
+  await expectStatus('coordinate transition readback', result, 200);
+  const data = (await result.json()).fields;
+  if (Object.hasOwn(coordinates, 'latitude')) {
+    if (data.schemaVersion.integerValue !== '2' ||
+        Number(data.latitude.doubleValue ?? data.latitude.integerValue) !== coordinates.latitude ||
+        Number(data.longitude.doubleValue ?? data.longitude.integerValue) !== coordinates.longitude) {
+      throw new Error('coordinate schema transition lost its coordinate pair');
+    }
+  } else if (data.schemaVersion.integerValue !== '1' || data.latitude || data.longitude) {
+    throw new Error('removing coordinates did not restore the legacy shape');
+  }
+}
+await expectStatus(
+  'coordinate records remain private to their owner',
+  await request(`/users/${coordinatesMember.uid}/records/${coordinateRecordId}`, {
+    token: intruder.token,
+  }),
+  403,
+);
+await commit(
+  'coordinate record deletes with a v1 tombstone',
+  coordinatesMember.token,
+  mutationCommit({
+    uid: coordinatesMember.uid, recordId: coordinateRecordId,
+    outboxId: 'coordinate-delete', operationType: 'delete',
+    baseVersionNo: 4, resultingVersionNo: 5,
+    createdAt: coordinateCreatedAt, recordStatus: 'DELETED',
+  }),
+  200,
+);
+for (const [label, latitude, longitude] of [
+  ['minimum-boundary', -90, -180], ['maximum-boundary', 90, 180],
+]) {
+  await commit(
+    `coordinate ${label} allowed`, coordinatesMember.token,
+    mutationCommit({
+      uid: coordinatesMember.uid, recordId: label, outboxId: `coordinate-${label}`,
+      operationType: 'create', baseVersionNo: 0, resultingVersionNo: 1,
+      latitude, longitude,
+    }),
+    200,
+  );
+}
+for (const [label, mutate] of [
+  ['legacy-with-coordinates', (fields) => { fields.schemaVersion = integerValue(1); }],
+  ['unsupported-schema', (fields) => { fields.schemaVersion = integerValue(3); }],
+  ['missing-pair', (fields) => { delete fields.latitude; delete fields.longitude; }],
+  ['latitude-only', (fields) => { delete fields.longitude; }],
+  ['longitude-only', (fields) => { delete fields.latitude; }],
+  ['latitude-out-of-range', (fields) => { fields.latitude = {doubleValue: 90.01}; }],
+  ['longitude-out-of-range', (fields) => { fields.longitude = {doubleValue: -180.01}; }],
+  ['null-latitude', (fields) => { fields.latitude = {nullValue: null}; }],
+  ['string-longitude', (fields) => { fields.longitude = stringValue('126.978'); }],
+  ['unknown-field', (fields) => { fields.coordinateLabel = stringValue('unexpected'); }],
+]) {
+  const body = mutationCommit({
+    uid: coordinatesMember.uid, recordId: label, outboxId: `coordinate-invalid-${label}`,
+    operationType: 'create', baseVersionNo: 0, resultingVersionNo: 1,
+    latitude: 37.5665, longitude: 126.9780,
+  });
+  mutate(body.writes[0].update.fields);
+  await commit(`coordinate ${label} denied`, coordinatesMember.token, body, 403);
+}
 
 console.log('Firestore rules smoke test passed.');

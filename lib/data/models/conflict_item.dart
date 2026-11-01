@@ -107,8 +107,8 @@ class ConflictItem {
       ConflictField(
         key: ConflictFieldKey.location,
         fieldName: '위치',
-        mineValue: mine.location,
-        theirsValue: theirs.location,
+        mineValue: _formatLocation(mine),
+        theirsValue: _formatLocation(theirs),
       ),
       ConflictField(
         key: ConflictFieldKey.startAt,
@@ -199,6 +199,16 @@ class ConflictItem {
         mine.location,
         theirs.location,
       ),
+      latitude: choose(
+        ConflictFieldKey.location,
+        mine.latitude,
+        theirs.latitude,
+      ),
+      longitude: choose(
+        ConflictFieldKey.location,
+        mine.longitude,
+        theirs.longitude,
+      ),
       startAt: choose(ConflictFieldKey.startAt, mine.startAt, theirs.startAt),
       endAt: choose(ConflictFieldKey.endAt, mine.endAt, theirs.endAt),
       genreName: choose(
@@ -277,6 +287,14 @@ class ConflictItem {
 
   static String _displayNumber(num? value, {required String suffix}) =>
       value == null ? '-' : '$value$suffix';
+
+  static String _formatLocation(FishingRecord record) {
+    if (record.latitude == null && record.longitude == null) {
+      return record.location;
+    }
+    return '${record.location}\n'
+        '위도 ${record.latitude ?? '-'} · 경도 ${record.longitude ?? '-'}';
+  }
 
   static String _formatDateTime(DateTime value) {
     String twoDigits(int number) => number.toString().padLeft(2, '0');
