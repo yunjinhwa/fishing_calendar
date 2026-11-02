@@ -4,6 +4,7 @@ import 'map_history_page.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import '../../data/models/external_data.dart';
+import 'weather_data_card.dart';
 
 class MapDetailPage extends StatelessWidget {
   final String selectedLocation;
@@ -34,37 +35,22 @@ class MapDetailPage extends StatelessWidget {
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            Text(
-              '기준 관측점: ${externalData?.observationPointName ?? '조회 정보 없음'}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 24),
-
-            _SectionTitle(title: '현재 외부 데이터'),
-            const SizedBox(height: 8),
-            _InfoCard(
-              children: [
-                _InfoRow(
-                  label: '날씨',
-                  value: externalData == null
-                      ? '-'
-                      : '${externalData!.weather} / ${externalData!.airTemperature}℃',
-                ),
-                _InfoRow(label: '물때', value: externalData?.tide ?? '-'),
-                _InfoRow(
-                  label: '수온',
-                  value: externalData == null
-                      ? '-'
-                      : '${externalData!.waterTemperature}℃',
-                ),
-              ],
-            ),
+            if (externalData != null)
+              WeatherDataCard(data: externalData!)
+            else
+              const _InfoCard(
+                children: [Text('조회된 날씨 예보가 없습니다. 기록 작성 화면에서 직접 입력할 수 있습니다.')],
+              ),
             const SizedBox(height: 24),
 
             _SectionTitle(title: '정확도 안내'),
             const SizedBox(height: 8),
             const _InfoCard(
-              children: [Text('날씨·물때·수온은 아직 샘플 정보입니다. 실제 관측 정보로 사용하지 마세요.')],
+              children: [
+                Text(
+                  '날씨·기온은 표시된 시간의 예보입니다. 다른 시간대의 기록은 직접 입력해 주세요. 물때·수온은 아직 연동되지 않았습니다.',
+                ),
+              ],
             ),
             const SizedBox(height: 24),
 
@@ -107,10 +93,7 @@ class MapDetailPage extends StatelessWidget {
                       initialLocation: selectedLocation,
                       initialLatitude: latitude,
                       initialLongitude: longitude,
-                      initialTide: externalData?.tide,
-                      initialWeather: externalData?.weather,
-                      initialAirTemperature: externalData?.airTemperature,
-                      initialWaterTemperature: externalData?.waterTemperature,
+                      initialExternalData: externalData,
                     ),
                   ),
                 );
@@ -155,35 +138,6 @@ class _InfoCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: children,
         ),
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 64,
-            child: Text(label, style: TextStyle(color: Colors.grey.shade600)),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
       ),
     );
   }

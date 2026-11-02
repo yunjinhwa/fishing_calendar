@@ -7,7 +7,7 @@ import 'package:fishing_build/data/models/external_data.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
-import 'package:fishing_build/data/services/mock_external_data_service.dart';
+import 'package:fishing_build/data/services/external_data_service.dart';
 import 'package:fishing_build/data/services/network_status_service.dart';
 import 'package:fishing_build/presentation/map/map_detail_page.dart';
 import 'package:fishing_build/presentation/map/map_page.dart';
@@ -204,7 +204,11 @@ void main() {
       expect(form.initialLocation, place.name);
       expect(form.initialLatitude, place.latitude);
       expect(form.initialLongitude, place.longitude);
-      expect(form.initialWeather, '샘플 날씨');
+      expect(form.initialExternalData!.weather, '예보 날씨');
+      expect(form.initialExternalData!.latitude, place.latitude);
+      expect(form.initialExternalData!.longitude, place.longitude);
+      expect(form.initialTide, isNull);
+      expect(form.initialWaterTemperature, isNull);
       expect(tester.takeException(), isNull);
     },
   );
@@ -231,6 +235,9 @@ void main() {
       expect(form.initialLocation, '선택한 항구');
       expect(form.initialLatitude, 34.8);
       expect(form.initialLongitude, 128.4);
+      expect(form.initialExternalData, same(detail.externalData));
+      expect(form.initialTide, isNull);
+      expect(form.initialWaterTemperature, isNull);
       expect(tester.takeException(), isNull);
     },
   );
@@ -283,7 +290,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('late sample response cannot replace a newer selected place', (
+  testWidgets('late forecast response cannot replace a newer selected place', (
     tester,
   ) async {
     final controller = MapSelectionController(
@@ -310,11 +317,77 @@ void main() {
     await tester.pumpAndSettle();
     service.pending[0].complete(_sample('부산 영도구 동삼동', weather: '이전 날씨'));
     await tester.pumpAndSettle();
-    expect(find.text('최신 날씨 / 18.0℃'), findsOneWidget);
-    expect(find.text('이전 날씨 / 18.0℃'), findsNothing);
+    expect(find.text('최신 날씨'), findsOneWidget);
+    expect(find.text('이전 날씨'), findsNothing);
     expect(controller.selection.name, '새로 고른 항구');
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'weather setup failure allows manual records and explicit retry',
+    (tester) async {
+      const error = ExternalDataException(ExternalDataFailure.configuration);
+      final service = _ExternalService(failure: error);
+      final controller = MapSelectionController(
+        locationGateway: _LocationGateway(),
+        initialSelection: MapLocation(name: '항구', latitude: 35, longitude: 129),
+      );
+      await _openMap(
+        tester,
+        controller: controller,
+        externalDataService: service,
+      );
+      expect(find.text(error.message), findsOneWidget);
+      expect(service.locations.single.latitude, 35);
+      expect(service.locations.single.longitude, 129);
+      expect(service.forceRefreshes, [false]);
+      await _tap(tester, '다시 조회');
+      expect(service.forceRefreshes, [false, true]);
+      await _tap(tester, '기록 작성');
+      final form = tester.widget<RecordFormPage>(find.byType(RecordFormPage));
+      expect(form.initialExternalData, isNull);
+      expect(form.initialWeather, isNull);
+      expect(form.initialAirTemperature, isNull);
+      expect(form.initialTide, isNull);
+      expect(form.initialWaterTemperature, isNull);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'partial forecast displays KST source times and manual marine data',
+    (tester) async {
+      final data = ExternalData(
+        locationName: '항구',
+        latitude: 35,
+        longitude: 129,
+        airTemperature: 18,
+        gridX: 98,
+        gridY: 74,
+        issuedAt: DateTime.utc(2026, 11, 1, 23, 30),
+        validAt: DateTime.utc(2026, 11, 2),
+        fetchedAt: DateTime.utc(2026, 11, 2, 0, 10),
+      );
+      final controller = MapSelectionController(
+        locationGateway: _LocationGateway(),
+        initialSelection: MapLocation(name: '항구', latitude: 35, longitude: 129),
+      );
+      await _openMap(
+        tester,
+        controller: controller,
+        externalDataService: _ExternalService(result: data),
+      );
+      expect(find.text('제공: 기상청 초단기예보'), findsOneWidget);
+      expect(find.text('예보 격자: 98, 74'), findsOneWidget);
+      expect(find.text('발표 기준: 2026.11.02 08:30 (KST)'), findsOneWidget);
+      expect(find.text('예보: 2026.11.02 09:00 (KST)'), findsOneWidget);
+      expect(find.text('정보 없음'), findsOneWidget);
+      expect(find.text('18.0℃'), findsOneWidget);
+      expect(find.text('수동 입력'), findsNWidgets(2));
+      expect(find.textContaining('샘플'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'search keeps its map alive while waiting and displaying results',
@@ -441,6 +514,7 @@ Future<void> _openMap(
   WidgetTester tester, {
   required MapSelectionController controller,
   MapCanvasBuilder? mapBuilder,
+  ExternalDataService? externalDataService,
 }) async {
   _prepareView(tester);
   addTearDown(controller.dispose);
@@ -449,7 +523,7 @@ Future<void> _openMap(
     MaterialApp(
       home: MapPage(
         controller: controller,
-        externalDataService: _ExternalService(),
+        externalDataService: externalDataService ?? _ExternalService(),
         mapBuilder:
             mapBuilder ??
             (_, _, _) => const SizedBox(key: ValueKey('fake-map')),
@@ -466,26 +540,58 @@ Future<void> _tap(WidgetTester tester, String text) async {
   await tester.pumpAndSettle();
 }
 
-ExternalData _sample(String name, {String weather = '샘플 날씨'}) => ExternalData(
-  locationName: name,
-  weather: weather,
-  airTemperature: 18,
-  tide: '7물',
-  waterTemperature: 16,
-  observationPointName: '$name 관측소',
-  observedAt: DateTime(2026, 11, 2),
-);
+ExternalData _sample(
+  String name, {
+  String? weather = '예보 날씨',
+  double? airTemperature = 18,
+  double latitude = 35,
+  double longitude = 129,
+}) {
+  final now = DateTime.now().toUtc();
+  final validAt = DateTime.utc(now.year, now.month, now.day, now.hour);
+  return ExternalData(
+    locationName: name,
+    latitude: latitude,
+    longitude: longitude,
+    weather: weather,
+    airTemperature: airTemperature,
+    gridX: 98,
+    gridY: 74,
+    issuedAt: validAt.subtract(const Duration(minutes: 30)),
+    validAt: validAt,
+    fetchedAt: now,
+  );
+}
 
-class _ExternalService extends MockExternalDataService {
-  _ExternalService({this.deferred = false});
+class _ExternalService implements ExternalDataService {
+  _ExternalService({this.deferred = false, this.failure, this.result});
   final bool deferred;
+  final ExternalDataException? failure;
+  final ExternalData? result;
   final calls = <String>[];
+  final locations = <MapLocation>[];
+  final forceRefreshes = <bool>[];
   final pending = <Completer<ExternalData>>[];
 
   @override
-  Future<ExternalData> fetchCurrentData({required String locationName}) {
-    calls.add(locationName);
-    if (!deferred) return Future.value(_sample(locationName));
+  Future<ExternalData> fetchCurrentData({
+    required MapLocation location,
+    bool forceRefresh = false,
+  }) {
+    calls.add(location.name);
+    locations.add(location);
+    forceRefreshes.add(forceRefresh);
+    if (failure != null) return Future.error(failure!);
+    if (!deferred) {
+      return Future.value(
+        result ??
+            _sample(
+              location.name,
+              latitude: location.latitude ?? 35,
+              longitude: location.longitude ?? 129,
+            ),
+      );
+    }
     final completer = Completer<ExternalData>();
     pending.add(completer);
     return completer.future;
