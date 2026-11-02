@@ -1,187 +1,66 @@
 import 'package:flutter/material.dart';
 
 class MapHistoryPage extends StatefulWidget {
-  final String selectedLocation;
+  const MapHistoryPage({super.key, required this.selectedLocation});
 
-  const MapHistoryPage({
-    super.key,
-    required this.selectedLocation,
-  });
+  final String selectedLocation;
 
   @override
   State<MapHistoryPage> createState() => _MapHistoryPageState();
 }
 
 class _MapHistoryPageState extends State<MapHistoryPage> {
-  DateTime selectedDate = DateTime.now().subtract(const Duration(days: 1));
+  DateTime _selectedDate = DateTime.now().subtract(const Duration(days: 1));
 
-  Future<void> pickDate() async {
-    final pickedDate = await showDatePicker(
+  Future<void> _pickDate() async {
+    final date = await showDatePicker(
       context: context,
-      initialDate: selectedDate,
+      initialDate: _selectedDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
-
-    if (pickedDate == null) {
-      return;
-    }
-
-    setState(() {
-      selectedDate = pickedDate;
-    });
+    if (!mounted || date == null) return;
+    setState(() => _selectedDate = date);
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('과거 정보 조회'),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(
-              widget.selectedLocation,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '외부 제공사 기준으로 조회 가능한 과거 데이터만 표시합니다.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 24),
-
-            OutlinedButton.icon(
-              onPressed: pickDate,
-              icon: const Icon(Icons.calendar_month_outlined),
-              label: Text(_formatDate(selectedDate)),
-            ),
-            const SizedBox(height: 24),
-
-            _SectionTitle(title: '조회 결과'),
-            const SizedBox(height: 8),
-
-            _InfoCard(
-              children: [
-                _InfoRow(
-                  label: '날짜',
-                  value: _formatDate(selectedDate),
-                ),
-                const _InfoRow(
-                  label: '날씨',
-                  value: '흐림 / 17℃',
-                ),
-                const _InfoRow(
-                  label: '물때',
-                  value: '6물',
-                ),
-                const _InfoRow(
-                  label: '수온',
-                  value: '15.8℃',
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            _InfoCard(
-              children: [
-                Text(
-                  '현재는 mock 데이터입니다. 실제 과거 날씨/물때/수온 조회는 추후 외부 API와 연동됩니다.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatDate(DateTime date) {
-    String twoDigits(int value) => value.toString().padLeft(2, '0');
-
-    return '${date.year}.${twoDigits(date.month)}.${twoDigits(date.day)}';
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String title;
-
-  const _SectionTitle({
-    required this.title,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-    );
-  }
-}
-
-class _InfoCard extends StatelessWidget {
-  final List<Widget> children;
-
-  const _InfoCard({
-    required this.children,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('과거 정보 조회')),
+    body: SafeArea(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: children,
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 64,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-              ),
-            ),
+          Text(
+            widget.selectedLocation,
+            style: Theme.of(context).textTheme.headlineSmall,
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
+          const SizedBox(height: 24),
+          OutlinedButton.icon(
+            onPressed: _pickDate,
+            icon: const Icon(Icons.calendar_month_outlined),
+            label: Text(_formatDate(_selectedDate)),
+          ),
+          const SizedBox(height: 24),
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('과거 날씨 조회는 아직 지원하지 않습니다.'),
+                  SizedBox(height: 8),
+                  Text('과거 날짜의 날씨·기온과 물때·수온은 기록 작성 화면에서 직접 입력해 주세요.'),
+                ],
               ),
             ),
           ),
         ],
       ),
-    );
+    ),
+  );
+
+  String _formatDate(DateTime date) {
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${date.year}.${two(date.month)}.${two(date.day)}';
   }
 }

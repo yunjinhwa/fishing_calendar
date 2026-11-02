@@ -8,7 +8,8 @@ import '../../data/maps/kakao_map_configuration.dart';
 import '../../data/maps/map_location.dart';
 import '../../data/maps/map_search_gateway.dart';
 import '../../data/models/external_data.dart';
-import '../../data/services/mock_external_data_service.dart';
+import '../../data/services/external_data_service.dart';
+import '../../data/services/kma_weather_service.dart';
 import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
@@ -16,6 +17,7 @@ import 'kakao_map_canvas.dart';
 import 'map_detail_page.dart';
 import 'map_fallback_page.dart';
 import 'map_selection_controller.dart';
+import 'weather_data_card.dart';
 
 typedef MapCanvasBuilder =
     Widget Function(
@@ -38,7 +40,7 @@ class MapPage extends StatefulWidget {
   final MapSelectionController? controller;
   final KakaoMapConfiguration configuration;
   final MapCanvasBuilder? mapBuilder;
-  final MockExternalDataService? externalDataService;
+  final ExternalDataService? externalDataService;
 
   @override
   State<MapPage> createState() => _MapPageState();
@@ -48,7 +50,7 @@ class _MapPageState extends State<MapPage> {
   final _searchController = TextEditingController();
   final _network = NetworkStatusService.instance;
   late final MapSelectionController _controller;
-  late final MockExternalDataService _externalService;
+  late final ExternalDataService _externalService;
   MapLocation? _observedSelection;
   MapLocation? _externalRequestedFor;
   ExternalData? _externalData;
@@ -67,7 +69,7 @@ class _MapPageState extends State<MapPage> {
         MapSelectionController(
           locationGateway: GeolocatorCurrentLocationGateway(),
         );
-    _externalService = widget.externalDataService ?? MockExternalDataService();
+    _externalService = widget.externalDataService ?? KmaWeatherService.instance;
     _observedSelection = _controller.selection;
     _wasDisconnected = _network.isDisconnected;
     _controller.addListener(_onSelectionChanged);
@@ -159,12 +161,20 @@ class _MapPageState extends State<MapPage> {
     });
     try {
       final data = await _externalService.fetchCurrentData(
-        locationName: selection.name,
+        location: selection,
+        forceRefresh: force,
       );
       if (!mounted || !widget.isActive || revision != _externalRevision) return;
       setState(() {
         _externalData = data;
         _loadingExternal = false;
+      });
+    } on ExternalDataException catch (error) {
+      if (!mounted || !widget.isActive || revision != _externalRevision) return;
+      setState(() {
+        _externalData = null;
+        _loadingExternal = false;
+        _externalError = error.message;
       });
     } on Object {
       if (!mounted || !widget.isActive || revision != _externalRevision) return;
@@ -204,10 +214,7 @@ class _MapPageState extends State<MapPage> {
           initialLocation: location.name,
           initialLatitude: location.latitude,
           initialLongitude: location.longitude,
-          initialTide: data?.tide,
-          initialWeather: data?.weather,
-          initialAirTemperature: data?.airTemperature,
-          initialWaterTemperature: data?.waterTemperature,
+          initialExternalData: data,
         ),
       ),
     );
@@ -379,9 +386,7 @@ class _MapPageState extends State<MapPage> {
                 ),
               ),
             ),
-            const Text('날씨·물때·수온은 아직 샘플 정보입니다.'),
             _ExternalDataCard(
-              selectedLocation: selected.name,
               externalData: _externalData,
               isLoading: _loadingExternal,
               errorMessage: _externalError,
@@ -462,14 +467,12 @@ class _MapCanvasHostState extends State<_MapCanvasHost>
 }
 
 class _ExternalDataCard extends StatelessWidget {
-  final String selectedLocation;
   final ExternalData? externalData;
   final bool isLoading;
   final String? errorMessage;
   final VoidCallback onRetry;
 
   const _ExternalDataCard({
-    required this.selectedLocation,
     required this.externalData,
     required this.isLoading,
     required this.errorMessage,
@@ -525,87 +528,6 @@ class _ExternalDataCard extends StatelessWidget {
       );
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '선택 위치 외부 데이터',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              data.locationName,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '기준 관측점: ${data.observationPointName}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _ExternalDataItem(
-                    label: '날씨',
-                    value: '${data.weather} / ${data.airTemperature}℃',
-                    icon: Icons.cloud_outlined,
-                  ),
-                ),
-                Expanded(
-                  child: _ExternalDataItem(
-                    label: '물때',
-                    value: data.tide,
-                    icon: Icons.waves_outlined,
-                  ),
-                ),
-                Expanded(
-                  child: _ExternalDataItem(
-                    label: '수온',
-                    value: '${data.waterTemperature}℃',
-                    icon: Icons.thermostat_outlined,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ExternalDataItem extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-
-  const _ExternalDataItem({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(icon, color: Theme.of(context).colorScheme.primary),
-        const SizedBox(height: 6),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: Theme.of(
-            context,
-          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-        ),
-      ],
-    );
+    return WeatherDataCard(data: data);
   }
 }

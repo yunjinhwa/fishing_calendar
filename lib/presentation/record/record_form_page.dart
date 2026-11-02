@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/validation/fishing_record_validator.dart';
+import '../../data/models/external_data.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/models/record_edit_snapshot.dart';
 import '../../data/models/record_cache_policy.dart';
@@ -30,6 +31,7 @@ class RecordFormPage extends StatefulWidget {
   final double? initialAirTemperature;
   final double? initialWaterTemperature;
   final String? initialFishName;
+  final ExternalData? initialExternalData;
 
   const RecordFormPage({
     super.key,
@@ -42,6 +44,7 @@ class RecordFormPage extends StatefulWidget {
     this.initialAirTemperature,
     this.initialWaterTemperature,
     this.initialFishName,
+    this.initialExternalData,
   });
 
   @override
@@ -79,6 +82,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool _isConfirmingReload = false;
   String? _draftBaseline;
   bool _hasUnsavedChanges = false;
+  bool _automaticWeather = false;
+  bool _automaticAirTemperature = false;
+  bool _reconcilingWeather = false;
   VoidCallback? _stopRecordWatch;
   bool isPickingPhoto = false;
   int nextPhotoSequence = 0;
@@ -114,6 +120,19 @@ class _RecordFormPageState extends State<RecordFormPage> {
         widget.initialAirTemperature?.toString() ?? '';
     waterTemperatureController.text =
         widget.initialWaterTemperature?.toString() ?? '';
+
+    final forecast = widget.initialExternalData;
+    if (!isEditMode && forecast != null && _forecastApplies) {
+      if (widget.initialWeather == null && forecast.weather != null) {
+        weatherController.text = forecast.weather!;
+        _automaticWeather = true;
+      }
+      if (widget.initialAirTemperature == null &&
+          forecast.airTemperature != null) {
+        airTemperatureController.text = forecast.airTemperature.toString();
+        _automaticAirTemperature = true;
+      }
+    }
 
     if (widget.initialFishName != null && catchItems.isNotEmpty) {
       catchItems.first.speciesController.text = widget.initialFishName!;
@@ -177,11 +196,44 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   void _handleDraftChange() {
-    if (!mounted || _draftBaseline == null) return;
+    if (!mounted || _draftBaseline == null || _reconcilingWeather) return;
+    final clearedForecast = _reconcileWeatherPrefill();
     final changed = _captureDraft() != _draftBaseline;
-    if (changed != _hasUnsavedChanges) {
+    if (changed != _hasUnsavedChanges || clearedForecast) {
       setState(() => _hasUnsavedChanges = changed);
     }
+  }
+
+  bool get _forecastApplies =>
+      widget.initialExternalData?.appliesToRecord(
+        startAt: startAt,
+        locationName: locationController.text,
+        latitude: double.tryParse(latitudeController.text),
+        longitude: double.tryParse(longitudeController.text),
+      ) ??
+      false;
+
+  bool _reconcileWeatherPrefill() {
+    if (isEditMode ||
+        _reconcilingWeather ||
+        (!_automaticWeather && !_automaticAirTemperature) ||
+        _forecastApplies) {
+      return false;
+    }
+    _reconcilingWeather = true;
+    try {
+      if (_automaticWeather) {
+        _automaticWeather = false;
+        weatherController.clear();
+      }
+      if (_automaticAirTemperature) {
+        _automaticAirTemperature = false;
+        airTemperatureController.clear();
+      }
+    } finally {
+      _reconcilingWeather = false;
+    }
+    return true;
   }
 
   Future<void> _requestExit() async {
@@ -472,6 +524,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       );
     }
 
+    _reconcileWeatherPrefill();
     final location = locationController.text.trim();
     final tide = tideController.text.trim();
     final weather = weatherController.text.trim();
@@ -1121,8 +1174,18 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
                 _SectionTitle(title: '외부 데이터'),
                 const SizedBox(height: 4),
+                if (!isEditMode &&
+                    widget.initialExternalData != null &&
+                    (_automaticWeather || _automaticAirTemperature)) ...[
+                  Text(
+                    '${widget.initialExternalData!.sourceName} · 예보 '
+                    '${formatDateTime(widget.initialExternalData!.validAt.toUtc().add(const Duration(hours: 9)))} KST',
+                  ),
+                  const Text('예보 시간대나 장소가 달라지면 자동 입력값이 해제됩니다.'),
+                  const SizedBox(height: 8),
+                ],
                 Text(
-                  '조회에 실패한 값은 직접 입력하세요.',
+                  '물때·수온과 조회되지 않은 값은 직접 입력하세요.',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
@@ -1141,7 +1204,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 const SizedBox(height: 16),
 
                 TextField(
+                  key: const ValueKey('record-weather'),
                   controller: weatherController,
+                  onChanged: (_) {
+                    if (_automaticWeather) {
+                      setState(() => _automaticWeather = false);
+                    }
+                  },
                   maxLength: FishingRecordValidator.maxWeatherLength,
                   decoration: const InputDecoration(
                     labelText: '날씨 *',
@@ -1152,8 +1221,17 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 const SizedBox(height: 16),
 
                 TextField(
+                  key: const ValueKey('record-air-temperature'),
                   controller: airTemperatureController,
-                  keyboardType: TextInputType.number,
+                  onChanged: (_) {
+                    if (_automaticAirTemperature) {
+                      setState(() => _automaticAirTemperature = false);
+                    }
+                  },
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
                   decoration: const InputDecoration(
                     labelText: '기온 *',
                     hintText: '예: 18',
