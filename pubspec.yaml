@@ -52,6 +52,8 @@ dependencies:
   firebase_auth: ^6.7.0
   cloud_firestore: ^6.10.0
   path_provider: ^2.1.6
+  kakao_map_plugin: 1.0.0
+  geolocator: 14.1.2
 
 dev_dependencies:
   flutter_test:

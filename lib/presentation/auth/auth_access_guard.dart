@@ -97,10 +97,6 @@ Future<bool> _requestAuthentication(
         title: const Text('로그인이 필요합니다'),
         content: Text(message),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('나중에'),
-          ),
           OutlinedButton(
             onPressed: () => Navigator.of(context).pop(_AuthChoice.signup),
             child: const Text('회원가입'),
@@ -108,6 +104,10 @@ Future<bool> _requestAuthentication(
           FilledButton(
             onPressed: () => Navigator.of(context).pop(_AuthChoice.login),
             child: const Text('로그인'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('나중에'),
           ),
         ],
       );

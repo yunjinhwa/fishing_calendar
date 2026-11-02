@@ -32,6 +32,7 @@ migrate_working_dir/
 /coverage/
 /firebase.local.json
 /firebase.*.local.json
+/kakao.local.json
 
 # Local credentials and signing files
 .env
