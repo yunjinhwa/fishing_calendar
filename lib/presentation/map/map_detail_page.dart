@@ -7,11 +7,15 @@ import '../../data/models/external_data.dart';
 
 class MapDetailPage extends StatelessWidget {
   final String selectedLocation;
+  final double? latitude;
+  final double? longitude;
   final ExternalData? externalData;
 
   const MapDetailPage({
     super.key,
     required this.selectedLocation,
+    this.latitude,
+    this.longitude,
     this.externalData,
   });
 
@@ -60,11 +64,7 @@ class MapDetailPage extends StatelessWidget {
             _SectionTitle(title: '정확도 안내'),
             const SizedBox(height: 8),
             const _InfoCard(
-              children: [
-                Text(
-                  '표시되는 날씨, 물때, 수온 정보는 현재 mock 데이터 기준입니다. 실제 API 연동 시 제공사 데이터 기준으로 표시됩니다.',
-                ),
-              ],
+              children: [Text('날씨·물때·수온은 아직 샘플 정보입니다. 실제 관측 정보로 사용하지 마세요.')],
             ),
             const SizedBox(height: 24),
 
@@ -105,6 +105,8 @@ class MapDetailPage extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) => RecordFormPage(
                       initialLocation: selectedLocation,
+                      initialLatitude: latitude,
+                      initialLongitude: longitude,
                       initialTide: externalData?.tide,
                       initialWeather: externalData?.weather,
                       initialAirTemperature: externalData?.airTemperature,

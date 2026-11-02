@@ -92,6 +92,8 @@ void main() {
       isPending: true,
       initiatedLocally: false,
     );
+    // The hidden map no longer renders a spinner while its sample request ends.
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
     expect(find.text('해당 계정은 탈퇴되었습니다'), findsOneWidget);

@@ -30,6 +30,8 @@
 	<string>출조 기록에 촬영한 사진을 첨부하기 위해 카메라를 사용합니다.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>출조 기록에 사진을 첨부하기 위해 사진 보관함을 사용합니다.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>현재 위치를 지도에 표시하고 출조 장소를 선택하기 위해 앱 사용 중 위치를 사용합니다.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

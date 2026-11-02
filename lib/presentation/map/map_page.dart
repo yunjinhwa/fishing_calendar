@@ -1,116 +1,242 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
-import 'map_fallback_page.dart';
-import 'map_detail_page.dart';
-import '../auth/auth_access_guard.dart';
-import '../record/record_form_page.dart';
+import '../../data/maps/current_location_gateway.dart';
+import '../../data/maps/geolocator_current_location_gateway.dart';
+import '../../data/maps/kakao_map_configuration.dart';
+import '../../data/maps/map_location.dart';
+import '../../data/maps/map_search_gateway.dart';
 import '../../data/models/external_data.dart';
 import '../../data/services/mock_external_data_service.dart';
+import '../../data/services/network_status_service.dart';
+import '../auth/auth_access_guard.dart';
+import '../record/record_form_page.dart';
+import 'kakao_map_canvas.dart';
+import 'map_detail_page.dart';
+import 'map_fallback_page.dart';
+import 'map_selection_controller.dart';
+
+typedef MapCanvasBuilder =
+    Widget Function(
+      MapLocation selection,
+      ValueChanged<MapSearchGateway?> onGatewayChanged,
+      void Function(double latitude, double longitude) onPointSelected,
+    );
 
 class MapPage extends StatefulWidget {
-  const MapPage({super.key});
+  const MapPage({
+    super.key,
+    this.isActive = true,
+    this.controller,
+    this.configuration = const KakaoMapConfiguration(),
+    this.mapBuilder,
+    this.externalDataService,
+  });
+
+  final bool isActive;
+  final MapSelectionController? controller;
+  final KakaoMapConfiguration configuration;
+  final MapCanvasBuilder? mapBuilder;
+  final MockExternalDataService? externalDataService;
 
   @override
   State<MapPage> createState() => _MapPageState();
 }
 
 class _MapPageState extends State<MapPage> {
-  final searchController = TextEditingController();
-  final externalDataService = MockExternalDataService();
-
-  String selectedLocation = '부산 영도구 동삼동';
-  ExternalData? externalData;
-  bool isLoadingExternalData = false;
-  String? externalDataErrorMessage;
+  final _searchController = TextEditingController();
+  final _network = NetworkStatusService.instance;
+  late final MapSelectionController _controller;
+  late final MockExternalDataService _externalService;
+  MapLocation? _observedSelection;
+  MapLocation? _externalRequestedFor;
+  ExternalData? _externalData;
+  String? _externalError;
+  bool _loadingExternal = false;
+  int _externalRevision = 0;
+  int _mapAttempt = 0;
+  int _locationEntryRevision = 0;
+  bool _wasDisconnected = false;
 
   @override
   void initState() {
     super.initState();
-    fetchExternalData();
+    _controller =
+        widget.controller ??
+        MapSelectionController(
+          locationGateway: GeolocatorCurrentLocationGateway(),
+        );
+    _externalService = widget.externalDataService ?? MockExternalDataService();
+    _observedSelection = _controller.selection;
+    _wasDisconnected = _network.isDisconnected;
+    _controller.addListener(_onSelectionChanged);
+    _network.addListener(_onNetworkChanged);
+    if (widget.isActive) _locateOnEntry();
+  }
+
+  @override
+  void didUpdateWidget(MapPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive == widget.isActive) return;
+    if (!widget.isActive) {
+      _locationEntryRevision++;
+      _externalRevision++;
+      _loadingExternal = false;
+      _externalRequestedFor = null;
+      _controller.cancelPendingLocation();
+      _controller.setGateway(null);
+    } else {
+      _locateOnEntry();
+    }
+  }
+
+  void _locateOnEntry() {
+    final revision = ++_locationEntryRevision;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || !widget.isActive || revision != _locationEntryRevision) {
+        return;
+      }
+      await _controller.useCurrentLocation(requestPermission: false);
+      if (!mounted || !widget.isActive || revision != _locationEntryRevision) {
+        return;
+      }
+      await _fetchExternalData();
+    });
+  }
+
+  void _onSelectionChanged() {
+    if (!mounted) return;
+    final selection = _controller.selection;
+    if (!identical(selection, _observedSelection)) {
+      _observedSelection = selection;
+      _externalRevision++;
+      _externalData = null;
+      _externalError = null;
+      _loadingExternal = false;
+    }
+    setState(() {});
+    if (widget.isActive &&
+        !_controller.isLocating &&
+        !_controller.isResolving &&
+        !identical(selection, _externalRequestedFor)) {
+      unawaited(_fetchExternalData());
+    }
+  }
+
+  void _onNetworkChanged() {
+    final disconnected = _network.isDisconnected;
+    final recovered = _wasDisconnected && _network.isConnected;
+    _wasDisconnected = disconnected;
+    if (!mounted) return;
+    if (disconnected || recovered) _controller.setGateway(null);
+    setState(() {
+      if (recovered) _mapAttempt++;
+    });
+    if (recovered && widget.isActive) {
+      unawaited(_fetchExternalData(force: true));
+    }
+  }
+
+  Future<void> _fetchExternalData({bool force = false}) async {
+    if (!widget.isActive || _controller.isLocating || _controller.isResolving) {
+      return;
+    }
+    final selection = _controller.selection;
+    if (!force && identical(selection, _externalRequestedFor)) return;
+    _externalRequestedFor = selection;
+    final revision = ++_externalRevision;
+    if (_network.isDisconnected) {
+      setState(() {
+        _externalError = '인터넷에 연결한 뒤 다시 조회해 주세요.';
+        _loadingExternal = false;
+      });
+      return;
+    }
+    setState(() {
+      _loadingExternal = true;
+      _externalError = null;
+    });
+    try {
+      final data = await _externalService.fetchCurrentData(
+        locationName: selection.name,
+      );
+      if (!mounted || !widget.isActive || revision != _externalRevision) return;
+      setState(() {
+        _externalData = data;
+        _loadingExternal = false;
+      });
+    } on Object {
+      if (!mounted || !widget.isActive || revision != _externalRevision) return;
+      setState(() {
+        _externalData = null;
+        _loadingExternal = false;
+        _externalError = '외부 데이터를 가져오지 못했습니다.';
+      });
+    }
+  }
+
+  Future<void> _openFallback() async {
+    final name = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const MapFallbackPage()));
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    _controller.selectLocation(MapLocation(name: name));
+    _searchController.clear();
+  }
+
+  void _search(String query) {
+    FocusScope.of(context).unfocus();
+    unawaited(_controller.search(query));
+  }
+
+  Future<void> _openRecordForm() async {
+    final allowed = await requireMemberAccess(
+      context,
+      message: '지도 정보를 출조 기록으로 저장하려면 로그인이 필요합니다.',
+    );
+    if (!allowed || !mounted) return;
+    final location = _controller.selection;
+    final data = _externalData;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RecordFormPage(
+          initialLocation: location.name,
+          initialLatitude: location.latitude,
+          initialLongitude: location.longitude,
+          initialTide: data?.tide,
+          initialWeather: data?.weather,
+          initialAirTemperature: data?.airTemperature,
+          initialWaterTemperature: data?.waterTemperature,
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
-    searchController.dispose();
+    _locationEntryRevision++;
+    _externalRevision++;
+    _network.removeListener(_onNetworkChanged);
+    _controller.removeListener(_onSelectionChanged);
+    _controller.cancelPendingLocation();
+    _controller.setGateway(null);
+    if (widget.controller == null) _controller.dispose();
+    _searchController.dispose();
     super.dispose();
-  }
-
-  Future<void> fetchExternalData() async {
-    setState(() {
-      isLoadingExternalData = true;
-      externalDataErrorMessage = null;
-    });
-
-    try {
-      final data = await externalDataService.fetchCurrentData(
-        locationName: selectedLocation,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        externalData = data;
-        isLoadingExternalData = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-
-      setState(() {
-        externalData = null;
-        isLoadingExternalData = false;
-        externalDataErrorMessage = '외부 데이터를 가져오지 못했습니다.';
-      });
-    }
-  }
-
-  void searchLocation() {
-    final keyword = searchController.text.trim();
-
-    if (keyword.isEmpty) {
-      showMessage('검색할 위치를 입력하세요.');
-      return;
-    }
-
-    setState(() {
-      selectedLocation = keyword;
-    });
-
-    showMessage('$keyword 위치를 선택했습니다.');
-    fetchExternalData();
-  }
-
-  Future<void> openFallbackPage() async {
-    final result = await Navigator.of(
-      context,
-    ).push<String>(MaterialPageRoute(builder: (_) => const MapFallbackPage()));
-
-    if (result == null || result.trim().isEmpty) {
-      return;
-    }
-
-    setState(() {
-      selectedLocation = result;
-      searchController.text = result;
-    });
-
-    fetchExternalData();
-  }
-
-  void showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
+    final selected = _controller.selection;
+    final choosing = _controller.isLocating || _controller.isResolving;
     return Scaffold(
       appBar: AppBar(
         title: const Text('지도'),
         actions: [
           IconButton(
-            onPressed: openFallbackPage,
-            icon: const Icon(Icons.location_off_outlined),
+            onPressed: _openFallback,
+            icon: const Icon(Icons.edit_location_alt_outlined),
             tooltip: '위치 대체 입력',
           ),
         ],
@@ -120,46 +246,166 @@ class _MapPageState extends State<MapPage> {
           padding: const EdgeInsets.all(16),
           children: [
             TextField(
-              controller: searchController,
+              controller: _searchController,
+              maxLength: 200,
+              textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 labelText: '위치 검색',
-                hintText: '예: 부산 영도구 동삼동',
+                hintText: '장소 이름 또는 주소',
                 border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
-                  onPressed: searchLocation,
+                  onPressed: () => _search(_searchController.text),
                   icon: const Icon(Icons.search),
+                  tooltip: '검색',
                 ),
               ),
-              onSubmitted: (_) => searchLocation(),
+              onSubmitted: _search,
             ),
-            const SizedBox(height: 16),
-
-            _MapPlaceholder(selectedLocation: selectedLocation),
-            const SizedBox(height: 16),
-
-            _ExternalDataCard(
-              selectedLocation: selectedLocation,
-              externalData: externalData,
-              isLoading: isLoadingExternalData,
-              errorMessage: externalDataErrorMessage,
-              onRetry: fetchExternalData,
+            if (_controller.isSearching) const LinearProgressIndicator(),
+            if (_controller.errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  _controller.errorMessage!,
+                  key: const ValueKey('map-error'),
+                ),
+              ),
+            if (_controller.locationFailure ==
+                CurrentLocationFailure.deniedForever)
+              TextButton(
+                onPressed: () async {
+                  await _controller.openAppSettings();
+                },
+                child: const Text('앱 권한 설정 열기'),
+              ),
+            if (_controller.locationFailure ==
+                CurrentLocationFailure.serviceDisabled)
+              TextButton(
+                onPressed: () async {
+                  await _controller.openLocationSettings();
+                },
+                child: const Text('위치 서비스 설정 열기'),
+              ),
+            const SizedBox(height: 12),
+            _MapCanvasHost(
+              key: const ValueKey('map-canvas'),
+              isActive: widget.isActive,
+              child: SizedBox(
+                height: 280,
+                child: !widget.isActive
+                    ? const SizedBox.shrink()
+                    : _network.isDisconnected
+                    ? const Card(
+                        child: Center(child: Text('오프라인에서는 장소를 직접 입력해 주세요.')),
+                      )
+                    : widget.mapBuilder?.call(
+                            selected,
+                            _controller.setGateway,
+                            (lat, lon) => unawaited(
+                              _controller.selectCoordinates(lat, lon),
+                            ),
+                          ) ??
+                          KakaoMapCanvas(
+                            key: ValueKey(_mapAttempt),
+                            configuration: widget.configuration,
+                            selection: selected,
+                            onGatewayChanged: _controller.setGateway,
+                            onPointSelected: (lat, lon) => unawaited(
+                              _controller.selectCoordinates(lat, lon),
+                            ),
+                          ),
+              ),
             ),
-            const SizedBox(height: 16),
-
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => MapDetailPage(
-                            selectedLocation: selectedLocation,
-                            externalData: externalData,
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: _controller.isLocating
+                        ? null
+                        : () => unawaited(_controller.useCurrentLocation()),
+                    icon: const Icon(Icons.my_location),
+                    label: const Text('현재 위치'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _openFallback,
+                    icon: const Icon(Icons.edit_location_alt_outlined),
+                    label: const Text('장소 직접 입력'),
+                  ),
+                ),
+              ],
+            ),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      selected.name,
+                      key: const ValueKey('map-selected-location'),
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (selected.address != null &&
+                        selected.address != selected.name)
+                      Text(selected.address!),
+                    Text(
+                      choosing
+                          ? '위치를 확인하고 있습니다.'
+                          : selected.hasCoordinates
+                          ? '선택한 위치를 기록에 저장합니다.'
+                          : '장소 이름을 기록에 저장합니다.',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ..._controller.results.map(
+              (result) => Card(
+                child: ListTile(
+                  leading: const Icon(Icons.place_outlined),
+                  title: Text(result.name),
+                  subtitle: result.address == null
+                      ? null
+                      : Text(result.address!),
+                  onTap: () {
+                    _controller.selectLocation(result);
+                    FocusScope.of(context).unfocus();
+                  },
+                ),
+              ),
+            ),
+            const Text('날씨·물때·수온은 아직 샘플 정보입니다.'),
+            _ExternalDataCard(
+              selectedLocation: selected.name,
+              externalData: _externalData,
+              isLoading: _loadingExternal,
+              errorMessage: _externalError,
+              onRetry: () => unawaited(_fetchExternalData(force: true)),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: choosing
+                        ? null
+                        : () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => MapDetailPage(
+                                  selectedLocation: selected.name,
+                                  latitude: selected.latitude,
+                                  longitude: selected.longitude,
+                                  externalData: _externalData,
+                                ),
+                              ),
+                            );
+                          },
                     icon: const Icon(Icons.info_outline),
                     label: const Text('자세히 보기'),
                   ),
@@ -167,33 +413,7 @@ class _MapPageState extends State<MapPage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: () async {
-                      final allowed = await requireMemberAccess(
-                        context,
-                        message: '지도 정보를 출조 기록으로 저장하려면 로그인이 필요합니다.',
-                      );
-
-                      if (!allowed || !context.mounted) {
-                        return;
-                      }
-
-                      if (externalDataErrorMessage != null) {
-                        showMessage('외부 데이터 조회에 실패했습니다. 기록 화면에서 값을 직접 입력하세요.');
-                      }
-
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => RecordFormPage(
-                            initialLocation: selectedLocation,
-                            initialTide: externalData?.tide,
-                            initialWeather: externalData?.weather,
-                            initialAirTemperature: externalData?.airTemperature,
-                            initialWaterTemperature:
-                                externalData?.waterTemperature,
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: choosing ? null : _openRecordForm,
                     icon: const Icon(Icons.edit_note),
                     label: const Text('기록 작성'),
                   ),
@@ -207,38 +427,37 @@ class _MapPageState extends State<MapPage> {
   }
 }
 
-class _MapPlaceholder extends StatelessWidget {
-  final String selectedLocation;
+// Search results can move the map outside the viewport. Keep its WebView and
+// in-flight requests alive until the map tab is deactivated.
+class _MapCanvasHost extends StatefulWidget {
+  const _MapCanvasHost({
+    super.key,
+    required this.isActive,
+    required this.child,
+  });
 
-  const _MapPlaceholder({required this.selectedLocation});
+  final bool isActive;
+  final Widget child;
+
+  @override
+  State<_MapCanvasHost> createState() => _MapCanvasHostState();
+}
+
+class _MapCanvasHostState extends State<_MapCanvasHost>
+    with AutomaticKeepAliveClientMixin<_MapCanvasHost> {
+  @override
+  bool get wantKeepAlive => widget.isActive;
+
+  @override
+  void didUpdateWidget(_MapCanvasHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive != widget.isActive) updateKeepAlive();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 280,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Stack(
-        children: [
-          const Center(child: Icon(Icons.map_outlined, size: 72)),
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
-            child: Card(
-              child: ListTile(
-                leading: const Icon(Icons.place_outlined),
-                title: Text(selectedLocation),
-                subtitle: const Text('지도 API 연동 전 임시 지도 화면입니다.'),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+    super.build(context);
+    return widget.child;
   }
 }
 
