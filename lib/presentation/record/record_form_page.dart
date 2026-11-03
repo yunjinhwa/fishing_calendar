@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/validation/fishing_record_validator.dart';
+import '../../data/history/historical_conditions.dart';
 import '../../data/maps/map_location.dart';
 import '../../data/models/external_data.dart';
 import '../../data/models/fishing_record.dart';
@@ -29,6 +30,7 @@ import '../map/tide_data_card.dart';
 class RecordFormPage extends StatefulWidget {
   final FishingRecord? editingRecord;
 
+  final DateTime? initialStartAt;
   final String? initialLocation;
   final double? initialLatitude;
   final double? initialLongitude;
@@ -41,11 +43,15 @@ class RecordFormPage extends StatefulWidget {
   final TideRecordReference? initialTideReference;
   final bool allowAutomaticTide;
   final WaterTemperatureObservation? initialWaterTemperatureObservation;
+  final HistoricalWeatherObservation? initialHistoricalWeather;
+  final HistoricalWaterTemperatureObservation?
+  initialHistoricalWaterTemperature;
   final bool allowAutomaticWaterTemperature;
 
   const RecordFormPage({
     super.key,
     this.editingRecord,
+    this.initialStartAt,
     this.initialLocation,
     this.initialLatitude,
     this.initialLongitude,
@@ -58,6 +64,8 @@ class RecordFormPage extends StatefulWidget {
     this.initialTideReference,
     this.allowAutomaticTide = true,
     this.initialWaterTemperatureObservation,
+    this.initialHistoricalWeather,
+    this.initialHistoricalWaterTemperature,
     this.allowAutomaticWaterTemperature = true,
   });
 
@@ -98,12 +106,17 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool _hasUnsavedChanges = false;
   bool _automaticWeather = false;
   bool _automaticAirTemperature = false;
+  bool _automaticHistoricalWeather = false;
+  bool _automaticHistoricalAirTemperature = false;
+  bool _weatherManuallyEdited = false;
+  bool _airTemperatureManuallyEdited = false;
   bool _reconcilingWeather = false;
   bool _tideReferenceApplies = false;
   bool _automaticTide = false;
   bool _tideManuallyEdited = false;
   bool _reconcilingTide = false;
   bool _automaticWaterTemperature = false;
+  bool _automaticHistoricalWaterTemperature = false;
   bool _waterTemperatureManuallyEdited = false;
   bool _reconcilingWaterTemperature = false;
   TideName? _calculatedTideName;
@@ -113,8 +126,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool isPickingPhoto = false;
   int nextPhotoSequence = 0;
 
-  DateTime startAt = DateTime.now();
-  DateTime endAt = DateTime.now().add(const Duration(hours: 2));
+  late DateTime startAt;
+  late DateTime endAt;
 
   String? selectedGenre;
 
@@ -123,6 +136,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
   @override
   void initState() {
     super.initState();
+
+    startAt = widget.initialStartAt?.toLocal() ?? DateTime.now();
+    endAt = startAt.add(const Duration(hours: 2));
 
     recordId =
         widget.editingRecord?.id ??
@@ -141,19 +157,25 @@ class _RecordFormPageState extends State<RecordFormPage> {
     tideController.text = widget.initialTide ?? '';
     _tideManuallyEdited = widget.initialTide != null;
     weatherController.text = widget.initialWeather ?? '';
+    _weatherManuallyEdited = widget.initialWeather != null;
     airTemperatureController.text =
         widget.initialAirTemperature?.toString() ?? '';
+    _airTemperatureManuallyEdited = widget.initialAirTemperature != null;
     waterTemperatureController.text =
         widget.initialWaterTemperature?.toString() ?? '';
     _waterTemperatureManuallyEdited = widget.initialWaterTemperature != null;
 
+    _reconcileHistoricalWeatherPrefill();
     final forecast = widget.initialExternalData;
     if (!isEditMode && forecast != null && _forecastApplies) {
-      if (widget.initialWeather == null && forecast.weather != null) {
+      if (widget.initialWeather == null &&
+          !_automaticHistoricalWeather &&
+          forecast.weather != null) {
         weatherController.text = forecast.weather!;
         _automaticWeather = true;
       }
       if (widget.initialAirTemperature == null &&
+          !_automaticHistoricalAirTemperature &&
           forecast.airTemperature != null) {
         airTemperatureController.text = forecast.airTemperature.toString();
         _automaticAirTemperature = true;
@@ -233,12 +255,14 @@ class _RecordFormPageState extends State<RecordFormPage> {
       return;
     }
     final clearedForecast = _reconcileWeatherPrefill();
+    final historicalWeatherChanged = _reconcileHistoricalWeatherPrefill();
     final tideNameChanged = _reconcileTidePrefill();
     final waterTemperatureChanged = _reconcileWaterTemperaturePrefill();
     final changed = _captureDraft() != _draftBaseline;
     final tideApplies = _matchesTideReference;
     if (changed != _hasUnsavedChanges ||
         clearedForecast ||
+        historicalWeatherChanged ||
         tideNameChanged ||
         waterTemperatureChanged ||
         tideApplies != _tideReferenceApplies) {
@@ -355,29 +379,91 @@ class _RecordFormPageState extends State<RecordFormPage> {
     return true;
   }
 
+  bool _reconcileHistoricalWeatherPrefill() {
+    if (isEditMode || _reconcilingWeather) return false;
+    final observation = widget.initialHistoricalWeather;
+    final applies =
+        observation?.appliesToRecord(
+          startAt: startAt,
+          locationName: locationController.text,
+          latitude: double.tryParse(latitudeController.text),
+          longitude: double.tryParse(longitudeController.text),
+        ) ??
+        false;
+    final weatherApplies =
+        applies && observation!.weather?.trim().isNotEmpty == true;
+    final temperature = observation?.airTemperature;
+    final airTemperatureApplies =
+        applies &&
+        temperature != null &&
+        temperature.isFinite &&
+        temperature.abs() < 100;
+    var changed = false;
+    _reconcilingWeather = true;
+    try {
+      if (!_weatherManuallyEdited &&
+          weatherApplies != _automaticHistoricalWeather) {
+        _automaticHistoricalWeather = weatherApplies;
+        _automaticWeather = false;
+        weatherController.text = weatherApplies ? observation.weather! : '';
+        changed = true;
+      }
+      if (!_airTemperatureManuallyEdited &&
+          airTemperatureApplies != _automaticHistoricalAirTemperature) {
+        _automaticHistoricalAirTemperature = airTemperatureApplies;
+        _automaticAirTemperature = false;
+        airTemperatureController.text = airTemperatureApplies
+            ? temperature.toString()
+            : '';
+        changed = true;
+      }
+    } finally {
+      _reconcilingWeather = false;
+    }
+    return changed;
+  }
+
   bool _reconcileWaterTemperaturePrefill() {
     if (isEditMode ||
         _waterTemperatureManuallyEdited ||
         _reconcilingWaterTemperature) {
       return false;
     }
-    final observation = widget.initialWaterTemperatureObservation;
-    final applies =
+    final historical = widget.initialHistoricalWaterTemperature;
+    final historicalApplies =
         widget.allowAutomaticWaterTemperature &&
-        (observation?.appliesToRecord(
+        (historical?.appliesToRecord(
               startAt: startAt,
               locationName: locationController.text,
               latitude: double.tryParse(latitudeController.text),
               longitude: double.tryParse(longitudeController.text),
             ) ??
             false);
-    if (applies == _automaticWaterTemperature) return false;
+    final observation = widget.initialWaterTemperatureObservation;
+    final applies =
+        historicalApplies ||
+        (widget.allowAutomaticWaterTemperature &&
+            (observation?.appliesToRecord(
+                  startAt: startAt,
+                  locationName: locationController.text,
+                  latitude: double.tryParse(latitudeController.text),
+                  longitude: double.tryParse(longitudeController.text),
+                ) ??
+                false));
+    if (applies == _automaticWaterTemperature &&
+        historicalApplies == _automaticHistoricalWaterTemperature) {
+      return false;
+    }
 
     _reconcilingWaterTemperature = true;
     try {
       _automaticWaterTemperature = applies;
+      _automaticHistoricalWaterTemperature = historicalApplies;
       waterTemperatureController.text = applies
-          ? observation!.temperatureCelsius.toString()
+          ? (historicalApplies
+                    ? historical!.temperatureCelsius
+                    : observation!.temperatureCelsius)
+                .toString()
           : '';
     } finally {
       _reconcilingWaterTemperature = false;
@@ -675,6 +761,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     }
 
     _reconcileWeatherPrefill();
+    _reconcileHistoricalWeatherPrefill();
     _reconcileWaterTemperaturePrefill();
     final location = locationController.text.trim();
     final tide = tideController.text.trim();
@@ -1060,6 +1147,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
         '${twoDigits(dateTime.hour)}:${twoDigits(dateTime.minute)}';
   }
 
+  String _historicalObservationLabel(String station, DateTime observedAt) =>
+      '$station · 과거 관측 '
+      '${formatDateTime(observedAt.toUtc().add(const Duration(hours: 9)))} KST';
+
   Future<void> pickStartDateTime() async {
     if (_isSaving || _isPreparingEdit) return;
     final pickedDate = await showDatePicker(
@@ -1345,8 +1436,20 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   const Text('예보 시간대나 장소가 달라지면 자동 입력값이 해제됩니다.'),
                   const SizedBox(height: 8),
                 ],
+                if (_automaticHistoricalWeather ||
+                    _automaticHistoricalAirTemperature) ...[
+                  Text(
+                    _historicalObservationLabel(
+                      widget.initialHistoricalWeather!.station.name,
+                      widget.initialHistoricalWeather!.observedAt,
+                    ),
+                    key: const ValueKey('record-historical-weather-reference'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Text(
-                  '물때는 날짜와 위치에 따라 자동 입력되며 수정할 수 있습니다. 수온은 현재 위치·시간에 맞는 관측값이 있을 때 자동 입력됩니다. 조회되지 않은 값은 직접 입력하세요.',
+                  '물때는 날짜와 위치에 따라 자동 입력되며 수정할 수 있습니다. 수온은 기록의 위치·시간에 맞는 관측값이 있을 때 자동 입력됩니다. 조회되지 않은 값은 직접 입력하세요.',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
@@ -1383,9 +1486,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   key: const ValueKey('record-weather'),
                   controller: weatherController,
                   onChanged: (_) {
-                    if (_automaticWeather) {
-                      setState(() => _automaticWeather = false);
-                    }
+                    setState(() {
+                      _weatherManuallyEdited = true;
+                      _automaticWeather = false;
+                      _automaticHistoricalWeather = false;
+                    });
                   },
                   maxLength: FishingRecordValidator.maxWeatherLength,
                   decoration: const InputDecoration(
@@ -1400,9 +1505,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   key: const ValueKey('record-air-temperature'),
                   controller: airTemperatureController,
                   onChanged: (_) {
-                    if (_automaticAirTemperature) {
-                      setState(() => _automaticAirTemperature = false);
-                    }
+                    setState(() {
+                      _airTemperatureManuallyEdited = true;
+                      _automaticAirTemperature = false;
+                      _automaticHistoricalAirTemperature = false;
+                    });
                   },
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
@@ -1424,6 +1531,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                     setState(() {
                       _waterTemperatureManuallyEdited = true;
                       _automaticWaterTemperature = false;
+                      _automaticHistoricalWaterTemperature = false;
                     });
                   },
                   keyboardType: const TextInputType.numberWithOptions(
@@ -1434,7 +1542,17 @@ class _RecordFormPageState extends State<RecordFormPage> {
                     labelText: '수온 *',
                     hintText: '예: 16.2',
                     suffixText: '℃',
-                    helperText: _automaticWaterTemperature
+                    helperText: _automaticHistoricalWaterTemperature
+                        ? _historicalObservationLabel(
+                            widget
+                                .initialHistoricalWaterTemperature!
+                                .station
+                                .name,
+                            widget
+                                .initialHistoricalWaterTemperature!
+                                .observedAt,
+                          )
+                        : _automaticWaterTemperature
                         ? '${widget.initialWaterTemperatureObservation!.station.name} · 관측 '
                               '${formatDateTime(widget.initialWaterTemperatureObservation!.observedAt.toUtc().add(const Duration(hours: 9)))} KST (자동 입력)'
                         : null,

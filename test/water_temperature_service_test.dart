@@ -155,11 +155,256 @@ void main() {
 
   test('request day uses KST across the UTC date boundary', () async {
     now = DateTime.utc(2026, 11, 2, 15, 5);
-    adapter.respond = (_) => _success([_row(time: '00:00:00')]);
+    adapter.respond = (request) =>
+        request.queryParameters['reqDate'] == '20261103'
+        ? _success([_row(time: '00:00:00')])
+        : _error('03');
     final result = await service.fetchCurrentData(location: location);
-    expect(adapter.calls.single.queryParameters['reqDate'], '20261103');
+    expect(
+      adapter.calls.map((request) => request.queryParameters['reqDate']),
+      unorderedEquals(['20261103', '20261102']),
+    );
     expect(result.observedAt, DateTime.utc(2026, 11, 2, 15));
   });
+
+  test(
+    'midnight requests both KST days concurrently and selects newest valid sample',
+    () async {
+      now = DateTime.utc(2026, 11, 3, 15, 6); // November 4, 00:06 KST.
+      final today = Completer<Object>();
+      final yesterday = Completer<Object>();
+      adapter.respond = (request) =>
+          request.queryParameters['reqDate'] == '20261104'
+          ? today.future
+          : yesterday.future;
+      final pending = service.fetchCurrentData(location: location);
+      await adapter.started.future;
+      await Future<void>.delayed(Duration.zero);
+      final startedDays = adapter.calls
+          .map((request) => request.queryParameters['reqDate'])
+          .toSet();
+      today.complete(
+        _success([
+          _row(day: '2026-11-04', time: '00:01:23', temperature: 20),
+          _row(day: '2026-11-04', time: '00:06:01', temperature: 25),
+          _row(day: '2026-11-04', time: '00:05:00', temperature: -999),
+        ]),
+      );
+      yesterday.complete(
+        _success([
+          _row(time: '22:05:59', temperature: 30), // More than two hours old.
+          _row(time: '23:59:47', temperature: 19),
+        ]),
+      );
+      final result = await pending;
+      expect(startedDays, {'20261104', '20261103'});
+      expect(result.temperatureCelsius, 20);
+      expect(result.observedAt, DateTime.utc(2026, 11, 3, 15, 1, 23));
+      expect(result.isUsableAt(now), isTrue);
+      expect(adapter.calls, hasLength(2));
+    },
+  );
+
+  test(
+    'either day may fail if the other day has a fresh measurement',
+    () async {
+      now = DateTime.utc(2026, 11, 3, 15, 6);
+      for (final failingDay in ['20261104', '20261103']) {
+        for (final failure in ['timeout', 'noData', 'malformed', 'identity']) {
+          service = KhoaWaterTemperatureService(
+            dio: dio,
+            clock: () => now,
+            stations: const [_station, _second],
+            configuration: const KhoaWaterTemperatureConfiguration(
+              serviceKey: 'test',
+            ),
+          );
+          adapter.calls.clear();
+          adapter.respond = (request) {
+            final day = request.queryParameters['reqDate'];
+            if (day == failingDay) {
+              return switch (failure) {
+                'timeout' => throw DioException(
+                  requestOptions: request,
+                  type: DioExceptionType.receiveTimeout,
+                  message: 'test+ secret',
+                ),
+                'noData' => _error('03'),
+                'identity' => _success([
+                  {
+                    ..._row(
+                      day: day == '20261104' ? '2026-11-04' : '2026-11-03',
+                      time: day == '20261104' ? '00:01:23' : '23:59:47',
+                    ),
+                    'obsvtrNm': 'Wrong station',
+                  },
+                ]),
+                _ => 'not valid JSON test+ secret',
+              };
+            }
+            return _success([
+              _row(
+                day: day == '20261104' ? '2026-11-04' : '2026-11-03',
+                time: day == '20261104' ? '00:01:23' : '23:59:47',
+              ),
+            ]);
+          };
+          final result = await service.fetchCurrentData(location: location);
+          expect(
+            result.observedAt,
+            failingDay == '20261104'
+                ? DateTime.utc(2026, 11, 3, 14, 59, 47)
+                : DateTime.utc(2026, 11, 3, 15, 1, 23),
+            reason: '$failingDay $failure',
+          );
+          expect(result.station.code, _station.code);
+          expect(result.isUsableAt(now), isTrue);
+          expect(adapter.calls, hasLength(2));
+        }
+      }
+    },
+  );
+
+  test(
+    'midnight failure with no fresh sample surfaces without station fallback',
+    () async {
+      now = DateTime.utc(2026, 11, 3, 15, 6);
+      for (final failingDay in ['20261104', '20261103']) {
+        for (final (code, failure) in [
+          ('22', WaterTemperatureFailure.rateLimited),
+          ('05', WaterTemperatureFailure.timedOut),
+          ('10', WaterTemperatureFailure.invalidResponse),
+        ]) {
+          service = KhoaWaterTemperatureService(
+            dio: dio,
+            clock: () => now,
+            stations: const [_station, _second, _third],
+            configuration: const KhoaWaterTemperatureConfiguration(
+              serviceKey: 'test',
+            ),
+          );
+          adapter.calls.clear();
+          adapter.respond = (request) => _error(
+            request.queryParameters['reqDate'] == failingDay ? code : '03',
+          );
+          await expectLater(
+            service.fetchCurrentData(location: location),
+            _failure(failure),
+          );
+          expect(adapter.calls, hasLength(2));
+          expect(
+            adapter.calls.map((request) => request.queryParameters['obsCode']),
+            everyElement(_station.code),
+          );
+        }
+      }
+    },
+  );
+
+  test(
+    'midnight all-no-data fallback still stops after three stations',
+    () async {
+      now = DateTime.utc(2026, 11, 3, 15, 6);
+      service = KhoaWaterTemperatureService(
+        dio: dio,
+        clock: () => now,
+        stations: const [_fourth, _third, _second, _station],
+        configuration: const KhoaWaterTemperatureConfiguration(
+          serviceKey: 'test',
+        ),
+      );
+      adapter.respond = (_) => _error('03');
+      await expectLater(
+        service.fetchCurrentData(location: location),
+        _failure(WaterTemperatureFailure.noData),
+      );
+      expect(adapter.calls, hasLength(6));
+      for (final station in [_station, _second, _third]) {
+        expect(
+          adapter.calls
+              .where(
+                (request) => request.queryParameters['obsCode'] == station.code,
+              )
+              .map((request) => request.queryParameters['reqDate']),
+          unorderedEquals(['20261104', '20261103']),
+        );
+      }
+    },
+  );
+
+  test(
+    'previous day is queried before 02:00 KST and omitted from 02:00',
+    () async {
+      now = DateTime.utc(2026, 11, 3, 16, 59, 59); // 01:59:59 KST.
+      adapter.respond = (request) =>
+          request.queryParameters['reqDate'] == '20261103'
+          ? _success([_row(time: '23:59:59')])
+          : _error('03');
+      final result = await service.fetchCurrentData(location: location);
+      expect(result.observedAt, DateTime.utc(2026, 11, 3, 14, 59, 59));
+      expect(
+        result.isUsableAt(now),
+        isTrue,
+      ); // Exactly two hours remains valid.
+      expect(adapter.calls, hasLength(2));
+      now = now.add(const Duration(seconds: 1));
+      service = KhoaWaterTemperatureService(
+        dio: dio,
+        clock: () => now,
+        stations: const [_station],
+        configuration: const KhoaWaterTemperatureConfiguration(
+          serviceKey: 'test',
+        ),
+      );
+      adapter.calls.clear();
+      adapter.respond = (_) =>
+          _success([_row(day: '2026-11-04', time: '01:59:59')]);
+      await service.fetchCurrentData(location: location);
+      expect(adapter.calls.single.queryParameters['reqDate'], '20261104');
+    },
+  );
+
+  test(
+    'both day requests reuse in-flight work and caches across midnight',
+    () async {
+      now = DateTime.utc(2026, 11, 3, 14, 59); // 23:59 KST.
+      final yesterday = Completer<Object>();
+      final today = Completer<Object>();
+      adapter.respond = (request) =>
+          request.queryParameters['reqDate'] == '20261103'
+          ? yesterday.future
+          : today.future;
+      final first = service.fetchCurrentData(location: location);
+      await adapter.started.future;
+      now = now.add(const Duration(minutes: 2)); // 00:01 KST.
+      final otherLocation = MapLocation(
+        name: 'Another spot',
+        latitude: 35.0001,
+        longitude: 127,
+      );
+      final second = service.fetchCurrentData(location: otherLocation);
+      await Future<void>.delayed(Duration.zero);
+      yesterday.complete(_success([_row(time: '23:58:37')]));
+      today.complete(
+        _success([_row(day: '2026-11-04', time: '00:00:23', temperature: 20)]),
+      );
+      final results = await Future.wait([first, second]);
+      expect(adapter.calls, hasLength(2));
+      expect(
+        adapter.calls.map((request) => request.queryParameters['reqDate']),
+        unorderedEquals(['20261103', '20261104']),
+      );
+      expect(results[0].observedAt, DateTime.utc(2026, 11, 3, 14, 58, 37));
+      expect(results[0].matchesLocation(location), isTrue);
+      expect(results[1].observedAt, DateTime.utc(2026, 11, 3, 15, 0, 23));
+      expect(results[1].matchesLocation(otherLocation), isTrue);
+      now = now.add(const Duration(minutes: 1));
+      final cached = await service.fetchCurrentData(location: location);
+      expect(cached.observedAt, results[1].observedAt);
+      expect(cached.matchesLocation(location), isTrue);
+      expect(adapter.calls, hasLength(2));
+    },
+  );
 
   test(
     'missing, nonfinite, sentinel, stale and future readings stay unavailable',
@@ -476,13 +721,14 @@ Matcher _failure(WaterTemperatureFailure reason) => throwsA(
 // Official 15142506 guide fields; local fixtures never call a live API.
 Map<String, Object?> _row({
   WaterTemperatureStation station = _station,
+  String day = '2026-11-03',
   String time = '11:50:00',
   Object? temperature = 18.5,
 }) => {
   'obsvtrNm': station.name,
   'lat': station.latitude,
   'lot': station.longitude,
-  'obsrvnDt': '2026-11-03 $time',
+  'obsrvnDt': '$day $time',
   'wtem': temperature,
 };
 

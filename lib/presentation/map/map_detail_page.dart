@@ -72,8 +72,12 @@ class MapDetailPage extends StatelessWidget {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) =>
-                        MapHistoryPage(selectedLocation: selectedLocation),
+                    builder: (_) => MapHistoryPage(
+                      selectedLocation: selectedLocation,
+                      latitude: latitude,
+                      longitude: longitude,
+                      waterArea: waterArea,
+                    ),
                   ),
                 );
               },

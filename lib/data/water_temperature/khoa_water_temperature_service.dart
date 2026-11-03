@@ -1,10 +1,8 @@
-import 'dart:async';
-import 'dart:convert';
-
 import 'package:dio/dio.dart';
 
 import '../maps/map_location.dart';
 import 'khoa_water_temperature_configuration.dart';
+import 'khoa_water_temperature_day_client.dart';
 import 'khoa_water_temperature_stations.dart';
 import 'water_temperature_models.dart';
 import 'water_temperature_service.dart';
@@ -21,9 +19,14 @@ class KhoaWaterTemperatureService implements WaterTemperatureService {
     this.cacheTtl = const Duration(minutes: 10),
     this.requestTimeout = const Duration(seconds: 12),
     this.maxCachedEntries = 64,
-  }) : _dio = dio ?? Dio(),
-       _clock = clock ?? DateTime.now,
-       _stations = List.unmodifiable(stations) {
+  }) : _clock = clock ?? DateTime.now,
+       _stations = List.unmodifiable(stations),
+       _dayClient = KhoaWaterTemperatureDayClient(
+         dio: dio ?? Dio(),
+         clock: clock ?? DateTime.now,
+         configuration: configuration,
+         requestTimeout: requestTimeout,
+       ) {
     if (cacheTtl <= Duration.zero ||
         requestTimeout <= Duration.zero ||
         maxCachedEntries < 1) {
@@ -45,12 +48,9 @@ class KhoaWaterTemperatureService implements WaterTemperatureService {
 
   static final KhoaWaterTemperatureService instance =
       KhoaWaterTemperatureService();
-  static const _pageSize = 300;
-  static const _maxPages = 5;
-  static const _maxResponseBytes = 512 * 1024;
   static const _maxStationDistanceKm = 50;
   static const _maxStations = 3;
-  final Dio _dio;
+  final KhoaWaterTemperatureDayClient _dayClient;
   final DateTime Function() _clock;
   final List<WaterTemperatureStation> _stations;
   final KhoaWaterTemperatureConfiguration configuration;
@@ -100,11 +100,12 @@ class KhoaWaterTemperatureService implements WaterTemperatureService {
       );
     }
     final now = _clock().toUtc();
-    final day = _kstDay(now);
+    final day = KhoaWaterTemperatureDayClient.kstDay(now);
     for (final station in nearest.take(_maxStations)) {
       try {
-        final reading = await _fetchStation(
+        final reading = await _fetchRecentStation(
           station,
+          now,
           day,
           serviceKey,
           forceRefresh,
@@ -125,6 +126,71 @@ class KhoaWaterTemperatureService implements WaterTemperatureService {
         if (error.reason != WaterTemperatureFailure.noData) rethrow;
       }
     }
+    throw const WaterTemperatureException(WaterTemperatureFailure.noData);
+  }
+
+  Future<_Reading> _fetchRecentStation(
+    WaterTemperatureStation station,
+    DateTime now,
+    String day,
+    String serviceKey,
+    bool forceRefresh,
+  ) async {
+    final earlierDay = KhoaWaterTemperatureDayClient.kstDay(
+      now.subtract(WaterTemperatureObservation.maxObservationAge),
+    );
+    if (earlierDay == day) {
+      return _fetchStation(station, day, serviceKey, forceRefresh);
+    }
+
+    // Just after KST midnight the latest usable sample can still belong to the
+    // previous day. Query both parts of the freshness window through the same
+    // bounded cache instead of treating an unpublished new day as no sensor.
+    Future<({_Reading? reading, WaterTemperatureException? failure})> attempt(
+      String requestedDay,
+    ) async {
+      try {
+        return (
+          reading: await _fetchStation(
+            station,
+            requestedDay,
+            serviceKey,
+            forceRefresh,
+          ),
+          failure: null,
+        );
+      } on Object catch (error) {
+        return (
+          reading: null,
+          failure: error is WaterTemperatureException
+              ? error
+              : const WaterTemperatureException(
+                  WaterTemperatureFailure.invalidResponse,
+                ),
+        );
+      }
+    }
+
+    final results = await Future.wait([attempt(day), attempt(earlierDay)]);
+    _Reading? latest;
+    WaterTemperatureException? failure;
+    for (final result in results) {
+      final reading = result.reading;
+      if (reading != null) {
+        final age = _clock().toUtc().difference(reading.observedAt);
+        if (!age.isNegative &&
+            age <= WaterTemperatureObservation.maxObservationAge &&
+            (latest == null || reading.observedAt.isAfter(latest.observedAt))) {
+          latest = reading;
+        }
+      }
+      final error = result.failure;
+      if (error != null && error.reason != WaterTemperatureFailure.noData) {
+        failure ??= error;
+      }
+    }
+    if (latest != null) return latest;
+    if (failure != null) throw failure;
     throw const WaterTemperatureException(WaterTemperatureFailure.noData);
   }
 
@@ -156,40 +222,12 @@ class KhoaWaterTemperatureService implements WaterTemperatureService {
     String serviceKey,
   ) async {
     try {
-      final rows = <Map>[];
-      int? expectedTotal;
-      for (var pageNo = 1; pageNo <= _maxPages; pageNo++) {
-        final page = await _request(station, day, serviceKey, pageNo);
-        if (page.totalCount != null) {
-          if (expectedTotal != null && expectedTotal != page.totalCount) {
-            throw const WaterTemperatureException(
-              WaterTemperatureFailure.invalidResponse,
-            );
-          }
-          expectedTotal = page.totalCount;
-        }
-        if (expectedTotal != null && expectedTotal > _pageSize * _maxPages) {
-          throw const WaterTemperatureException(
-            WaterTemperatureFailure.invalidResponse,
-          );
-        }
-        rows.addAll(page.rows);
-        if (expectedTotal != null && rows.length > expectedTotal) {
-          throw const WaterTemperatureException(
-            WaterTemperatureFailure.invalidResponse,
-          );
-        }
-        final finished = expectedTotal != null
-            ? rows.length == expectedTotal
-            : page.rows.length < _pageSize;
-        if (finished) break;
-        if (page.rows.isEmpty || pageNo == _maxPages) {
-          throw const WaterTemperatureException(
-            WaterTemperatureFailure.invalidResponse,
-          );
-        }
-      }
-      final reading = _latestReading(rows, station, day);
+      final data = await _dayClient.fetchDay(
+        station: station,
+        day: day,
+        serviceKey: serviceKey,
+      );
+      final reading = _latestReading(data);
       _putCache(key, _CacheEntry(reading, reading.fetchedAt));
       return reading;
     } on WaterTemperatureException catch (error) {
@@ -210,324 +248,27 @@ class KhoaWaterTemperatureService implements WaterTemperatureService {
     }
   }
 
-  Future<_Page> _request(
-    WaterTemperatureStation station,
-    String day,
-    String serviceKey,
-    int pageNo,
-  ) async {
-    final cancellation = CancelToken();
-    try {
-      final (
-        body,
-        status,
-      ) = await _send(station, day, serviceKey, pageNo, cancellation).timeout(
-        requestTimeout,
-        onTimeout: () {
-          cancellation.cancel();
-          throw const WaterTemperatureException(
-            WaterTemperatureFailure.timedOut,
-          );
-        },
-      );
-      final providerFailure = _providerFailure(body);
-      if (providerFailure != null) {
-        throw WaterTemperatureException(providerFailure);
-      }
-      final httpFailure = _httpFailure(status);
-      if (httpFailure != null) throw WaterTemperatureException(httpFailure);
-      return _parsePage(body, pageNo);
-    } on WaterTemperatureException {
-      rethrow;
-    } on DioException catch (error) {
-      final reason = switch (error.type) {
-        DioExceptionType.connectionTimeout ||
-        DioExceptionType.sendTimeout ||
-        DioExceptionType.receiveTimeout => WaterTemperatureFailure.timedOut,
-        _ =>
-          _httpFailure(error.response?.statusCode) ??
-              WaterTemperatureFailure.network,
-      };
-      throw WaterTemperatureException(reason);
-    } on TimeoutException {
-      throw const WaterTemperatureException(WaterTemperatureFailure.timedOut);
-    } on Object {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-  }
-
-  Future<(String, int?)> _send(
-    WaterTemperatureStation station,
-    String day,
-    String serviceKey,
-    int pageNo,
-    CancelToken cancellation,
-  ) async {
-    final response = await _dio.get<ResponseBody>(
-      configuration.endpoint,
-      queryParameters: {
-        'serviceKey': serviceKey,
-        'obsCode': station.code,
-        'reqDate': day,
-        'type': 'json',
-        // KHOA documents this as the output time interval in minutes.
-        'min': '10',
-        'pageNo': '$pageNo',
-        'numOfRows': '$_pageSize',
-      },
-      cancelToken: cancellation,
-      options: Options(
-        responseType: ResponseType.stream,
-        sendTimeout: requestTimeout,
-        receiveTimeout: requestTimeout,
-        followRedirects: false,
-        maxRedirects: 0,
-        validateStatus: (_) => true,
-      ),
-    );
-    final responseBody = response.data;
-    if (responseBody == null) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    final bytes = <int>[];
-    await for (final chunk in responseBody.stream) {
-      if (bytes.length + chunk.length > _maxResponseBytes) {
-        cancellation.cancel();
-        throw const WaterTemperatureException(
-          WaterTemperatureFailure.invalidResponse,
-        );
-      }
-      bytes.addAll(chunk);
-    }
-    return (utf8.decode(bytes), response.statusCode);
-  }
-
-  static WaterTemperatureFailure? _httpFailure(int? status) {
-    if (status == 401 || status == 403) {
-      return WaterTemperatureFailure.unauthorized;
-    }
-    if (status == 429) return WaterTemperatureFailure.rateLimited;
-    if (status != null && status >= 500) return WaterTemperatureFailure.network;
-    if (status != null && (status < 200 || status >= 300)) {
-      return WaterTemperatureFailure.invalidResponse;
-    }
-    return null;
-  }
-
-  static WaterTemperatureFailure _apiFailure(String code) =>
-      switch (code.trim().padLeft(2, '0')) {
-        '03' || '40' || '41' => WaterTemperatureFailure.noData,
-        '20' ||
-        '21' ||
-        '30' ||
-        '31' ||
-        '32' ||
-        '33' => WaterTemperatureFailure.unauthorized,
-        '22' || '23' => WaterTemperatureFailure.rateLimited,
-        '05' => WaterTemperatureFailure.timedOut,
-        '01' || '02' || '04' => WaterTemperatureFailure.network,
-        _ => WaterTemperatureFailure.invalidResponse,
-      };
-
-  static WaterTemperatureFailure? _providerFailure(String body) {
-    try {
-      if (body.trimLeft().startsWith('<')) {
-        String field(String name) =>
-            RegExp(
-              '<$name(?:\\s[^>]*)?>([\\s\\S]*?)</$name>',
-              caseSensitive: false,
-            ).firstMatch(body)?.group(1)?.trim() ??
-            '';
-        final gatewayCode = field('returnReasonCode');
-        final code = gatewayCode.isEmpty ? field('resultCode') : gatewayCode;
-        if (code.isEmpty || code.padLeft(2, '0') == '00') return null;
-        return _apiFailure(code);
-      }
-      final decoded = jsonDecode(body);
-      if (decoded is! Map) return null;
-      final root = decoded['response'] ?? decoded;
-      if (root is! Map || root['header'] is! Map) return null;
-      final code = (root['header'] as Map)['resultCode']?.toString().trim();
-      if (code == null || code.padLeft(2, '0') == '00') return null;
-      return _apiFailure(code);
-    } on Object {
-      return null;
-    }
-  }
-
-  static _Page _parsePage(String body, int requestedPage) {
-    final decoded = jsonDecode(body);
-    if (decoded is! Map) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    final root = decoded['response'] ?? decoded;
-    if (root is! Map || root['header'] is! Map || root['body'] is! Map) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    final header = root['header'] as Map;
-    if (header['resultCode']?.toString().trim().padLeft(2, '0') != '00') {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    final data = root['body'] as Map;
-    final total = _optionalInt(data, 'totalCount', minimum: 0);
-    final page = _optionalInt(data, 'pageNo', minimum: 1);
-    final size = _optionalInt(data, 'numOfRows', minimum: 0);
-    if ((page != null && page != requestedPage) ||
-        (size != null && size > _pageSize)) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    Object? items = data['items'];
-    if (items is Map && items.containsKey('item')) items = items['item'];
-    if (items == null ||
-        items == '' ||
-        (items is List && items.isEmpty) ||
-        (items is Map && items.isEmpty)) {
-      if (total != 0) {
-        throw const WaterTemperatureException(
-          WaterTemperatureFailure.invalidResponse,
-        );
-      }
-      return _Page(const [], total);
-    }
-    final List list;
-    if (items is List) {
-      list = items;
-    } else if (items is Map && items.containsKey('obsrvnDt')) {
-      list = [items];
-    } else {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    if (list.length > _pageSize || list.any((item) => item is! Map)) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    return _Page(list.cast<Map>(), total);
-  }
-
-  static int? _optionalInt(Map data, String key, {required int minimum}) {
-    if (!data.containsKey(key)) return null;
-    final text = data[key].toString();
-    final value = RegExp(r'^\d+$').hasMatch(text) ? int.tryParse(text) : null;
-    if (value == null || value < minimum) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    return value;
-  }
-
-  _Reading _latestReading(
-    List<Map> rows,
-    WaterTemperatureStation station,
-    String day,
-  ) {
+  _Reading _latestReading(KhoaWaterTemperatureDay data) {
     final now = _clock().toUtc();
-    final readings = <DateTime, double>{};
-    for (final row in rows) {
-      final latitude = _number(row['lat']);
-      final longitude = _number(row['lot']);
-      if (row['obsvtrNm']?.toString().trim() != station.name ||
-          latitude == null ||
-          longitude == null ||
-          latitude.abs() > 90 ||
-          longitude.abs() > 180 ||
-          station.distanceKmTo(latitude, longitude) > 1 ||
-          (row.containsKey('obsCode') && row['obsCode'] != station.code)) {
-        throw const WaterTemperatureException(
-          WaterTemperatureFailure.invalidResponse,
-        );
-      }
-      final temperature = _number(row['wtem']);
-      // Missing sensor values, sentinels, and physically invalid temperatures
-      // cannot become observations; a measured zero remains valid.
-      if (temperature == null || temperature < -5 || temperature > 45) continue;
-      final observedAt = _parseKst(row['obsrvnDt']);
-      if (_kstDay(observedAt) != day) {
-        throw const WaterTemperatureException(
-          WaterTemperatureFailure.invalidResponse,
-        );
-      }
-      final age = now.difference(observedAt);
+    KhoaWaterTemperatureSample? latest;
+    for (final sample in data.samples) {
+      final age = now.difference(sample.observedAt);
       if (age.isNegative ||
           age > WaterTemperatureObservation.maxObservationAge) {
         continue;
       }
-      final previous = readings[observedAt];
-      if (previous != null && previous != temperature) {
-        throw const WaterTemperatureException(
-          WaterTemperatureFailure.invalidResponse,
-        );
+      if (latest == null || sample.observedAt.isAfter(latest.observedAt)) {
+        latest = sample;
       }
-      readings[observedAt] = temperature;
     }
-    if (readings.isEmpty) {
+    if (latest == null) {
       throw const WaterTemperatureException(WaterTemperatureFailure.noData);
     }
-    final latest = readings.keys.reduce((a, b) => a.isAfter(b) ? a : b);
-    return _Reading(readings[latest]!, latest, now);
-  }
-
-  static double? _number(Object? raw) {
-    final value = raw is num ? raw.toDouble() : double.tryParse('$raw');
-    return value != null && value.isFinite ? value : null;
-  }
-
-  static String _kstDay(DateTime instant) {
-    final day = instant.toUtc().add(const Duration(hours: 9));
-    return '${day.year.toString().padLeft(4, '0')}'
-        '${day.month.toString().padLeft(2, '0')}'
-        '${day.day.toString().padLeft(2, '0')}';
-  }
-
-  static DateTime _parseKst(Object? raw) {
-    final match = raw is String
-        ? RegExp(
-            r'^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$',
-          ).firstMatch(raw.trim())
-        : null;
-    if (match == null) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    final parts = [
-      for (var index = 1; index <= 6; index++)
-        int.parse(match.group(index) ?? '0'),
-    ];
-    final wallTime = DateTime.utc(
-      parts[0],
-      parts[1],
-      parts[2],
-      parts[3],
-      parts[4],
-      parts[5],
+    return _Reading(
+      latest.temperatureCelsius,
+      latest.observedAt,
+      data.fetchedAt,
     );
-    if (wallTime.year != parts[0] ||
-        wallTime.month != parts[1] ||
-        wallTime.day != parts[2] ||
-        wallTime.hour != parts[3] ||
-        wallTime.minute != parts[4] ||
-        wallTime.second != parts[5]) {
-      throw const WaterTemperatureException(
-        WaterTemperatureFailure.invalidResponse,
-      );
-    }
-    return wallTime.subtract(const Duration(hours: 9));
   }
 }
 
@@ -544,10 +285,4 @@ class _CacheEntry {
   const _CacheEntry(this.reading, this.fetchedAt);
   final _Reading? reading;
   final DateTime fetchedAt;
-}
-
-class _Page {
-  const _Page(this.rows, this.totalCount);
-  final List<Map> rows;
-  final int? totalCount;
 }

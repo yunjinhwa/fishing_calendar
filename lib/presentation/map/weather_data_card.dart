@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../data/history/historical_conditions.dart';
 import '../../data/maps/water_area.dart';
 import '../../data/models/external_data.dart';
 import '../../data/tides/tide_name.dart';
@@ -14,6 +15,8 @@ class WeatherDataCard extends StatelessWidget {
     this.embedded = false,
     this.marineControls,
     this.waterTemperatureObservation,
+    this.historicalWeather,
+    this.historicalWaterTemperature,
   });
 
   final ExternalData? data;
@@ -22,6 +25,8 @@ class WeatherDataCard extends StatelessWidget {
   final bool embedded;
   final Widget? marineControls;
   final WaterTemperatureObservation? waterTemperatureObservation;
+  final HistoricalWeatherObservation? historicalWeather;
+  final HistoricalWaterTemperatureObservation? historicalWaterTemperature;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +37,13 @@ class WeatherDataCard extends StatelessWidget {
         const spacing = 12.0;
         final width =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
-        final weather = data?.weather?.trim();
+        final history = historicalWeather;
+        final weather = (history == null ? data?.weather : history.weather)
+            ?.trim();
+        final historicalWater = historicalWaterTemperature;
+        final archivedWater = historicalWater?.hasValidData == true
+            ? historicalWater
+            : null;
         final observation = waterTemperatureObservation;
         final measured = observation?.isUsableAt(DateTime.now()) == true
             ? observation
@@ -47,6 +58,10 @@ class WeatherDataCard extends StatelessWidget {
                 icon: Icons.cloud_outlined,
                 label: '날씨',
                 value: weather == null || weather.isEmpty ? '제공되지 않음' : weather,
+                detail: history == null
+                    ? null
+                    : '${history.station.name} · '
+                          '${formatWeatherTime(history.observedAt)} 관측',
               ),
             ),
             SizedBox(
@@ -54,7 +69,11 @@ class WeatherDataCard extends StatelessWidget {
               child: _WeatherValue(
                 icon: Icons.thermostat_outlined,
                 label: '기온',
-                value: _temperature(data?.airTemperature),
+                value: _temperature(
+                  history == null
+                      ? data?.airTemperature
+                      : history.airTemperature,
+                ),
               ),
             ),
             if (waterArea.providesMarineData) ...[
@@ -73,8 +92,15 @@ class WeatherDataCard extends StatelessWidget {
                 child: _WeatherValue(
                   icon: Icons.water_drop_outlined,
                   label: '수온',
-                  value: _temperature(measured?.temperatureCelsius),
-                  detail: measured == null
+                  value: _temperature(
+                    historicalWater == null
+                        ? measured?.temperatureCelsius
+                        : archivedWater?.temperatureCelsius,
+                  ),
+                  detail: archivedWater != null
+                      ? '${archivedWater.station.name} · '
+                            '${formatWeatherTime(archivedWater.observedAt)} 관측'
+                      : measured == null || historicalWater != null
                       ? null
                       : '${measured.station.name} · '
                             '${formatWeatherTime(measured.observedAt)} 관측',
