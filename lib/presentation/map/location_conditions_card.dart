@@ -4,6 +4,7 @@ import '../../data/maps/water_area.dart';
 import '../../data/models/external_data.dart';
 import '../../data/tides/tide_models.dart';
 import '../../data/tides/tide_name.dart';
+import '../../data/water_temperature/water_temperature_models.dart';
 import 'tide_data_card.dart';
 import 'weather_data_card.dart';
 
@@ -23,6 +24,10 @@ class LocationConditionsCard extends StatelessWidget {
     this.waterAreaSelector,
     this.tideControls,
     this.compact = false,
+    this.waterTemperatureObservation,
+    this.waterTemperatureLoading = false,
+    this.waterTemperatureError,
+    this.onRetryWaterTemperature,
   });
 
   final WaterArea waterArea;
@@ -38,6 +43,10 @@ class LocationConditionsCard extends StatelessWidget {
   final Widget? waterAreaSelector;
   final Widget? tideControls;
   final bool compact;
+  final WaterTemperatureObservation? waterTemperatureObservation;
+  final bool waterTemperatureLoading;
+  final String? waterTemperatureError;
+  final VoidCallback? onRetryWaterTemperature;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -64,12 +73,24 @@ class LocationConditionsCard extends StatelessWidget {
             waterArea: waterArea,
             tideName: tideName,
             marineControls: tideControls,
+            waterTemperatureObservation: waterTemperatureObservation,
           ),
           if (weatherError != null) ...[
             const SizedBox(height: 8),
             _ConditionError(label: '날씨 다시 조회', onRetry: onRetryWeather),
           ],
           if (waterArea.providesMarineData) ...[
+            if (waterTemperatureLoading) ...[
+              const SizedBox(height: 8),
+              const LinearProgressIndicator(
+                key: ValueKey('water-temperature-loading'),
+              ),
+            ],
+            if (waterTemperatureError != null)
+              _ConditionError(
+                label: '수온 다시 조회',
+                onRetry: onRetryWaterTemperature,
+              ),
             const SizedBox(height: 16),
             const Divider(height: 1),
             const SizedBox(height: 16),
