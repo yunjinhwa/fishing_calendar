@@ -49,7 +49,9 @@ class _MapHistoryPageState extends State<MapHistoryPage> {
                 children: [
                   Text('과거 날씨 조회는 아직 지원하지 않습니다.'),
                   SizedBox(height: 8),
-                  Text('과거 날짜의 날씨·기온과 물때·수온은 기록 작성 화면에서 직접 입력해 주세요.'),
+                  Text(
+                    '과거 날씨·기온과 수온은 기록 작성 화면에서 직접 입력해 주세요. 지도 조석 영역에서 날짜를 선택하면 자동 계산한 물때와 만조·간조 예보를 확인할 수 있습니다. 물때는 기록에서 수정할 수 있습니다.',
+                  ),
                 ],
               ),
             ),

@@ -7,17 +7,24 @@ import '../../data/maps/geolocator_current_location_gateway.dart';
 import '../../data/maps/kakao_map_configuration.dart';
 import '../../data/maps/map_location.dart';
 import '../../data/maps/map_search_gateway.dart';
+import '../../data/maps/open_map_water_service.dart';
+import '../../data/maps/water_area.dart';
+import '../../data/maps/water_area_service.dart';
 import '../../data/models/external_data.dart';
 import '../../data/services/external_data_service.dart';
 import '../../data/services/kma_weather_service.dart';
 import '../../data/services/network_status_service.dart';
+import '../../data/tides/tide_models.dart';
+import '../../data/tides/tide_name.dart';
+import '../../data/tides/tide_service.dart';
+import '../../data/tides/tide_station_catalog.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import 'kakao_map_canvas.dart';
 import 'map_detail_page.dart';
 import 'map_fallback_page.dart';
 import 'map_selection_controller.dart';
-import 'weather_data_card.dart';
+import 'tide_panel.dart';
 
 typedef MapCanvasBuilder =
     Widget Function(
@@ -34,6 +41,9 @@ class MapPage extends StatefulWidget {
     this.configuration = const KakaoMapConfiguration(),
     this.mapBuilder,
     this.externalDataService,
+    this.tideService,
+    this.tideStations,
+    this.waterAreaService,
   });
 
   final bool isActive;
@@ -41,6 +51,9 @@ class MapPage extends StatefulWidget {
   final KakaoMapConfiguration configuration;
   final MapCanvasBuilder? mapBuilder;
   final ExternalDataService? externalDataService;
+  final TideService? tideService;
+  final TideStationCatalog? tideStations;
+  final WaterAreaService? waterAreaService;
 
   @override
   State<MapPage> createState() => _MapPageState();
@@ -51,15 +64,25 @@ class _MapPageState extends State<MapPage> {
   final _network = NetworkStatusService.instance;
   late final MapSelectionController _controller;
   late final ExternalDataService _externalService;
+  late final WaterAreaService _waterAreaService;
   MapLocation? _observedSelection;
   MapLocation? _externalRequestedFor;
   ExternalData? _externalData;
+  TideRecordReference? _tideReference;
+  TideName? _tideName;
   String? _externalError;
   bool _loadingExternal = false;
   int _externalRevision = 0;
   int _mapAttempt = 0;
   int _locationEntryRevision = 0;
   bool _wasDisconnected = false;
+  WaterArea _detectedWaterArea = WaterArea.unknown;
+  WaterArea? _waterAreaOverride;
+  bool _classifyingWaterArea = false;
+  int _waterAreaRevision = 0;
+  MapLocation? _waterAreaRequestedFor;
+
+  WaterArea get _waterArea => _waterAreaOverride ?? _detectedWaterArea;
 
   @override
   void initState() {
@@ -70,7 +93,9 @@ class _MapPageState extends State<MapPage> {
           locationGateway: GeolocatorCurrentLocationGateway(),
         );
     _externalService = widget.externalDataService ?? KmaWeatherService.instance;
+    _waterAreaService = widget.waterAreaService ?? OpenMapWaterService.instance;
     _observedSelection = _controller.selection;
+    _tideName = _defaultTideName(_controller.selection);
     _wasDisconnected = _network.isDisconnected;
     _controller.addListener(_onSelectionChanged);
     _network.addListener(_onNetworkChanged);
@@ -82,6 +107,11 @@ class _MapPageState extends State<MapPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isActive == widget.isActive) return;
     if (!widget.isActive) {
+      _tideReference = null;
+      _tideName = null;
+      _waterAreaRevision++;
+      _classifyingWaterArea = false;
+      _waterAreaRequestedFor = null;
       _locationEntryRevision++;
       _externalRevision++;
       _loadingExternal = false;
@@ -89,6 +119,7 @@ class _MapPageState extends State<MapPage> {
       _controller.cancelPendingLocation();
       _controller.setGateway(null);
     } else {
+      _tideName = _defaultTideName(_controller.selection);
       _locateOnEntry();
     }
   }
@@ -104,6 +135,7 @@ class _MapPageState extends State<MapPage> {
         return;
       }
       await _fetchExternalData();
+      await _classifyWaterArea();
     });
   }
 
@@ -114,6 +146,13 @@ class _MapPageState extends State<MapPage> {
       _observedSelection = selection;
       _externalRevision++;
       _externalData = null;
+      _tideReference = null;
+      _waterAreaRevision++;
+      _waterAreaRequestedFor = null;
+      _detectedWaterArea = WaterArea.unknown;
+      _waterAreaOverride = null;
+      _classifyingWaterArea = false;
+      _tideName = _defaultTideName(selection, day: _tideName?.day);
       _externalError = null;
       _loadingExternal = false;
     }
@@ -123,7 +162,23 @@ class _MapPageState extends State<MapPage> {
         !_controller.isResolving &&
         !identical(selection, _externalRequestedFor)) {
       unawaited(_fetchExternalData());
+      unawaited(_classifyWaterArea());
     }
+  }
+
+  // The weather card can enter the viewport before the lazy tide panel does.
+  // Calculate the default locally so its tide value does not depend on scrolling.
+  TideName? _defaultTideName(MapLocation location, {TideDay? day}) {
+    if (!_waterArea.providesMarineData) return null;
+    final stations = (widget.tideStations ?? TideStationCatalog()).nearby(
+      location,
+      limit: 1,
+    );
+    if (stations.isEmpty) return null;
+    return TideName.calculate(
+      day: day ?? TideDay.fromInstant(DateTime.now()),
+      station: stations.first,
+    );
   }
 
   void _onNetworkChanged() {
@@ -137,6 +192,66 @@ class _MapPageState extends State<MapPage> {
     });
     if (recovered && widget.isActive) {
       unawaited(_fetchExternalData(force: true));
+      if (_detectedWaterArea == WaterArea.unknown) {
+        _waterAreaRequestedFor = null;
+      }
+      unawaited(_classifyWaterArea());
+    }
+  }
+
+  Future<void> _classifyWaterArea({bool force = false}) async {
+    if (!widget.isActive ||
+        _controller.isLocating ||
+        _controller.isResolving ||
+        _waterAreaOverride != null ||
+        _network.isDisconnected) {
+      return;
+    }
+    final location = _controller.selection;
+    if (!force && identical(location, _waterAreaRequestedFor)) return;
+    _waterAreaRequestedFor = location;
+    final revision = ++_waterAreaRevision;
+    if (!location.hasCoordinates) {
+      setState(() {
+        _detectedWaterArea = WaterArea.unknown;
+        _classifyingWaterArea = false;
+        _tideName = null;
+        _tideReference = null;
+      });
+      return;
+    }
+    setState(() => _classifyingWaterArea = true);
+    WaterArea area;
+    try {
+      area = await _waterAreaService.classify(location, forceRefresh: force);
+    } on Object {
+      area = WaterArea.unknown;
+    }
+    if (!mounted ||
+        !widget.isActive ||
+        revision != _waterAreaRevision ||
+        !identical(location, _controller.selection)) {
+      return;
+    }
+    setState(() {
+      _detectedWaterArea = area;
+      _classifyingWaterArea = false;
+      _tideName = _defaultTideName(location, day: _tideName?.day);
+      if (!area.providesMarineData) _tideReference = null;
+    });
+  }
+
+  void _chooseWaterArea(WaterArea? area) {
+    setState(() {
+      _waterAreaRevision++;
+      _waterAreaOverride = area;
+      _classifyingWaterArea = false;
+      _tideReference = null;
+      _tideName = _defaultTideName(_controller.selection, day: _tideName?.day);
+    });
+    if (area == null) {
+      _waterAreaRequestedFor = null;
+      unawaited(_classifyWaterArea());
     }
   }
 
@@ -215,6 +330,8 @@ class _MapPageState extends State<MapPage> {
           initialLatitude: location.latitude,
           initialLongitude: location.longitude,
           initialExternalData: data,
+          initialTideReference: _tideReference,
+          allowAutomaticTide: _waterArea.providesMarineData,
         ),
       ),
     );
@@ -222,6 +339,7 @@ class _MapPageState extends State<MapPage> {
 
   @override
   void dispose() {
+    _waterAreaRevision++;
     _locationEntryRevision++;
     _externalRevision++;
     _network.removeListener(_onNetworkChanged);
@@ -386,11 +504,59 @@ class _MapPageState extends State<MapPage> {
                 ),
               ),
             ),
-            _ExternalDataCard(
-              externalData: _externalData,
-              isLoading: _loadingExternal,
-              errorMessage: _externalError,
-              onRetry: () => unawaited(_fetchExternalData(force: true)),
+            TidePanel(
+              key: const ValueKey('map-tide-panel'),
+              location: selected,
+              isActive: widget.isActive && !choosing,
+              service: widget.tideService,
+              catalog: widget.tideStations,
+              waterArea: _waterArea,
+              waterAreaSelector: _WaterAreaSelector(
+                detected: _detectedWaterArea,
+                areaOverride: _waterAreaOverride,
+                isLoading: _classifyingWaterArea,
+                onChanged: _chooseWaterArea,
+                onRetry: () => unawaited(_classifyWaterArea(force: true)),
+              ),
+              weatherData: choosing ? null : _externalData,
+              weatherLoading: widget.isActive && _loadingExternal,
+              weatherError: _externalError,
+              onRetryWeather: () => unawaited(_fetchExternalData(force: true)),
+              onTideNameChanged: (name) {
+                if (!mounted) return;
+                final current = _controller.selection;
+                if (name != null &&
+                    (!_waterArea.providesMarineData ||
+                        !widget.isActive ||
+                        _controller.isLocating ||
+                        _controller.isResolving ||
+                        selected.name != current.name ||
+                        selected.latitude != current.latitude ||
+                        selected.longitude != current.longitude)) {
+                  return;
+                }
+                if (_tideName?.day == name?.day &&
+                    _tideName?.station.code == name?.station.code) {
+                  return;
+                }
+                setState(() => _tideName = name);
+              },
+              onReferenceChanged: (reference) {
+                if (!mounted) return;
+                final current = _controller.selection;
+                if (reference != null &&
+                    (!_waterArea.providesMarineData ||
+                        !widget.isActive ||
+                        _controller.isLocating ||
+                        _controller.isResolving ||
+                        reference.location.name != current.name ||
+                        reference.location.latitude != current.latitude ||
+                        reference.location.longitude != current.longitude)) {
+                  return;
+                }
+                if (identical(_tideReference, reference)) return;
+                setState(() => _tideReference = reference);
+              },
             ),
             const SizedBox(height: 16),
             Row(
@@ -407,6 +573,9 @@ class _MapPageState extends State<MapPage> {
                                   latitude: selected.latitude,
                                   longitude: selected.longitude,
                                   externalData: _externalData,
+                                  tideReference: _tideReference,
+                                  tideName: _tideName,
+                                  waterArea: _waterArea,
                                 ),
                               ),
                             );
@@ -466,68 +635,49 @@ class _MapCanvasHostState extends State<_MapCanvasHost>
   }
 }
 
-class _ExternalDataCard extends StatelessWidget {
-  final ExternalData? externalData;
-  final bool isLoading;
-  final String? errorMessage;
-  final VoidCallback onRetry;
-
-  const _ExternalDataCard({
-    required this.externalData,
+class _WaterAreaSelector extends StatelessWidget {
+  const _WaterAreaSelector({
+    required this.detected,
+    required this.areaOverride,
     required this.isLoading,
-    required this.errorMessage,
+    required this.onChanged,
     required this.onRetry,
   });
 
+  final WaterArea detected;
+  final WaterArea? areaOverride;
+  final bool isLoading;
+  final ValueChanged<WaterArea?> onChanged;
+  final VoidCallback onRetry;
+
   @override
-  Widget build(BuildContext context) {
-    if (isLoading) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Center(child: CircularProgressIndicator()),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      SegmentedButton<WaterArea?>(
+        key: const ValueKey('water-area-selector'),
+        direction: MediaQuery.textScalerOf(context).scale(1) > 1.5
+            ? Axis.vertical
+            : Axis.horizontal,
+        segments: const [
+          ButtonSegment(value: null, label: Text('자동')),
+          ButtonSegment(value: WaterArea.marine, label: Text('바다')),
+          ButtonSegment(value: WaterArea.freshwater, label: Text('민물')),
+        ],
+        selected: {areaOverride},
+        onSelectionChanged: (selected) => onChanged(selected.single),
+      ),
+      const SizedBox(height: 8),
+      if (isLoading)
+        const LinearProgressIndicator(key: ValueKey('water-area-loading'))
+      else if (areaOverride == null)
+        Row(
+          children: [
+            Expanded(child: Text('자동 판별 · ${detected.label}')),
+            if (detected == WaterArea.unknown)
+              TextButton(onPressed: onRetry, child: const Text('다시 판별')),
+          ],
         ),
-      );
-    }
-
-    if (errorMessage != null) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '외부 데이터 조회 실패',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(errorMessage!),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('다시 조회'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final data = externalData;
-
-    if (data == null) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('조회된 외부 데이터가 없습니다.'),
-        ),
-      );
-    }
-
-    return WeatherDataCard(data: data);
-  }
+    ],
+  );
 }

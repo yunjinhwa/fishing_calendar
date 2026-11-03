@@ -1,6 +1,6 @@
 # 카카오 지도 연결
 
-Android·iOS 앱에서 `kakao_map_plugin`의 WebView와 카카오 지도 JavaScript SDK를 사용한다. 장소·주소 검색, 지도 지점 선택, 현재 위치 확인 결과를 기록 작성 화면에 전달한다. 날씨·기온의 실제 예보 연결과 실행 옵션은 [날씨 API 연결](weather_api_setup.md)을 참고한다. 물때·수온은 수동 입력한다.
+Android·iOS 앱에서 `kakao_map_plugin`의 WebView와 카카오 지도 JavaScript SDK를 사용한다. 장소·주소 검색, 지도 지점 선택, 현재 위치 확인 결과를 기록 작성 화면에 전달한다. 날씨·기온의 실제 예보 연결은 [날씨 API 연결](weather_api_setup.md), 자동 물때·만조·간조와 통합 실행 옵션은 [조석 API 연결](tide_api_setup.md)을 참고한다. 수온은 수동 입력한다.
 
 ## 키와 도메인 설정
 

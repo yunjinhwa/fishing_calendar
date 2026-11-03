@@ -34,6 +34,7 @@ migrate_working_dir/
 /firebase.*.local.json
 /kakao.local.json
 /weather.local.json
+/tide.local.json
 
 # Local credentials and signing files
 .env

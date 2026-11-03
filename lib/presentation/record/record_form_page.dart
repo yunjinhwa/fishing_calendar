@@ -7,10 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/validation/fishing_record_validator.dart';
+import '../../data/maps/map_location.dart';
 import '../../data/models/external_data.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/models/record_edit_snapshot.dart';
 import '../../data/models/record_cache_policy.dart';
+import '../../data/tides/tide_models.dart';
+import '../../data/tides/tide_name.dart';
+import '../../data/tides/tide_station_catalog.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/photos/record_photo_file_store_utils.dart';
 import '../../data/repositories/auth_session_repository.dart';
@@ -19,6 +23,7 @@ import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_photo_cleanup_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../map/tide_data_card.dart';
 
 class RecordFormPage extends StatefulWidget {
   final FishingRecord? editingRecord;
@@ -32,6 +37,8 @@ class RecordFormPage extends StatefulWidget {
   final double? initialWaterTemperature;
   final String? initialFishName;
   final ExternalData? initialExternalData;
+  final TideRecordReference? initialTideReference;
+  final bool allowAutomaticTide;
 
   const RecordFormPage({
     super.key,
@@ -45,6 +52,8 @@ class RecordFormPage extends StatefulWidget {
     this.initialWaterTemperature,
     this.initialFishName,
     this.initialExternalData,
+    this.initialTideReference,
+    this.allowAutomaticTide = true,
   });
 
   @override
@@ -85,6 +94,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool _automaticWeather = false;
   bool _automaticAirTemperature = false;
   bool _reconcilingWeather = false;
+  bool _tideReferenceApplies = false;
+  bool _automaticTide = false;
+  bool _tideManuallyEdited = false;
+  bool _reconcilingTide = false;
+  TideName? _calculatedTideName;
+  ({TideDay day, String location, double? latitude, double? longitude})?
+  _tideNameInput;
   VoidCallback? _stopRecordWatch;
   bool isPickingPhoto = false;
   int nextPhotoSequence = 0;
@@ -115,6 +131,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     latitudeController.text = widget.initialLatitude?.toString() ?? '';
     longitudeController.text = widget.initialLongitude?.toString() ?? '';
     tideController.text = widget.initialTide ?? '';
+    _tideManuallyEdited = widget.initialTide != null;
     weatherController.text = widget.initialWeather ?? '';
     airTemperatureController.text =
         widget.initialAirTemperature?.toString() ?? '';
@@ -152,6 +169,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
       ownerKey: _editingOwnerKey,
       paths: _photoPaths,
     );
+    _tideReferenceApplies = _matchesTideReference;
+    _reconcileTidePrefill();
     _resetDraftBaseline();
     for (final controller in _textControllers) {
       controller.addListener(_handleDraftChange);
@@ -196,13 +215,36 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   void _handleDraftChange() {
-    if (!mounted || _draftBaseline == null || _reconcilingWeather) return;
+    if (!mounted ||
+        _draftBaseline == null ||
+        _reconcilingWeather ||
+        _reconcilingTide) {
+      return;
+    }
     final clearedForecast = _reconcileWeatherPrefill();
+    final tideNameChanged = _reconcileTidePrefill();
     final changed = _captureDraft() != _draftBaseline;
-    if (changed != _hasUnsavedChanges || clearedForecast) {
-      setState(() => _hasUnsavedChanges = changed);
+    final tideApplies = _matchesTideReference;
+    if (changed != _hasUnsavedChanges ||
+        clearedForecast ||
+        tideNameChanged ||
+        tideApplies != _tideReferenceApplies) {
+      setState(() {
+        _hasUnsavedChanges = changed;
+        _tideReferenceApplies = tideApplies;
+      });
     }
   }
+
+  bool get _matchesTideReference =>
+      widget.allowAutomaticTide &&
+      (widget.initialTideReference?.appliesToRecord(
+            startAt: startAt,
+            locationName: locationController.text,
+            latitude: double.tryParse(latitudeController.text),
+            longitude: double.tryParse(longitudeController.text),
+          ) ??
+          false);
 
   bool get _forecastApplies =>
       widget.initialExternalData?.appliesToRecord(
@@ -212,6 +254,70 @@ class _RecordFormPageState extends State<RecordFormPage> {
         longitude: double.tryParse(longitudeController.text),
       ) ??
       false;
+
+  bool _reconcileTidePrefill() {
+    final input = (
+      day: TideDay.fromInstant(startAt),
+      location: locationController.text.trim(),
+      latitude: double.tryParse(latitudeController.text),
+      longitude: double.tryParse(longitudeController.text),
+    );
+    if (input == _tideNameInput) return false;
+    _tideNameInput = input;
+    _calculatedTideName = null;
+    final latitude = input.latitude;
+    final longitude = input.longitude;
+    if (widget.allowAutomaticTide &&
+        input.location.isNotEmpty &&
+        input.location.length <= FishingRecordValidator.maxLocationLength &&
+        latitude != null &&
+        longitude != null &&
+        latitude.isFinite &&
+        longitude.isFinite &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        longitude >= -180 &&
+        longitude <= 180) {
+      final original = widget.initialTideReference;
+      final sameCoordinates =
+          original?.location.latitude == latitude &&
+          original?.location.longitude == longitude;
+      // A changed name alone must not reuse the map's old coordinates.
+      final renamedOriginal =
+          original != null &&
+          sameCoordinates &&
+          original.location.name != input.location;
+      if (!renamedOriginal) {
+        final nearby = original != null && sameCoordinates
+            ? [original.forecast.station]
+            : TideStationCatalog().nearby(
+                MapLocation(
+                  name: input.location,
+                  latitude: latitude,
+                  longitude: longitude,
+                ),
+                limit: 1,
+              );
+        if (nearby.isNotEmpty) {
+          _calculatedTideName = TideName.calculate(
+            day: input.day,
+            station: nearby.first,
+          );
+        }
+      }
+    }
+
+    if (!isEditMode && !_tideManuallyEdited) {
+      _reconcilingTide = true;
+      try {
+        tideController.text = _calculatedTideName?.label ?? '';
+        _automaticTide = _calculatedTideName != null;
+      } finally {
+        _reconcilingTide = false;
+      }
+    }
+    return true;
+  }
 
   bool _reconcileWeatherPrefill() {
     if (isEditMode ||
@@ -447,6 +553,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       ..clear()
       ..addAll(record.photos);
     _photoDraft?.updatePaths(_photoPaths);
+    _reconcileTidePrefill();
   }
 
   @override
@@ -1174,6 +1281,16 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
                 _SectionTitle(title: '외부 데이터'),
                 const SizedBox(height: 4),
+                if (widget.initialTideReference != null) ...[
+                  if (_tideReferenceApplies)
+                    TideDataCard(
+                      reference: widget.initialTideReference!,
+                      compact: true,
+                    )
+                  else
+                    const Text('조회한 만조·간조 예보는 현재 기록의 날짜·장소와 다릅니다.'),
+                  const SizedBox(height: 8),
+                ],
                 if (!isEditMode &&
                     widget.initialExternalData != null &&
                     (_automaticWeather || _automaticAirTemperature)) ...[
@@ -1185,7 +1302,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   const SizedBox(height: 8),
                 ],
                 Text(
-                  '물때·수온과 조회되지 않은 값은 직접 입력하세요.',
+                  '물때는 날짜와 위치에 따라 자동 입력되며 수정할 수 있습니다. 수온과 조회되지 않은 값은 직접 입력하세요.',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
@@ -1193,12 +1310,27 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 const SizedBox(height: 12),
 
                 TextField(
+                  key: const ValueKey('record-tide'),
                   controller: tideController,
+                  onChanged: (_) {
+                    setState(() {
+                      _tideManuallyEdited = true;
+                      _automaticTide = false;
+                    });
+                  },
                   maxLength: FishingRecordValidator.maxTideLength,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: '물때 *',
                     hintText: '예: 7물',
-                    border: OutlineInputBorder(),
+                    helperText: _calculatedTideName == null
+                        ? '자동 계산할 수 없는 위치·날짜는 직접 입력해 주세요.'
+                        : '계산 물때: ${_calculatedTideName!.label} · '
+                              '${_calculatedTideName!.lunarDate.label} · '
+                              '${_calculatedTideName!.convention.label} · '
+                              '${_calculatedTideName!.station.name} 기준'
+                              '${_automaticTide ? ' (자동 입력)' : ' (직접 입력값 유지)'}',
+                    helperMaxLines: 3,
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),

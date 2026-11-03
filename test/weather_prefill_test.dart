@@ -21,13 +21,13 @@ void main() {
     );
   });
 
-  testWidgets('matching forecast fills only weather and air temperature', (
+  testWidgets('matching forecast fills weather alongside the calculated tide', (
     tester,
   ) async {
     await _open(tester, _forecast());
     expect(_text(tester, '날씨 *'), '흐림');
     expect(_text(tester, '기온 *'), '-2.5');
-    expect(_text(tester, '물때 *'), isEmpty);
+    expect(_text(tester, '물때 *'), isNotEmpty);
     expect(_text(tester, '수온 *'), isEmpty);
     expect(find.textContaining('기상청 초단기예보'), findsOneWidget);
   });
@@ -104,7 +104,7 @@ void main() {
     );
     expect(_text(tester, '날씨 *'), isEmpty);
     expect(_text(tester, '기온 *'), '0.0');
-    expect(_text(tester, '물때 *'), isEmpty);
+    expect(_text(tester, '물때 *'), isNotEmpty);
     expect(_text(tester, '수온 *'), isEmpty);
     expect(tester.takeException(), isNull);
   });
