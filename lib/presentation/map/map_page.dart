@@ -18,6 +18,9 @@ import '../../data/tides/tide_models.dart';
 import '../../data/tides/tide_name.dart';
 import '../../data/tides/tide_service.dart';
 import '../../data/tides/tide_station_catalog.dart';
+import '../../data/water_temperature/khoa_water_temperature_service.dart';
+import '../../data/water_temperature/water_temperature_models.dart';
+import '../../data/water_temperature/water_temperature_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
 import 'kakao_map_canvas.dart';
@@ -44,6 +47,7 @@ class MapPage extends StatefulWidget {
     this.tideService,
     this.tideStations,
     this.waterAreaService,
+    this.waterTemperatureService,
   });
 
   final bool isActive;
@@ -54,6 +58,7 @@ class MapPage extends StatefulWidget {
   final TideService? tideService;
   final TideStationCatalog? tideStations;
   final WaterAreaService? waterAreaService;
+  final WaterTemperatureService? waterTemperatureService;
 
   @override
   State<MapPage> createState() => _MapPageState();
@@ -81,8 +86,32 @@ class _MapPageState extends State<MapPage> {
   bool _classifyingWaterArea = false;
   int _waterAreaRevision = 0;
   MapLocation? _waterAreaRequestedFor;
+  WaterTemperatureObservation? _waterTemperatureObservation;
+  WaterTemperatureFailure? _waterTemperatureFailure;
+  MapLocation? _waterTemperatureRequestedFor;
+  bool _loadingWaterTemperature = false;
+  int _waterTemperatureRevision = 0;
 
   WaterArea get _waterArea => _waterAreaOverride ?? _detectedWaterArea;
+  WaterTemperatureService get _temperatureService =>
+      widget.waterTemperatureService ?? KhoaWaterTemperatureService.instance;
+  WaterTemperatureObservation? get _currentWaterTemperature {
+    final observation = _waterTemperatureObservation;
+    return _waterArea.providesMarineData &&
+            observation != null &&
+            observation.matchesLocation(_controller.selection) &&
+            observation.isUsableAt(DateTime.now())
+        ? observation
+        : null;
+  }
+
+  void _resetWaterTemperature() {
+    _waterTemperatureRevision++;
+    _waterTemperatureObservation = null;
+    _waterTemperatureFailure = null;
+    _waterTemperatureRequestedFor = null;
+    _loadingWaterTemperature = false;
+  }
 
   @override
   void initState() {
@@ -107,6 +136,7 @@ class _MapPageState extends State<MapPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isActive == widget.isActive) return;
     if (!widget.isActive) {
+      _resetWaterTemperature();
       _tideReference = null;
       _tideName = null;
       _waterAreaRevision++;
@@ -146,6 +176,7 @@ class _MapPageState extends State<MapPage> {
       _observedSelection = selection;
       _externalRevision++;
       _externalData = null;
+      _resetWaterTemperature();
       _tideReference = null;
       _waterAreaRevision++;
       _waterAreaRequestedFor = null;
@@ -159,10 +190,12 @@ class _MapPageState extends State<MapPage> {
     setState(() {});
     if (widget.isActive &&
         !_controller.isLocating &&
-        !_controller.isResolving &&
-        !identical(selection, _externalRequestedFor)) {
-      unawaited(_fetchExternalData());
+        !_controller.isResolving) {
+      if (!identical(selection, _externalRequestedFor)) {
+        unawaited(_fetchExternalData());
+      }
       unawaited(_classifyWaterArea());
+      unawaited(_fetchWaterTemperature());
     }
   }
 
@@ -189,6 +222,11 @@ class _MapPageState extends State<MapPage> {
     if (disconnected || recovered) _controller.setGateway(null);
     setState(() {
       if (recovered) _mapAttempt++;
+      if (disconnected) {
+        _waterTemperatureRevision++;
+        _loadingWaterTemperature = false;
+        _waterTemperatureRequestedFor = null;
+      }
     });
     if (recovered && widget.isActive) {
       unawaited(_fetchExternalData(force: true));
@@ -196,6 +234,7 @@ class _MapPageState extends State<MapPage> {
         _waterAreaRequestedFor = null;
       }
       unawaited(_classifyWaterArea());
+      unawaited(_fetchWaterTemperature(force: true));
     }
   }
 
@@ -217,6 +256,7 @@ class _MapPageState extends State<MapPage> {
         _classifyingWaterArea = false;
         _tideName = null;
         _tideReference = null;
+        _resetWaterTemperature();
       });
       return;
     }
@@ -237,8 +277,12 @@ class _MapPageState extends State<MapPage> {
       _detectedWaterArea = area;
       _classifyingWaterArea = false;
       _tideName = _defaultTideName(location, day: _tideName?.day);
-      if (!area.providesMarineData) _tideReference = null;
+      if (!area.providesMarineData) {
+        _tideReference = null;
+        _resetWaterTemperature();
+      }
     });
+    unawaited(_fetchWaterTemperature());
   }
 
   void _chooseWaterArea(WaterArea? area) {
@@ -247,11 +291,68 @@ class _MapPageState extends State<MapPage> {
       _waterAreaOverride = area;
       _classifyingWaterArea = false;
       _tideReference = null;
+      _resetWaterTemperature();
       _tideName = _defaultTideName(_controller.selection, day: _tideName?.day);
     });
     if (area == null) {
       _waterAreaRequestedFor = null;
       unawaited(_classifyWaterArea());
+    }
+    unawaited(_fetchWaterTemperature());
+  }
+
+  Future<void> _fetchWaterTemperature({bool force = false}) async {
+    if (!widget.isActive ||
+        _controller.isLocating ||
+        _controller.isResolving ||
+        !_waterArea.providesMarineData ||
+        _network.isDisconnected) {
+      return;
+    }
+    final location = _controller.selection;
+    if (!location.hasCoordinates ||
+        (!force && identical(location, _waterTemperatureRequestedFor))) {
+      return;
+    }
+    _waterTemperatureRequestedFor = location;
+    final revision = ++_waterTemperatureRevision;
+    setState(() {
+      _waterTemperatureFailure = null;
+      _loadingWaterTemperature = true;
+    });
+    bool current() =>
+        mounted &&
+        widget.isActive &&
+        _waterArea.providesMarineData &&
+        revision == _waterTemperatureRevision &&
+        identical(location, _controller.selection);
+    try {
+      final observation = await _temperatureService.fetchCurrentData(
+        location: location,
+        forceRefresh: force,
+      );
+      if (!current()) return;
+      if (!observation.matchesLocation(location)) {
+        throw const WaterTemperatureException(
+          WaterTemperatureFailure.invalidResponse,
+        );
+      }
+      if (!observation.isUsableAt(DateTime.now())) {
+        throw const WaterTemperatureException(WaterTemperatureFailure.noData);
+      }
+      setState(() {
+        _waterTemperatureObservation = observation;
+        _loadingWaterTemperature = false;
+      });
+    } on Object catch (error) {
+      if (!current()) return;
+      setState(() {
+        _waterTemperatureObservation = null;
+        _loadingWaterTemperature = false;
+        _waterTemperatureFailure = error is WaterTemperatureException
+            ? error.reason
+            : WaterTemperatureFailure.invalidResponse;
+      });
     }
   }
 
@@ -332,6 +433,8 @@ class _MapPageState extends State<MapPage> {
           initialExternalData: data,
           initialTideReference: _tideReference,
           allowAutomaticTide: _waterArea.providesMarineData,
+          initialWaterTemperatureObservation: _currentWaterTemperature,
+          allowAutomaticWaterTemperature: _waterArea.providesMarineData,
         ),
       ),
     );
@@ -340,6 +443,7 @@ class _MapPageState extends State<MapPage> {
   @override
   void dispose() {
     _waterAreaRevision++;
+    _waterTemperatureRevision++;
     _locationEntryRevision++;
     _externalRevision++;
     _network.removeListener(_onNetworkChanged);
@@ -522,6 +626,21 @@ class _MapPageState extends State<MapPage> {
               weatherLoading: widget.isActive && _loadingExternal,
               weatherError: _externalError,
               onRetryWeather: () => unawaited(_fetchExternalData(force: true)),
+              waterTemperatureObservation: choosing
+                  ? null
+                  : _currentWaterTemperature,
+              waterTemperatureLoading:
+                  widget.isActive && !choosing && _loadingWaterTemperature,
+              waterTemperatureError: _waterTemperatureFailure == null
+                  ? null
+                  : '제공되지 않음',
+              onRetryWaterTemperature:
+                  _waterTemperatureFailure != null &&
+                      _waterTemperatureFailure !=
+                          WaterTemperatureFailure.configuration &&
+                      !_network.isDisconnected
+                  ? () => unawaited(_fetchWaterTemperature(force: true))
+                  : null,
               onTideNameChanged: (name) {
                 if (!mounted) return;
                 final current = _controller.selection;
@@ -576,6 +695,8 @@ class _MapPageState extends State<MapPage> {
                                   tideReference: _tideReference,
                                   tideName: _tideName,
                                   waterArea: _waterArea,
+                                  waterTemperatureObservation:
+                                      _currentWaterTemperature,
                                 ),
                               ),
                             );

@@ -10,6 +10,8 @@ import 'package:fishing_build/data/services/network_status_service.dart';
 import 'package:fishing_build/data/tides/tide_models.dart';
 import 'package:fishing_build/data/tides/tide_service.dart';
 import 'package:fishing_build/data/tides/tide_station_catalog.dart';
+import 'package:fishing_build/data/water_temperature/water_temperature_models.dart';
+import 'package:fishing_build/data/water_temperature/water_temperature_service.dart';
 import 'package:fishing_build/presentation/map/location_conditions_card.dart';
 import 'package:fishing_build/presentation/map/map_page.dart';
 import 'package:fishing_build/presentation/map/map_selection_controller.dart';
@@ -41,8 +43,16 @@ void main() {
       tester,
     ) async {
       final tides = _Tides();
-      await _open(tester, _Areas(result: area), tides, location: _river);
+      final temperatures = _Temperatures();
+      await _open(
+        tester,
+        _Areas(result: area),
+        tides,
+        location: _river,
+        temperatures: temperatures,
+      );
       expect(tides.calls, 0);
+      expect(temperatures.calls, 0);
       expect(find.text('맑음'), findsOneWidget);
       expect(find.text('20℃'), findsOneWidget);
       expect(find.text('물때'), findsNothing);
@@ -55,6 +65,7 @@ void main() {
       expect(conditions.waterArea, area);
       expect(conditions.tideForecast, isNull);
       expect(conditions.tideName, isNull);
+      expect(conditions.waterTemperatureObservation, isNull);
       if (area == WaterArea.inland) {
         expect(find.text('자동 판별 · 내륙'), findsOneWidget);
       }
@@ -66,8 +77,15 @@ void main() {
     tester,
   ) async {
     final tides = _Tides();
-    await _open(tester, _Areas(result: WaterArea.marine), tides);
+    final temperatures = _Temperatures();
+    await _open(
+      tester,
+      _Areas(result: WaterArea.marine),
+      tides,
+      temperatures: temperatures,
+    );
     expect(tides.calls, 1);
+    expect(temperatures.calls, 1);
     final card = find.byType(LocationConditionsCard);
     expect(card, findsOneWidget);
     expect(
@@ -78,6 +96,11 @@ void main() {
     expect(find.text('물때'), findsOneWidget);
     expect(find.text('수온'), findsOneWidget);
     expect(find.text('23℃'), findsOneWidget);
+    expect(
+      tester.widget<LocationConditionsCard>(card).waterTemperatureObservation,
+      isNotNull,
+    );
+    expect(find.textContaining('인천송도 수온 관측소 · '), findsOneWidget);
     expect(find.text('만조'), findsOneWidget);
     expect(find.text('609 cm'), findsOneWidget);
     expect(find.textContaining('제공:'), findsNothing);
@@ -91,7 +114,14 @@ void main() {
   ) async {
     final areas = _Areas(deferred: true);
     final tides = _Tides();
-    final controller = await _open(tester, areas, tides, settle: false);
+    final temperatures = _Temperatures();
+    final controller = await _open(
+      tester,
+      areas,
+      tides,
+      temperatures: temperatures,
+      settle: false,
+    );
     await tester.pump();
     expect(areas.pending, hasLength(1));
     controller.selectLocation(_river);
@@ -102,6 +132,7 @@ void main() {
     areas.pending[0].complete(WaterArea.marine);
     await tester.pumpAndSettle();
     expect(tides.calls, 0);
+    expect(temperatures.calls, 0);
     expect(find.text('물때'), findsNothing);
     expect(find.text('수온'), findsNothing);
     expect(
@@ -179,6 +210,7 @@ Future<MapSelectionController> _open(
   bool settle = true,
   Size viewSize = const Size(1000, 2400),
   double textScale = 1,
+  _Temperatures? temperatures,
 }) async {
   tester.view.physicalSize = viewSize;
   tester.view.devicePixelRatio = 1;
@@ -202,6 +234,7 @@ Future<MapSelectionController> _open(
         waterAreaService: areas,
         externalDataService: _Weather(),
         tideService: tides,
+        waterTemperatureService: temperatures ?? _Temperatures(),
         tideStations: TideStationCatalog(stations: [_station]),
         mapBuilder: (_, _, _) => const SizedBox(),
       ),
@@ -265,6 +298,31 @@ class _Tides implements TideService {
     calls++;
     lastDay = day;
     return deferred ? pending.future : Future.value(_forecast(day));
+  }
+}
+
+class _Temperatures implements WaterTemperatureService {
+  int calls = 0;
+
+  @override
+  Future<WaterTemperatureObservation> fetchCurrentData({
+    required MapLocation location,
+    bool forceRefresh = false,
+  }) async {
+    calls++;
+    final now = DateTime.now().toUtc();
+    return WaterTemperatureObservation(
+      location: location,
+      station: const WaterTemperatureStation(
+        code: 'TEST_INC',
+        name: '인천송도 수온 관측소',
+        latitude: 37.3382,
+        longitude: 126.586,
+      ),
+      temperatureCelsius: 23,
+      observedAt: now.subtract(const Duration(minutes: 10)),
+      fetchedAt: now,
+    );
   }
 }
 

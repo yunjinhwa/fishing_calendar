@@ -15,6 +15,7 @@ import '../../data/models/record_cache_policy.dart';
 import '../../data/tides/tide_models.dart';
 import '../../data/tides/tide_name.dart';
 import '../../data/tides/tide_station_catalog.dart';
+import '../../data/water_temperature/water_temperature_models.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/photos/record_photo_file_store_utils.dart';
 import '../../data/repositories/auth_session_repository.dart';
@@ -39,6 +40,8 @@ class RecordFormPage extends StatefulWidget {
   final ExternalData? initialExternalData;
   final TideRecordReference? initialTideReference;
   final bool allowAutomaticTide;
+  final WaterTemperatureObservation? initialWaterTemperatureObservation;
+  final bool allowAutomaticWaterTemperature;
 
   const RecordFormPage({
     super.key,
@@ -54,6 +57,8 @@ class RecordFormPage extends StatefulWidget {
     this.initialExternalData,
     this.initialTideReference,
     this.allowAutomaticTide = true,
+    this.initialWaterTemperatureObservation,
+    this.allowAutomaticWaterTemperature = true,
   });
 
   @override
@@ -98,6 +103,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool _automaticTide = false;
   bool _tideManuallyEdited = false;
   bool _reconcilingTide = false;
+  bool _automaticWaterTemperature = false;
+  bool _waterTemperatureManuallyEdited = false;
+  bool _reconcilingWaterTemperature = false;
   TideName? _calculatedTideName;
   ({TideDay day, String location, double? latitude, double? longitude})?
   _tideNameInput;
@@ -137,6 +145,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
         widget.initialAirTemperature?.toString() ?? '';
     waterTemperatureController.text =
         widget.initialWaterTemperature?.toString() ?? '';
+    _waterTemperatureManuallyEdited = widget.initialWaterTemperature != null;
 
     final forecast = widget.initialExternalData;
     if (!isEditMode && forecast != null && _forecastApplies) {
@@ -171,6 +180,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     );
     _tideReferenceApplies = _matchesTideReference;
     _reconcileTidePrefill();
+    _reconcileWaterTemperaturePrefill();
     _resetDraftBaseline();
     for (final controller in _textControllers) {
       controller.addListener(_handleDraftChange);
@@ -218,16 +228,19 @@ class _RecordFormPageState extends State<RecordFormPage> {
     if (!mounted ||
         _draftBaseline == null ||
         _reconcilingWeather ||
-        _reconcilingTide) {
+        _reconcilingTide ||
+        _reconcilingWaterTemperature) {
       return;
     }
     final clearedForecast = _reconcileWeatherPrefill();
     final tideNameChanged = _reconcileTidePrefill();
+    final waterTemperatureChanged = _reconcileWaterTemperaturePrefill();
     final changed = _captureDraft() != _draftBaseline;
     final tideApplies = _matchesTideReference;
     if (changed != _hasUnsavedChanges ||
         clearedForecast ||
         tideNameChanged ||
+        waterTemperatureChanged ||
         tideApplies != _tideReferenceApplies) {
       setState(() {
         _hasUnsavedChanges = changed;
@@ -338,6 +351,36 @@ class _RecordFormPageState extends State<RecordFormPage> {
       }
     } finally {
       _reconcilingWeather = false;
+    }
+    return true;
+  }
+
+  bool _reconcileWaterTemperaturePrefill() {
+    if (isEditMode ||
+        _waterTemperatureManuallyEdited ||
+        _reconcilingWaterTemperature) {
+      return false;
+    }
+    final observation = widget.initialWaterTemperatureObservation;
+    final applies =
+        widget.allowAutomaticWaterTemperature &&
+        (observation?.appliesToRecord(
+              startAt: startAt,
+              locationName: locationController.text,
+              latitude: double.tryParse(latitudeController.text),
+              longitude: double.tryParse(longitudeController.text),
+            ) ??
+            false);
+    if (applies == _automaticWaterTemperature) return false;
+
+    _reconcilingWaterTemperature = true;
+    try {
+      _automaticWaterTemperature = applies;
+      waterTemperatureController.text = applies
+          ? observation!.temperatureCelsius.toString()
+          : '';
+    } finally {
+      _reconcilingWaterTemperature = false;
     }
     return true;
   }
@@ -632,6 +675,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     }
 
     _reconcileWeatherPrefill();
+    _reconcileWaterTemperaturePrefill();
     final location = locationController.text.trim();
     final tide = tideController.text.trim();
     final weather = weatherController.text.trim();
@@ -1302,7 +1346,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   const SizedBox(height: 8),
                 ],
                 Text(
-                  '물때는 날짜와 위치에 따라 자동 입력되며 수정할 수 있습니다. 수온과 조회되지 않은 값은 직접 입력하세요.',
+                  '물때는 날짜와 위치에 따라 자동 입력되며 수정할 수 있습니다. 수온은 현재 위치·시간에 맞는 관측값이 있을 때 자동 입력됩니다. 조회되지 않은 값은 직접 입력하세요.',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
@@ -1374,13 +1418,28 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 const SizedBox(height: 16),
 
                 TextField(
+                  key: const ValueKey('record-water-temperature'),
                   controller: waterTemperatureController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
+                  onChanged: (_) {
+                    setState(() {
+                      _waterTemperatureManuallyEdited = true;
+                      _automaticWaterTemperature = false;
+                    });
+                  },
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  decoration: InputDecoration(
                     labelText: '수온 *',
                     hintText: '예: 16.2',
                     suffixText: '℃',
-                    border: OutlineInputBorder(),
+                    helperText: _automaticWaterTemperature
+                        ? '${widget.initialWaterTemperatureObservation!.station.name} · 관측 '
+                              '${formatDateTime(widget.initialWaterTemperatureObservation!.observedAt.toUtc().add(const Duration(hours: 9)))} KST (자동 입력)'
+                        : null,
+                    helperMaxLines: 3,
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 24),

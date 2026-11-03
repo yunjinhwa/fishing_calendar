@@ -7,6 +7,7 @@ import '../../data/models/external_data.dart';
 import '../../data/maps/water_area.dart';
 import '../../data/tides/tide_models.dart';
 import '../../data/tides/tide_name.dart';
+import '../../data/water_temperature/water_temperature_models.dart';
 import 'location_conditions_card.dart';
 
 class MapDetailPage extends StatelessWidget {
@@ -17,6 +18,7 @@ class MapDetailPage extends StatelessWidget {
   final TideRecordReference? tideReference;
   final TideName? tideName;
   final WaterArea waterArea;
+  final WaterTemperatureObservation? waterTemperatureObservation;
 
   const MapDetailPage({
     super.key,
@@ -27,6 +29,7 @@ class MapDetailPage extends StatelessWidget {
     this.tideReference,
     this.tideName,
     this.waterArea = WaterArea.unknown,
+    this.waterTemperatureObservation,
   });
 
   @override
@@ -47,6 +50,9 @@ class MapDetailPage extends StatelessWidget {
             LocationConditionsCard(
               waterArea: waterArea,
               weatherData: externalData,
+              waterTemperatureObservation: waterArea.providesMarineData
+                  ? waterTemperatureObservation
+                  : null,
               tideName: !waterArea.providesMarineData
                   ? null
                   : tideName ??
@@ -98,6 +104,12 @@ class MapDetailPage extends StatelessWidget {
                           ? tideReference
                           : null,
                       allowAutomaticTide: waterArea.providesMarineData,
+                      initialWaterTemperatureObservation:
+                          waterArea.providesMarineData
+                          ? waterTemperatureObservation
+                          : null,
+                      allowAutomaticWaterTemperature:
+                          waterArea.providesMarineData,
                     ),
                   ),
                 );

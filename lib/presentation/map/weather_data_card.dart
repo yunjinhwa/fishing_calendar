@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/maps/water_area.dart';
 import '../../data/models/external_data.dart';
 import '../../data/tides/tide_name.dart';
+import '../../data/water_temperature/water_temperature_models.dart';
 
 class WeatherDataCard extends StatelessWidget {
   const WeatherDataCard({
@@ -12,6 +13,7 @@ class WeatherDataCard extends StatelessWidget {
     this.waterArea = WaterArea.unknown,
     this.embedded = false,
     this.marineControls,
+    this.waterTemperatureObservation,
   });
 
   final ExternalData? data;
@@ -19,6 +21,7 @@ class WeatherDataCard extends StatelessWidget {
   final WaterArea waterArea;
   final bool embedded;
   final Widget? marineControls;
+  final WaterTemperatureObservation? waterTemperatureObservation;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +33,10 @@ class WeatherDataCard extends StatelessWidget {
         final width =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
         final weather = data?.weather?.trim();
+        final observation = waterTemperatureObservation;
+        final measured = observation?.isUsableAt(DateTime.now()) == true
+            ? observation
+            : null;
         return Wrap(
           spacing: spacing,
           runSpacing: spacing,
@@ -66,7 +73,11 @@ class WeatherDataCard extends StatelessWidget {
                 child: _WeatherValue(
                   icon: Icons.water_drop_outlined,
                   label: '수온',
-                  value: _temperature(data?.waterTemperature),
+                  value: _temperature(measured?.temperatureCelsius),
+                  detail: measured == null
+                      ? null
+                      : '${measured.station.name} · '
+                            '${formatWeatherTime(measured.observedAt)} 관측',
                 ),
               ),
             ],
@@ -113,11 +124,13 @@ class _WeatherValue extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.detail,
   });
 
   final IconData icon;
   final String label;
   final String value;
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
@@ -156,6 +169,15 @@ class _WeatherValue extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
           ),
+          if (detail != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              detail!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );

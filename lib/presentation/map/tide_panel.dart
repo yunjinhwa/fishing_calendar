@@ -11,6 +11,7 @@ import '../../data/tides/tide_models.dart';
 import '../../data/tides/tide_name.dart';
 import '../../data/tides/tide_service.dart';
 import '../../data/tides/tide_station_catalog.dart';
+import '../../data/water_temperature/water_temperature_models.dart';
 import 'location_conditions_card.dart';
 
 class TidePanel extends StatefulWidget {
@@ -29,6 +30,10 @@ class TidePanel extends StatefulWidget {
     this.weatherError,
     this.onRetryWeather,
     this.clock,
+    this.waterTemperatureObservation,
+    this.waterTemperatureLoading = false,
+    this.waterTemperatureError,
+    this.onRetryWaterTemperature,
   });
 
   final MapLocation location;
@@ -44,6 +49,10 @@ class TidePanel extends StatefulWidget {
   final String? weatherError;
   final VoidCallback? onRetryWeather;
   final DateTime Function()? clock;
+  final WaterTemperatureObservation? waterTemperatureObservation;
+  final bool waterTemperatureLoading;
+  final String? waterTemperatureError;
+  final VoidCallback? onRetryWaterTemperature;
 
   @override
   State<TidePanel> createState() => _TidePanelState();
@@ -270,6 +279,12 @@ class _TidePanelState extends State<TidePanel>
       weatherLoading: widget.weatherLoading,
       weatherError: widget.weatherError,
       onRetryWeather: widget.onRetryWeather,
+      waterTemperatureObservation: marine
+          ? widget.waterTemperatureObservation
+          : null,
+      waterTemperatureLoading: marine && widget.waterTemperatureLoading,
+      waterTemperatureError: marine ? widget.waterTemperatureError : null,
+      onRetryWaterTemperature: marine ? widget.onRetryWaterTemperature : null,
       tideName: tideName,
       tideForecast: marine ? reference?.forecast : null,
       tideLoading: marine && _loading,
