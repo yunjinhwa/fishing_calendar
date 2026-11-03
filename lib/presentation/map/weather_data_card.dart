@@ -1,50 +1,104 @@
 import 'package:flutter/material.dart';
 
+import '../../data/maps/water_area.dart';
 import '../../data/models/external_data.dart';
+import '../../data/tides/tide_name.dart';
 
 class WeatherDataCard extends StatelessWidget {
-  const WeatherDataCard({super.key, required this.data});
+  const WeatherDataCard({
+    super.key,
+    this.data,
+    this.tideName,
+    this.waterArea = WaterArea.unknown,
+    this.embedded = false,
+    this.marineControls,
+  });
 
-  final ExternalData data;
+  final ExternalData? data;
+  final TideName? tideName;
+  final WaterArea waterArea;
+  final bool embedded;
+  final Widget? marineControls;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('선택 위치 날씨 예보', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text(data.locationName),
-          Text('제공: ${data.sourceName}'),
-          Text('예보 격자: ${data.gridX}, ${data.gridY}'),
-          Text('발표 기준: ${formatWeatherTime(data.issuedAt)} (KST)'),
-          Text('예보: ${formatWeatherTime(data.validAt)} (KST)'),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 24,
-            runSpacing: 12,
-            children: [
-              _WeatherValue(label: '날씨', value: data.weather ?? '정보 없음'),
-              _WeatherValue(
-                label: '기온',
-                value: data.airTemperature == null
-                    ? '정보 없음'
-                    : '${data.airTemperature}℃',
+  Widget build(BuildContext context) {
+    final metrics = LayoutBuilder(
+      builder: (context, constraints) {
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final columns = constraints.maxWidth >= 280 && textScale <= 1.5 ? 2 : 1;
+        const spacing = 12.0;
+        final width =
+            (constraints.maxWidth - spacing * (columns - 1)) / columns;
+        final weather = data?.weather?.trim();
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            SizedBox(
+              width: width,
+              child: _WeatherValue(
+                icon: Icons.cloud_outlined,
+                label: '날씨',
+                value: weather == null || weather.isEmpty ? '제공되지 않음' : weather,
               ),
-              const _WeatherValue(label: '물때', value: '수동 입력'),
-              const _WeatherValue(label: '수온', value: '수동 입력'),
+            ),
+            SizedBox(
+              width: width,
+              child: _WeatherValue(
+                icon: Icons.thermostat_outlined,
+                label: '기온',
+                value: _temperature(data?.airTemperature),
+              ),
+            ),
+            if (waterArea.providesMarineData) ...[
+              if (marineControls != null)
+                SizedBox(width: constraints.maxWidth, child: marineControls),
+              SizedBox(
+                width: width,
+                child: _WeatherValue(
+                  icon: Icons.waves_outlined,
+                  label: '물때',
+                  value: tideName?.label ?? '제공되지 않음',
+                ),
+              ),
+              SizedBox(
+                width: width,
+                child: _WeatherValue(
+                  icon: Icons.water_drop_outlined,
+                  label: '수온',
+                  value: _temperature(data?.waterTemperature),
+                ),
+              ),
             ],
-          ),
-          const SizedBox(height: 12),
-          const Text('물때·수온은 아직 연동되지 않았습니다. 기록 작성 화면에서 직접 입력해 주세요.'),
-          if (data.weather == null || data.airTemperature == null)
-            const Text('제공되지 않은 날씨 항목도 직접 입력할 수 있습니다.'),
-        ],
+          ],
+        );
+      },
+    );
+    if (embedded) return metrics;
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('날씨·낚시 정보', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 16),
+            metrics,
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
+}
+
+String _temperature(double? value) {
+  if (value == null || !value.isFinite) return '제공되지 않음';
+  final number = value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value.toString();
+  return '$number℃';
 }
 
 String formatWeatherTime(DateTime value) {
@@ -55,18 +109,55 @@ String formatWeatherTime(DateTime value) {
 }
 
 class _WeatherValue extends StatelessWidget {
-  const _WeatherValue({required this.label, required this.value});
+  const _WeatherValue({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
+  final IconData icon;
   final String label;
   final String value;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(label, style: Theme.of(context).textTheme.bodySmall),
-      const SizedBox(height: 4),
-      Text(value, style: Theme.of(context).textTheme.titleSmall),
-    ],
-  );
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: value == '제공되지 않음'
+                ? theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  )
+                : theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -952,6 +952,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.5.2"
+  protobuf:
+    dependency: transitive
+    description:
+      name: protobuf
+      sha256: "13b6717366aa7ec3792dd62c19c7d33a785708224365f2db23c5ca01f1c1a0f2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.1.0"
   pub_semver:
     dependency: transitive
     description:
@@ -1253,6 +1261,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  vector_tile:
+    dependency: "direct main"
+    description:
+      name: vector_tile
+      sha256: "43e32cd8e4a1ceede6ad61fbce1ac0ecc84380b6e6fbee52883f08774b12576f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
   vm_service:
     dependency: transitive
     description:

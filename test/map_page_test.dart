@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:fishing_build/data/maps/current_location_gateway.dart';
 import 'package:fishing_build/data/maps/map_location.dart';
 import 'package:fishing_build/data/maps/map_search_gateway.dart';
+import 'package:fishing_build/data/maps/water_area.dart';
 import 'package:fishing_build/data/models/external_data.dart';
 import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
@@ -12,11 +13,14 @@ import 'package:fishing_build/data/services/network_status_service.dart';
 import 'package:fishing_build/presentation/map/map_detail_page.dart';
 import 'package:fishing_build/presentation/map/map_page.dart';
 import 'package:fishing_build/presentation/map/map_selection_controller.dart';
+import 'package:fishing_build/presentation/map/location_conditions_card.dart';
+import 'package:fishing_build/presentation/map/weather_data_card.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'support/fixed_water_area_service.dart';
 import 'support/test_database.dart';
 
 void main() {
@@ -43,6 +47,7 @@ void main() {
     var mapBuilds = 0;
     Widget page(bool isActive) => MaterialApp(
       home: MapPage(
+        waterAreaService: const FixedWaterAreaService(),
         isActive: isActive,
         controller: controller,
         externalDataService: service,
@@ -84,6 +89,7 @@ void main() {
     MapLocation? displayedSelection;
     Widget page(bool isActive) => MaterialApp(
       home: MapPage(
+        waterAreaService: const FixedWaterAreaService(),
         isActive: isActive,
         controller: controller,
         externalDataService: service,
@@ -143,6 +149,7 @@ void main() {
     final original = controller.selection;
     Widget page(bool isActive) => MaterialApp(
       home: MapPage(
+        waterAreaService: const FixedWaterAreaService(),
         isActive: isActive,
         controller: controller,
         externalDataService: service,
@@ -303,6 +310,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: MapPage(
+          waterAreaService: const FixedWaterAreaService(),
           controller: controller,
           externalDataService: service,
           mapBuilder: (_, _, _) => const SizedBox(),
@@ -337,11 +345,16 @@ void main() {
         controller: controller,
         externalDataService: service,
       );
-      expect(find.text(error.message), findsOneWidget);
+      final weatherCard = tester.widget<WeatherDataCard>(
+        find.byType(WeatherDataCard),
+      );
+      expect(weatherCard.data, isNull);
+      expect(weatherCard.waterArea, WaterArea.marine);
+      expect(find.text('제공되지 않음'), findsWidgets);
       expect(service.locations.single.latitude, 35);
       expect(service.locations.single.longitude, 129);
       expect(service.forceRefreshes, [false]);
-      await _tap(tester, '다시 조회');
+      await _tap(tester, '날씨 다시 조회');
       expect(service.forceRefreshes, [false, true]);
       await _tap(tester, '기록 작성');
       final form = tester.widget<RecordFormPage>(find.byType(RecordFormPage));
@@ -355,7 +368,7 @@ void main() {
   );
 
   testWidgets(
-    'partial forecast displays KST source times and manual marine data',
+    'partial forecast shows available values with no source metadata',
     (tester) async {
       final data = ExternalData(
         locationName: '항구',
@@ -377,13 +390,29 @@ void main() {
         controller: controller,
         externalDataService: _ExternalService(result: data),
       );
-      expect(find.text('제공: 기상청 초단기예보'), findsOneWidget);
-      expect(find.text('예보 격자: 98, 74'), findsOneWidget);
-      expect(find.text('발표 기준: 2026.11.02 08:30 (KST)'), findsOneWidget);
-      expect(find.text('예보: 2026.11.02 09:00 (KST)'), findsOneWidget);
-      expect(find.text('정보 없음'), findsOneWidget);
-      expect(find.text('18.0℃'), findsOneWidget);
-      expect(find.text('수동 입력'), findsNWidgets(2));
+      expect(find.byType(LocationConditionsCard), findsOneWidget);
+      expect(find.text('날씨·낚시 정보'), findsOneWidget);
+      expect(find.text('제공: 기상청 초단기예보'), findsNothing);
+      expect(find.text('예보 격자: 98, 74'), findsNothing);
+      expect(find.text('발표 기준: 2026.11.02 08:30 (KST)'), findsNothing);
+      expect(find.text('예보: 2026.11.02 09:00 (KST)'), findsNothing);
+      final weather = tester.widget<WeatherDataCard>(
+        find.byType(WeatherDataCard),
+      );
+      expect(weather.data, same(data));
+      expect(weather.waterArea, WaterArea.marine);
+      expect(weather.tideName, isNotNull);
+      expect(
+        find.descendant(
+          of: find.byType(WeatherDataCard),
+          matching: find.text('제공되지 않음'),
+        ),
+        findsNWidgets(2),
+      );
+      expect(find.text('18℃'), findsOneWidget);
+      expect(find.text('수동 입력'), findsNothing);
+      expect(find.text('물때'), findsOneWidget);
+      expect(find.text('조석 영역에서 확인'), findsNothing);
       expect(find.textContaining('샘플'), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -402,6 +431,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: MapPage(
+            waterAreaService: const FixedWaterAreaService(),
             controller: controller,
             externalDataService: _ExternalService(),
             mapBuilder: (_, onGatewayChanged, _) => _LifecycleMapCanvas(
@@ -452,6 +482,7 @@ void main() {
       );
       Widget page(bool isActive) => MaterialApp(
         home: MapPage(
+          waterAreaService: const FixedWaterAreaService(),
           isActive: isActive,
           controller: controller,
           externalDataService: _ExternalService(),
@@ -522,6 +553,7 @@ Future<void> _openMap(
   await tester.pumpWidget(
     MaterialApp(
       home: MapPage(
+        waterAreaService: const FixedWaterAreaService(),
         controller: controller,
         externalDataService: externalDataService ?? _ExternalService(),
         mapBuilder:

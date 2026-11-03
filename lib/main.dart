@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app.dart';
 import 'data/auth/firebase_auth_bootstrap.dart';
@@ -19,6 +21,15 @@ import 'data/services/paid_record_cache_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks([
+      'klc (Korean lunar calendar data)',
+    ], await rootBundle.loadString('third_party/klc_LICENSE.txt'));
+    yield LicenseEntryWithLineBreaks([
+      'OpenFreeMap / OpenMapTiles / OpenStreetMap',
+    ], await rootBundle.loadString('third_party/open_map_water_NOTICE.txt'));
+  });
 
   unawaited(NetworkStatusService.instance.initialize());
 

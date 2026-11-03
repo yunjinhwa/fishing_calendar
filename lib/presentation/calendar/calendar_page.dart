@@ -580,7 +580,7 @@ class _TodaySummaryCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '출조 기록 · 날씨/물때 정보는 이후 외부 데이터 연동에서 표시합니다.',
+                          '지도에서 위치와 날짜를 선택해 날씨·물때 정보를 확인할 수 있습니다.',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
