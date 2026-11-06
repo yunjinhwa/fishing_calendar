@@ -35,6 +35,7 @@ migrate_working_dir/
 /kakao.local.json
 /weather.local.json
 /tide.local.json
+/fish.local.json
 
 # Local credentials and signing files
 .env
