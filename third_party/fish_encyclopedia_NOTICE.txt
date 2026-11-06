@@ -1,0 +1,127 @@
+Fish encyclopedia data sources
+
+Bundled public species names, scientific names, classification and water types:
+National Institute of Fisheries Science (국립수산과학원), Species Information API
+https://www.nifs.go.kr/openApi/actionOpenapiInfoList.do
+The catalog includes its collection date and source. No API credentials or
+account-owned records are included in the distributed catalog.
+
+Taxon identifiers, scientific-name validation and language links:
+Wikidata contributors (structured data is available under CC0)
+https://www.wikidata.org/wiki/Wikidata:Licensing
+
+Korean introductory descriptions, where an exact matching article exists:
+Korean Wikipedia contributors, Creative Commons Attribution-ShareAlike 4.0
+https://ko.wikipedia.org/
+https://creativecommons.org/licenses/by-sa/4.0/
+The corresponding article source link is retained with cached descriptions
+for a separately displayed attribution interface.
+
+Representative photographs, where a reusable matching file is available:
+Wikimedia Commons. The original file's author, source page and license link
+are retained in metadata for separate attribution. Individual file licenses apply. Images with
+unverified or noncommercial-only permissions are not selected.
+https://commons.wikimedia.org/wiki/Commons:Reusing_content_outside_Wikimedia
+Images are displayed with their original aspect ratio and without cropping.
+
+Additional actual photographic files reviewed on 2026-11-05:
+Decapterus maruadsi: re_nebel, CC BY 4.0
+https://commons.wikimedia.org/wiki/File:Decapterus_maruadsi.jpg
+Planiliza haematocheilus: Jung-Goo MYOUNG, CC BY 3.0
+https://commons.wikimedia.org/wiki/File:Planiliza_haematocheilus.png
+Acanthopsetta nadeshnyi: Voronina, Elena P.; Volkova, Galina A., CC BY 4.0
+https://commons.wikimedia.org/wiki/File:Acanthopsetta_nadeshnyi.png
+The latter is an original plate with an actual type specimen photograph
+and a radiograph, retained complete without cropping or reconstructing the fish.
+These subject/license-reviewed files fill gaps even when structured taxon
+image links are missing. Explicit illustrations, paintings, maps and generated
+art identified in filenames or metadata are excluded from photo selection.
+
+Supplemental photographs from verified active species taxa:
+iNaturalist contributors. Only individual CC0 1.0, CC BY 4.0, or CC BY-SA 4.0
+photos are selected. Author, original photo page, license and taxon identity
+are checked and retained in cached metadata for separate attribution.
+https://www.inaturalist.org/pages/api+recommended+practices
+https://help.inaturalist.org/en/support/solutions/articles/151000169918
+
+Accepted scientific-name relationships:
+GBIF Species API v2 using the current Catalogue of Life XR checklist,
+checklist UUID 7ddf754f-d193-4cc9-b351-99906754a03b.
+Both names are checked at species rank. A synonym does not override a
+conflicting Korean name or authorize photos from another taxon.
+https://techdocs.gbif.org/en/openapi/v1/species
+
+Bundled Korean translations/summaries of English Wikipedia contributors' text,
+Creative Commons Attribution-ShareAlike 4.0. The text is translated and abridged;
+these are not original Korean Wikipedia articles. Reviewed 2026-11-05 against
+the following revisions, whose scientific-name and taxon links were checked:
+Slender giant moray (Strophidon sathete), revision 1370178422
+https://en.wikipedia.org/w/index.php?title=Slender_giant_moray&oldid=1370178422
+Scomberoides tol, revision 1363314457
+https://en.wikipedia.org/w/index.php?title=Scomberoides_tol&oldid=1363314457
+Hypsagonus corniger, revision 1271719228
+https://en.wikipedia.org/w/index.php?title=Hypsagonus_corniger&oldid=1271719228
+Yellowfin sole (Limanda aspera), revision 1351305262
+https://en.wikipedia.org/w/index.php?title=Yellowfin_sole&oldid=1351305262
+https://creativecommons.org/licenses/by-sa/4.0/
+
+Optional Korean morphology/ecology descriptions:
+National Marine Biodiversity Institute of Korea (국립해양생물자원관), MBRIS
+https://www.data.go.kr/data/15094770/openapi.do
+Description source and attribution metadata are retained for separate display.
+Uses the authenticated public OpenAPI only when the developer configures it.
+Verified public descriptions are also included in assets/data/fish_enrichment.json.
+The official portal's reuse scope was checked on 2026-11-06 as unrestricted
+(이용허락범위 제한 없음). API credentials and collector reports are not bundled.
+
+Additional bundled public descriptions and photographs reviewed 2026-11-06:
+Individual source pages, photo authors and license URLs accompany each result
+in assets/data/fish_enrichment.json; content is merged only for exact catalog
+identity. Selected Korean Wiki descriptions/habitats are abridged Korean
+summaries, under CC BY-SA 4.0. The original authors/contributors, source page,
+adaptation notice and license link are retained per species. This includes
+Korean Wikipedia and the Global World Encyclopedia / Korean Wikisource
+contributors. The latter's exact matching 붕어 and 잉어 sections use revision
+317006 of 글로벌 세계 대백과사전/생물I·동물·인체/동물의 분류/척 추 동 물/어류 경골어류.
+https://ko.wikisource.org/
+https://creativecommons.org/licenses/by-sa/4.0/
+These summaries do not override catalog taxonomy or assert rights in the
+original underlying photographs. Individual photo licenses continue to apply.
+
+Two additional actual photographs downloaded and visually reviewed:
+Acanthopagrus schlegelii: Rakurakuda, CC BY-SA 4.0
+https://commons.wikimedia.org/wiki/File:クロダイ.jpg
+Paralichthys olivaceus: User:Vmenkov, CC BY-SA 3.0
+https://commons.wikimedia.org/wiki/File:Paralichthys-olivaceus-Federal-Way-3583.jpg
+Other new species-linked photographs use iNaturalist taxon photographs with
+matching species identity and individual author, original photo page and
+CC0/CC BY/CC BY-SA license metadata retained in the bundled public data.
+
+Whole-catalog collection, 2026-11-06:
+All 800 catalog identities were processed against the public source lanes.
+The selected output includes 588 Korean descriptions and 420 photographs;
+source-specific results overlap. English Wikipedia was also used to locate
+species-matched photographs, without redistributing English article prose.
+MBRIS domestic/foreign distribution fields supplement its descriptions.
+Independently sourced body-length excerpts retain their original source and
+license in sizeProvenance even when another source supplies the main prose.
+docs/fish_enrichment_inventory.json records the complete public inventory.
+
+Additional official photographic source, reviewed 2026-11-06:
+National Institute of Fisheries Science (국립수산과학원), KOGL Type 1
+(attribution; commercial use and modification allowed as stated by each
+species dialog's own license badge):
+https://www.nifs.go.kr/contents/actionContentsCons0088.do
+Official reuse policy:
+https://www.nifs.go.kr/contents/actionContentsCons0001.do
+Only exact Korean/scientific-name pairs with the individual Type 1 badge and
+an official representative photographic file are collected. Institutional
+attribution, source page, policy link and original watermarked photo URL are
+retained. No publication year or individual photographer is invented when
+the source does not provide one. There are 33 matching licensed source photos,
+including 11 additions to previously missing photos (431 final photo links).
+
+The previous NARIS adapter is retained for possible future use and is not
+called by the default encyclopedia service. The NARIS API information page
+displays KOGL Type 3 (attribution; no derivatives):
+https://naris.science.go.kr/intd/sym/selectOpenApiIntroduce.do

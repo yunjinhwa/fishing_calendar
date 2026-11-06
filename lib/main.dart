@@ -29,6 +29,9 @@ Future<void> main() async {
     yield LicenseEntryWithLineBreaks([
       'OpenFreeMap / OpenMapTiles / OpenStreetMap',
     ], await rootBundle.loadString('third_party/open_map_water_NOTICE.txt'));
+    yield LicenseEntryWithLineBreaks([
+      'NIFS / Wikidata / Wikipedia / Wikimedia Commons / iNaturalist / GBIF',
+    ], await rootBundle.loadString('third_party/fish_encyclopedia_NOTICE.txt'));
   });
 
   unawaited(NetworkStatusService.instance.initialize());

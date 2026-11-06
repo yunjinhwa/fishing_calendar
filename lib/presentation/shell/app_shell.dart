@@ -73,7 +73,7 @@ class _AppShellState extends State<AppShell> {
       ),
       MapPage(isActive: selectedIndex == 1),
       RecordPage(isActive: selectedIndex == 2),
-      const FishDictionaryPage(),
+      FishDictionaryPage(isActive: selectedIndex == 3),
       MyPage(networkStatusService: widget.networkStatusService),
     ];
   }

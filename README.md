@@ -105,3 +105,5 @@ Firebase 프로젝트 연결과 실행 방법은 [Firebase Authentication 설정
 조석 인증키·예보 지점·날짜별 조회와 실제 기기 테스트는 [조석 API 연결](docs/tide_api_setup.md)을 참고한다.
 관측 수온의 활용 신청·표시 기준·기록 자동 입력과 테스트는 [수온 API 연결](docs/water_temperature_api_setup.md)을 참고한다.
 과거 관측 자료의 활용 신청·조회 범위·기록 연결과 테스트는 [과거 날씨·수온 조회](docs/historical_external_data.md)를 참고한다.
+어류도감의 기본 800종 목록·키 없는 사진과 설명 조회·기기 테스트는 [어류도감 연결](docs/fish_encyclopedia_api.md)을 참고한다.
+설명·사진 제공 수의 비교와 일괄 점검 방법은 [어류 상세정보 제공 범위](docs/fish_data_coverage.md)를 참고한다.

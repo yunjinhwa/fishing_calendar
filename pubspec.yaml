@@ -37,6 +37,7 @@ dependencies:
   go_router: ^14.0.0
   flutter_riverpod: ^2.5.1
   dio: ^5.4.0
+  xml: 6.6.1
   freezed_annotation: ^2.4.1
   json_annotation: ^4.9.0
   table_calendar: ^3.1.2
@@ -82,8 +83,11 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/data/fish_catalog.json
+    - assets/data/fish_enrichment.json
     - third_party/klc_LICENSE.txt
     - third_party/open_map_water_NOTICE.txt
+    - third_party/fish_encyclopedia_NOTICE.txt
 
   # To add assets to your application, add an assets section, like this:
   # assets:
