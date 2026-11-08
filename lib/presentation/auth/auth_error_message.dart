@@ -6,7 +6,7 @@ String authFailureMessage(AuthFailure failure) {
     AuthFailureCode.invalidCredentials => '이메일 또는 비밀번호가 올바르지 않습니다.',
     AuthFailureCode.userNotFound => '가입된 계정을 찾을 수 없습니다.',
     AuthFailureCode.emailAlreadyInUse => '이미 가입된 이메일입니다.',
-    AuthFailureCode.weakPassword => '더 안전한 비밀번호를 입력해 주세요.',
+    AuthFailureCode.weakPassword => '비밀번호는 8자 이상이며 영문과 숫자를 포함해야 합니다.',
     AuthFailureCode.userDisabled => '사용이 중지된 계정입니다. 관리자에게 문의해 주세요.',
     AuthFailureCode.tooManyRequests => '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
     AuthFailureCode.networkUnavailable => '네트워크 연결을 확인한 뒤 다시 시도해 주세요.',

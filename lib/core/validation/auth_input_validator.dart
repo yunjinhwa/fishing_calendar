@@ -16,7 +16,7 @@ class AuthInputValidator {
   static bool isValidPassword(String value) {
     return value.length >= 8 &&
         RegExp(r'[A-Za-z]').hasMatch(value) &&
-        RegExp(r'\d').hasMatch(value);
+        RegExp(r'[0-9]').hasMatch(value);
   }
 
   static bool isValidNickname(String value) {

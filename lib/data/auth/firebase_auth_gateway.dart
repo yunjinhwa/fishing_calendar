@@ -87,6 +87,23 @@ class FirebaseAuthGateway implements AuthGateway {
   }
 
   @override
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    try {
+      // This Korean-language app keeps the shared Auth language consistent for
+      // concurrent requests instead of temporarily changing and restoring it.
+      await _auth.setLanguageCode('ko');
+      await _auth.sendPasswordResetEmail(email: email);
+    } on firebase.FirebaseAuthException catch (error, stackTrace) {
+      if (error.code == 'user-not-found' || error.code == 'user-disabled') {
+        return;
+      }
+      throw _mapFirebaseError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  @override
   Future<AuthUser> updateDisplayName(String? displayName) async {
     final user = _auth.currentUser;
     if (user == null) {

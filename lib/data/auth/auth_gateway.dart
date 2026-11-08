@@ -100,6 +100,10 @@ abstract interface class AuthGateway {
     required String password,
   });
 
+  /// Requests a reset email without signing in or changing the current user.
+  /// Success does not confirm that an account exists or an email was delivered.
+  Future<void> sendPasswordResetEmail({required String email});
+
   Future<AuthUser> registerWithEmailAndPassword({
     required String email,
     required String password,
@@ -170,6 +174,10 @@ class UnavailableAuthGateway implements AuthGateway {
     required String email,
     required String password,
   }) => Future<AuthUser>.error(failure);
+
+  @override
+  Future<void> sendPasswordResetEmail({required String email}) =>
+      Future<void>.error(failure);
 
   @override
   Future<void> signOut() => Future<void>.error(failure);

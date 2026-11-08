@@ -14,6 +14,7 @@ import '../../data/services/record_sync_service.dart';
 import '../common/hold_to_reveal_password_field.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
+import 'password_reset_page.dart';
 import 'signup_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -152,6 +153,18 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
+  Future<void> _openPasswordReset() async {
+    if (isSubmitting) return;
+    final email = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => PasswordResetPage(initialEmail: emailController.text),
+      ),
+    );
+    if (!mounted || email == null) return;
+    emailController.text = email;
+    passwordController.clear();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -196,6 +209,13 @@ class _LoginPageState extends State<LoginPage> {
                 labelText: '비밀번호',
                 hintText: '비밀번호를 입력하세요',
                 border: OutlineInputBorder(),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: isSubmitting ? null : _openPasswordReset,
+                child: const Text('비밀번호를 잊으셨나요?'),
               ),
             ),
             const SizedBox(height: 12),

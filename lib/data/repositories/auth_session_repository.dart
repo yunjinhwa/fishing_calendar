@@ -97,6 +97,8 @@ class AuthSessionRepository extends ChangeNotifier {
   bool get isAccountDeletedRemotely =>
       _hasPendingAccountDeletion && !_accountDeletionInitiatedLocally;
   bool get usesFirebaseAuth => _authGateway != null;
+  bool get canSendPasswordResetEmail =>
+      _authGateway?.availability == AuthGatewayAvailability.available;
   AuthFailure? get lastAuthFailure => _lastAuthFailure;
   bool get usesServerPlan => _authGateway != null;
   bool get canRefreshServerPlan =>
@@ -445,6 +447,37 @@ class AuthSessionRepository extends ChangeNotifier {
         _signOutOnRestartKey,
         'clear restart sign-out',
       );
+    }
+  }
+
+  /// Requests recovery without reading or changing local account/session data.
+  /// A successful request does not disclose whether the address is registered.
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    final normalizedEmail = DataOwnerKey.normalizeEmail(email);
+    if (!AuthInputValidator.isValidEmail(normalizedEmail)) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidEmail,
+        message: '올바른 이메일 주소를 입력해 주세요.',
+      );
+    }
+
+    final gateway = _authGateway;
+    if (gateway == null) {
+      throw const AuthFailure(
+        code: AuthFailureCode.configuration,
+        message: '비밀번호 재설정을 위한 인증 서비스가 설정되지 않았습니다.',
+      );
+    }
+    _requireAvailableGateway(gateway);
+
+    try {
+      await gateway.sendPasswordResetEmail(email: normalizedEmail);
+    } on AuthFailure catch (failure) {
+      if (failure.code == AuthFailureCode.userNotFound ||
+          failure.code == AuthFailureCode.userDisabled) {
+        return;
+      }
+      rethrow;
     }
   }
 
