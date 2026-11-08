@@ -6,6 +6,7 @@ import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/personal_best_repository.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_history_scope.dart';
+import '../share/share_record_page.dart';
 import 'personal_best_photo.dart';
 
 class PersonalBestDetailPage extends StatefulWidget {
@@ -229,7 +230,7 @@ class _PersonalBestDetailPageState extends State<PersonalBestDetailPage> {
         const SizedBox(height: 8),
         _InfoCard(
           children: [
-            const Text('기록어 공유 이미지는 현재 준비 중입니다.'),
+            const Text('선택한 조과의 수치와 출조 사진으로 공유 이미지를 만듭니다.'),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () async {
@@ -238,8 +239,19 @@ class _PersonalBestDetailPageState extends State<PersonalBestDetailPage> {
                   message: '기록어 공유는 로그인 후 사용할 수 있습니다.',
                 );
                 if (!allowed || !context.mounted || !_isCurrentSession) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('공유 이미지 생성 기능은 현재 준비 중입니다.')),
+                final latest = _repository.getPersonalBest(
+                  widget.record.speciesName,
+                  sortType: _sortType,
+                );
+                if (latest == null) return;
+                await Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => ShareRecordPage(
+                      record: latest,
+                      repository: _repository,
+                      recordChanges: _recordChanges,
+                    ),
+                  ),
                 );
               },
               icon: const Icon(Icons.ios_share_outlined),

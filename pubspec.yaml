@@ -53,6 +53,9 @@ dependencies:
   firebase_auth: ^6.7.0
   cloud_firestore: ^6.10.0
   path_provider: ^2.1.6
+  share_plus: ^13.0.0
+  gal: ^2.3.3
+  file_selector: ^1.1.0
   kakao_map_plugin: 1.0.0
   geolocator: 14.1.2
   vector_tile: ^4.0.0
@@ -83,6 +86,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/images/share_record_background.png
     - assets/data/fish_catalog.json
     - assets/data/fish_enrichment.json
     - third_party/klc_LICENSE.txt
