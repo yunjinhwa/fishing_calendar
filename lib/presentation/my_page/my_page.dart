@@ -10,6 +10,7 @@ import '../auth/auth_access_guard.dart';
 import '../auth/auth_error_message.dart';
 import '../auth/login_choice_page.dart';
 import '../common/hold_to_reveal_password_field.dart';
+import '../legal/policy_document_page.dart';
 import '../offline/offline_mode_page.dart';
 import '../plan/plan_page.dart';
 import '../personal_best/personal_best_page.dart';
@@ -384,6 +385,37 @@ class MyPage extends StatelessWidget {
                         ),
                       );
                     },
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                Text(
+                  '약관 및 정책',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Card(
+                  child: Column(
+                    children: [
+                      for (final document in PolicyDocument.values)
+                        ListTile(
+                          leading: Icon(
+                            document == PolicyDocument.terms
+                                ? Icons.description_outlined
+                                : Icons.privacy_tip_outlined,
+                          ),
+                          title: Text(document.title),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  PolicyDocumentPage(document: document),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 24),
