@@ -27,8 +27,8 @@ void main() {
     await _open(tester, _forecast());
     expect(_text(tester, '날씨 *'), '흐림');
     expect(_text(tester, '기온 *'), '-2.5');
-    expect(_text(tester, '물때 *'), isNotEmpty);
-    expect(_text(tester, '수온 *'), isEmpty);
+    expect(_text(tester, '물때 (선택)'), isNotEmpty);
+    expect(_text(tester, '수온 (선택)'), isEmpty);
     expect(find.textContaining('기상청 초단기예보'), findsOneWidget);
   });
 
@@ -49,14 +49,14 @@ void main() {
   ) async {
     await _open(tester, _forecast());
     await tester.enterText(_field('날씨 *'), '직접 확인한 비');
-    await tester.enterText(_field('물때 *'), '3물');
-    await tester.enterText(_field('수온 *'), '15');
+    await tester.enterText(_field('물때 (선택)'), '3물');
+    await tester.enterText(_field('수온 (선택)'), '15');
     await tester.enterText(_field('위치 *'), '다른 항구');
     await tester.pump();
     expect(_text(tester, '날씨 *'), '직접 확인한 비');
     expect(_text(tester, '기온 *'), isEmpty);
-    expect(_text(tester, '물때 *'), '3물');
-    expect(_text(tester, '수온 *'), '15');
+    expect(_text(tester, '물때 (선택)'), '3물');
+    expect(_text(tester, '수온 (선택)'), '15');
   });
 
   testWidgets(
@@ -104,8 +104,8 @@ void main() {
     );
     expect(_text(tester, '날씨 *'), isEmpty);
     expect(_text(tester, '기온 *'), '0.0');
-    expect(_text(tester, '물때 *'), isNotEmpty);
-    expect(_text(tester, '수온 *'), isEmpty);
+    expect(_text(tester, '물때 (선택)'), isNotEmpty);
+    expect(_text(tester, '수온 (선택)'), isEmpty);
     expect(tester.takeException(), isNull);
   });
 }

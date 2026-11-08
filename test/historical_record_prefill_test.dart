@@ -50,7 +50,7 @@ void main() {
     );
     expect(_text(tester, '날씨 *'), '맑음');
     expect(_text(tester, '기온 *'), '24.6');
-    expect(_text(tester, '수온 *'), '21.8');
+    expect(_text(tester, '수온 (선택)'), '21.8');
     expect(find.text('부산 기상관측소 · 과거 관측 2025.07.13 00:00 KST'), findsOneWidget);
     expect(find.text('부산 수온관측소 · 과거 관측 2025.07.13 00:00 KST'), findsOneWidget);
     await _selectGenreAndSave(tester);
@@ -105,15 +105,15 @@ void main() {
     'location changes clear automatic values and restore matching ones',
     (tester) async {
       await _open(tester);
-      await tester.enterText(_field('물때 *'), '직접 확인한 물때');
+      await tester.enterText(_field('물때 (선택)'), '직접 확인한 물때');
       await tester.enterText(_field('위치 *'), '다른 항구');
       await tester.pump();
       _expectValues(tester, weather: '', air: '', water: '');
-      expect(_text(tester, '물때 *'), '직접 확인한 물때');
+      expect(_text(tester, '물때 (선택)'), '직접 확인한 물때');
       await tester.enterText(_field('위치 *'), _location.name);
       await tester.pump();
       _expectValues(tester);
-      expect(_text(tester, '물때 *'), '직접 확인한 물때');
+      expect(_text(tester, '물때 (선택)'), '직접 확인한 물때');
     },
   );
 
@@ -144,7 +144,7 @@ void main() {
         final water = clear ? '' : '19.2';
         await tester.enterText(_field('날씨 *'), weather);
         await tester.enterText(_field('기온 *'), air);
-        await tester.enterText(_field('수온 *'), water);
+        await tester.enterText(_field('수온 (선택)'), water);
         await tester.enterText(_field('위치 *'), '다른 항구');
         await tester.enterText(_field('위치 *'), _location.name);
         await _chooseStart(
@@ -310,10 +310,10 @@ void main() {
         fetchedAt: DateTime.now().toUtc(),
       ),
     );
-    expect(_text(tester, '수온 *'), isEmpty);
+    expect(_text(tester, '수온 (선택)'), isEmpty);
   });
 
-  for (final field in ['날씨 *', '기온 *', '수온 *']) {
+  for (final field in ['날씨 *', '기온 *']) {
     testWidgets('clearing historical $field preserves required validation', (
       tester,
     ) async {
@@ -321,16 +321,25 @@ void main() {
       await tester.enterText(_field(field), '');
       await _selectGenreAndSave(tester);
       expect(_text(tester, field), isEmpty);
-      final message = switch (field) {
-        '날씨 *' => '날씨를 입력하세요.',
-        '기온 *' => '기온을 입력하세요.',
-        _ => '수온을 입력하세요.',
-      };
+      final message = field == '날씨 *' ? '날씨를 입력하세요.' : '기온을 입력하세요.';
       expect(find.text(message), findsOneWidget);
       expect(FishingRecordRepository.instance.getAllRecords(), isEmpty);
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('clearing historical water saves null without refilling', (
+    tester,
+  ) async {
+    await _open(tester);
+    await tester.enterText(_field('수온 (선택)'), '');
+    await _selectGenreAndSave(tester);
+    expect(
+      FishingRecordRepository.instance.getAllRecords().single.waterTemperature,
+      isNull,
+    );
+    expect(tester.takeException(), isNull);
+  });
 }
 
 HistoricalWeatherObservation _weather() => HistoricalWeatherObservation(
@@ -435,7 +444,7 @@ void _expectValues(
 }) {
   expect(_text(tester, '날씨 *'), weather);
   expect(_text(tester, '기온 *'), air);
-  expect(_text(tester, '수온 *'), water);
+  expect(_text(tester, '수온 (선택)'), water);
 }
 
 String _dateTimeText(WidgetTester tester, String label) => tester

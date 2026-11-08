@@ -491,10 +491,10 @@ Future<void> _systemBack(WidgetTester tester) async {
 Future<void> _fillRequiredFields(WidgetTester tester) async {
   for (final entry in <String, String>{
     '위치 *': 'New harbor',
-    '물때 *': '3물',
+    '물때 (선택)': '3물',
     '날씨 *': '맑음',
     '기온 *': '22',
-    '수온 *': '19',
+    '수온 (선택)': '19',
     '메모': 'Keep this draft',
   }.entries) {
     await tester.ensureVisible(_field(entry.key));

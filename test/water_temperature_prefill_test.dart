@@ -36,10 +36,10 @@ void main() {
     tester,
   ) async {
     await _open(tester);
-    expect(_text(tester, '수온 *'), '16.2');
+    expect(_text(tester, '수온 (선택)'), '16.2');
     expect(_text(tester, '날씨 *'), isEmpty);
     expect(_text(tester, '기온 *'), isEmpty);
-    expect(_text(tester, '물때 *'), isNotEmpty);
+    expect(_text(tester, '물때 (선택)'), isNotEmpty);
     expect(find.textContaining('테스트 관측소 · 관측'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -48,7 +48,7 @@ void main() {
     tester,
   ) async {
     await _open(tester, weather: _forecast(hoursAgo: 24));
-    expect(_text(tester, '수온 *'), '16.2');
+    expect(_text(tester, '수온 (선택)'), '16.2');
     expect(_text(tester, '날씨 *'), isEmpty);
     expect(_text(tester, '기온 *'), isEmpty);
   });
@@ -56,7 +56,7 @@ void main() {
   for (final age in [const Duration(hours: 3), const Duration(minutes: -5)]) {
     testWidgets('observation with age $age is never prefilled', (tester) async {
       await _open(tester, observation: _observation(age: age));
-      expect(_text(tester, '수온 *'), isEmpty);
+      expect(_text(tester, '수온 (선택)'), isEmpty);
       expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
     });
   }
@@ -65,10 +65,10 @@ void main() {
     tester,
   ) async {
     await _open(tester, name: '다른 항구');
-    expect(_text(tester, '수온 *'), isEmpty);
+    expect(_text(tester, '수온 (선택)'), isEmpty);
     await tester.pumpWidget(const SizedBox.shrink());
     await _open(tester, longitude: 128);
-    expect(_text(tester, '수온 *'), isEmpty);
+    expect(_text(tester, '수온 (선택)'), isEmpty);
   });
 
   testWidgets(
@@ -77,16 +77,16 @@ void main() {
       await _open(tester, weather: _forecast());
       await tester.enterText(_field('날씨 *'), '직접 확인한 비');
       await tester.enterText(_field('기온 *'), '20');
-      await tester.enterText(_field('물때 *'), '3물');
+      await tester.enterText(_field('물때 (선택)'), '3물');
       await tester.enterText(_field('위치 *'), '다른 항구');
       await tester.pump();
-      expect(_text(tester, '수온 *'), isEmpty);
+      expect(_text(tester, '수온 (선택)'), isEmpty);
       expect(_text(tester, '날씨 *'), '직접 확인한 비');
       expect(_text(tester, '기온 *'), '20');
-      expect(_text(tester, '물때 *'), '3물');
+      expect(_text(tester, '물때 (선택)'), '3물');
       await tester.enterText(_field('위치 *'), _location.name);
       await tester.pump();
-      expect(_text(tester, '수온 *'), '16.2');
+      expect(_text(tester, '수온 (선택)'), '16.2');
       expect(tester.takeException(), isNull);
     },
   );
@@ -100,10 +100,10 @@ void main() {
         final original = tester.widget<TextField>(field).controller!.text;
         await tester.enterText(field, '34');
         await tester.pump();
-        expect(_text(tester, '수온 *'), isEmpty);
+        expect(_text(tester, '수온 (선택)'), isEmpty);
         await tester.enterText(field, original);
         await tester.pump();
-        expect(_text(tester, '수온 *'), '16.2');
+        expect(_text(tester, '수온 (선택)'), '16.2');
         expect(tester.takeException(), isNull);
       },
     );
@@ -120,10 +120,10 @@ void main() {
     ) async {
       await _open(tester);
       await _chooseStart(tester, DateTime.now().add(offset));
-      expect(_text(tester, '수온 *'), isEmpty);
+      expect(_text(tester, '수온 (선택)'), isEmpty);
       expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
       await _chooseStart(tester, DateTime.now());
-      expect(_text(tester, '수온 *'), '16.2');
+      expect(_text(tester, '수온 (선택)'), '16.2');
       expect(tester.takeException(), isNull);
     });
   }
@@ -133,12 +133,12 @@ void main() {
       tester,
     ) async {
       await _open(tester);
-      await tester.enterText(_field('수온 *'), manual);
+      await tester.enterText(_field('수온 (선택)'), manual);
       await tester.enterText(_field('위치 *'), '다른 항구');
       await tester.enterText(_field('위치 *'), _location.name);
       await _chooseStart(tester, DateTime.now().add(const Duration(days: 2)));
       await _chooseStart(tester, DateTime.now());
-      expect(_text(tester, '수온 *'), manual);
+      expect(_text(tester, '수온 (선택)'), manual);
       expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -148,13 +148,13 @@ void main() {
     tester,
   ) async {
     await _open(tester, initialWaterTemperature: 12.4);
-    expect(_text(tester, '수온 *'), '12.4');
+    expect(_text(tester, '수온 (선택)'), '12.4');
     await tester.enterText(_field('위치 *'), '다른 항구');
     await _chooseStart(
       tester,
       DateTime.now().subtract(const Duration(days: 2)),
     );
-    expect(_text(tester, '수온 *'), '12.4');
+    expect(_text(tester, '수온 (선택)'), '12.4');
     expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
   });
 
@@ -178,11 +178,11 @@ void main() {
       );
       await FishingRecordRepository.instance.addRecord(record);
       await _open(tester, editingRecord: record);
-      expect(_text(tester, '수온 *'), temperature?.toString() ?? '');
+      expect(_text(tester, '수온 (선택)'), temperature?.toString() ?? '');
       await tester.enterText(_field('위치 *'), '다른 항구');
       await tester.enterText(_field('위치 *'), _location.name);
       await _chooseStart(tester, DateTime.now());
-      expect(_text(tester, '수온 *'), temperature?.toString() ?? '');
+      expect(_text(tester, '수온 (선택)'), temperature?.toString() ?? '');
       expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -192,23 +192,23 @@ void main() {
     tester,
   ) async {
     await _open(tester, allowAutomaticWaterTemperature: false);
-    expect(_text(tester, '수온 *'), isEmpty);
+    expect(_text(tester, '수온 (선택)'), isEmpty);
     await tester.enterText(_field('위치 *'), '다른 항구');
     await tester.enterText(_field('위치 *'), _location.name);
-    expect(_text(tester, '수온 *'), isEmpty);
-    await tester.enterText(_field('수온 *'), '18.3');
+    expect(_text(tester, '수온 (선택)'), isEmpty);
+    await tester.enterText(_field('수온 (선택)'), '18.3');
     await _chooseStart(
       tester,
       DateTime.now().subtract(const Duration(days: 2)),
     );
-    expect(_text(tester, '수온 *'), '18.3');
+    expect(_text(tester, '수온 (선택)'), '18.3');
   });
 
-  testWidgets('deliberate clear keeps existing required water validation', (
+  testWidgets('deliberate clear saves optional observed water as null', (
     tester,
   ) async {
     await _open(tester, weather: _forecast());
-    await tester.enterText(_field('수온 *'), '');
+    await tester.enterText(_field('수온 (선택)'), '');
     final genre = find.widgetWithText(ChoiceChip, '루어');
     await tester.ensureVisible(genre);
     await tester.tap(genre);
@@ -216,8 +216,10 @@ void main() {
     await tester.ensureVisible(save);
     await tester.tap(save);
     await tester.pumpAndSettle();
-    expect(_text(tester, '수온 *'), isEmpty);
-    expect(find.text('수온을 입력하세요.'), findsOneWidget);
+    expect(
+      FishingRecordRepository.instance.getAllRecords().single.waterTemperature,
+      isNull,
+    );
     expect(tester.takeException(), isNull);
   });
 }
