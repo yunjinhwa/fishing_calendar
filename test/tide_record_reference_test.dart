@@ -35,8 +35,8 @@ void main() {
     expect(find.text('만조'), findsOneWidget);
     expect(find.text('09:00'), findsOneWidget);
     expect(find.text('483 cm'), findsOneWidget);
-    expect(_text(tester, '물때 *'), '조금');
-    expect(_text(tester, '수온 *'), isEmpty);
+    expect(_text(tester, '물때 (선택)'), '조금');
+    expect(_text(tester, '수온 (선택)'), isEmpty);
   });
 
   testWidgets(
@@ -44,11 +44,11 @@ void main() {
     (tester) async {
       await _open(tester, _reference(day: TideDay(2026, 11, 2)));
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
-      expect(_text(tester, '물때 *'), '조금');
+      expect(_text(tester, '물때 (선택)'), '조금');
 
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 3));
 
-      expect(_text(tester, '물때 *'), '무시');
+      expect(_text(tester, '물때 (선택)'), '무시');
       expect(find.byType(TideDataCard), findsNothing);
       expect(find.text('간조'), findsNothing);
       expect(find.text('03:00'), findsNothing);
@@ -65,13 +65,13 @@ void main() {
     (tester) async {
       await _open(tester, _reference());
       // A real edit must differ from today's automatically calculated tide.
-      await tester.enterText(_field('물때 *'), '직접 확인한 7물');
-      await tester.enterText(_field('수온 *'), '16.5');
+      await tester.enterText(_field('물때 (선택)'), '직접 확인한 7물');
+      await tester.enterText(_field('수온 (선택)'), '16.5');
       await tester.enterText(_field('위치 *'), '다른 출조 장소');
       await tester.pump();
       expect(find.byType(TideDataCard), findsNothing);
-      expect(_text(tester, '물때 *'), '직접 확인한 7물');
-      expect(_text(tester, '수온 *'), '16.5');
+      expect(_text(tester, '물때 (선택)'), '직접 확인한 7물');
+      expect(_text(tester, '수온 (선택)'), '16.5');
     },
   );
 
@@ -80,10 +80,10 @@ void main() {
     (tester) async {
       await _open(tester, _reference(day: TideDay(2026, 11, 2)));
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
-      await tester.enterText(_field('물때 *'), '직접 확인한 7물');
+      await tester.enterText(_field('물때 (선택)'), '직접 확인한 7물');
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 3));
       expect(find.byType(TideDataCard), findsNothing);
-      expect(_text(tester, '물때 *'), '직접 확인한 7물');
+      expect(_text(tester, '물때 (선택)'), '직접 확인한 7물');
       expect(tester.takeException(), isNull);
     },
   );
@@ -93,12 +93,12 @@ void main() {
   ) async {
     await _open(tester, _reference(day: TideDay(2026, 11, 2)));
     await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
-    expect(_text(tester, '물때 *'), '조금');
-    await tester.enterText(_field('물때 *'), '');
+    expect(_text(tester, '물때 (선택)'), '조금');
+    await tester.enterText(_field('물때 (선택)'), '');
 
     await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 3));
 
-    expect(_text(tester, '물때 *'), isEmpty);
+    expect(_text(tester, '물때 (선택)'), isEmpty);
     expect(tester.takeException(), isNull);
   });
 
@@ -107,22 +107,22 @@ void main() {
     (tester) async {
       await _open(tester, _reference(day: TideDay(2026, 11, 2)));
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
-      expect(_text(tester, '물때 *'), '조금');
+      expect(_text(tester, '물때 (선택)'), '조금');
 
       await tester.ensureVisible(_field('위도'));
       await tester.enterText(_field('위도'), '91');
       await tester.pump();
-      expect(_text(tester, '물때 *'), isEmpty);
+      expect(_text(tester, '물때 (선택)'), isEmpty);
       expect(find.byType(TideDataCard), findsNothing);
 
       await tester.enterText(_field('위도'), '35.9756');
       await tester.pump();
-      expect(_text(tester, '물때 *'), '조금');
-      await tester.enterText(_field('물때 *'), '7물');
+      expect(_text(tester, '물때 (선택)'), '조금');
+      await tester.enterText(_field('물때 (선택)'), '7물');
       await tester.ensureVisible(_field('위도'));
       await tester.enterText(_field('위도'), '91');
       await tester.pump();
-      expect(_text(tester, '물때 *'), '7물');
+      expect(_text(tester, '물때 (선택)'), '7물');
       expect(tester.takeException(), isNull);
     },
   );
@@ -133,7 +133,7 @@ void main() {
       await _open(tester, null);
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
 
-      expect(_text(tester, '물때 *'), '조금');
+      expect(_text(tester, '물때 (선택)'), '조금');
       expect(find.byType(TideDataCard), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -151,15 +151,15 @@ void main() {
 
       expect(_text(tester, '위도'), '35.9756');
       expect(_text(tester, '경도'), '126.5631');
-      expect(_text(tester, '물때 *'), isEmpty);
+      expect(_text(tester, '물때 (선택)'), isEmpty);
       expect(find.byType(TideDataCard), findsNothing);
       expect(find.text('03:00'), findsNothing);
       expect(find.text('09:00'), findsNothing);
 
-      await tester.enterText(_field('물때 *'), '직접 확인한 7물');
+      await tester.enterText(_field('물때 (선택)'), '직접 확인한 7물');
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 3));
 
-      expect(_text(tester, '물때 *'), '직접 확인한 7물');
+      expect(_text(tester, '물때 (선택)'), '직접 확인한 7물');
       expect(find.byType(TideDataCard), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -173,11 +173,11 @@ void main() {
         _reference(day: TideDay(2026, 11, 2)),
         initialTide: '기존 입력 5물',
       );
-      expect(_text(tester, '물때 *'), '기존 입력 5물');
+      expect(_text(tester, '물때 (선택)'), '기존 입력 5물');
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 3));
 
-      expect(_text(tester, '물때 *'), '기존 입력 5물');
+      expect(_text(tester, '물때 (선택)'), '기존 입력 5물');
       expect(tester.takeException(), isNull);
     },
   );
@@ -186,10 +186,10 @@ void main() {
     await _open(tester, null);
     await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
     await _pickDateTime(tester, '종료 시간 *', DateTime(2026, 11, 2), hour: 14);
-    expect(_text(tester, '물때 *'), '조금');
+    expect(_text(tester, '물때 (선택)'), '조금');
     await tester.enterText(_field('날씨 *'), '흐림');
     await tester.enterText(_field('기온 *'), '11');
-    await tester.enterText(_field('수온 *'), '16.5');
+    await tester.enterText(_field('수온 (선택)'), '16.5');
     final genre = find.widgetWithText(ChoiceChip, '루어');
     await tester.ensureVisible(genre);
     await tester.tap(genre);
@@ -209,10 +209,10 @@ void main() {
     tester,
   ) async {
     await _open(tester, _reference());
-    await tester.enterText(_field('물때 *'), '7물');
+    await tester.enterText(_field('물때 (선택)'), '7물');
     await tester.enterText(_field('날씨 *'), '흐림');
     await tester.enterText(_field('기온 *'), '11');
-    await tester.enterText(_field('수온 *'), '16.5');
+    await tester.enterText(_field('수온 (선택)'), '16.5');
     final genre = find.widgetWithText(ChoiceChip, '루어');
     await tester.ensureVisible(genre);
     await tester.tap(genre);

@@ -815,11 +815,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     final genreName = genre == '기타' ? customGenre : genre;
 
-    if (tide.isEmpty) {
-      showMessage('물때를 입력하세요.');
-      return;
-    }
-
     if (weather.isEmpty) {
       showMessage('날씨를 입력하세요.');
       return;
@@ -837,15 +832,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
       return;
     }
 
-    if (waterTemperature.isEmpty) {
-      showMessage('수온을 입력하세요.');
-      return;
-    }
+    final waterTemperatureValue = waterTemperature.isEmpty
+        ? null
+        : double.tryParse(waterTemperature);
 
-    final waterTemperatureValue = double.tryParse(waterTemperature);
-
-    if (waterTemperatureValue == null) {
-      showMessage('수온은 숫자로 입력하세요.');
+    if (waterTemperature.isNotEmpty &&
+        (waterTemperatureValue == null || !waterTemperatureValue.isFinite)) {
+      showMessage('수온은 유한한 숫자로 입력하세요.');
       return;
     }
 
@@ -913,7 +906,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       startAt: startAt,
       endAt: endAt,
       genreName: genreName,
-      tide: tide,
+      tide: tide.isEmpty ? null : tide,
       weather: weather,
       airTemperature: airTemperatureValue,
       waterTemperature: waterTemperatureValue,
@@ -1449,7 +1442,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   const SizedBox(height: 8),
                 ],
                 Text(
-                  '물때는 날짜와 위치에 따라 자동 입력되며 수정할 수 있습니다. 수온은 기록의 위치·시간에 맞는 관측값이 있을 때 자동 입력됩니다. 조회되지 않은 값은 직접 입력하세요.',
+                  '물때와 수온은 선택 항목으로 비워 두어도 저장할 수 있습니다. 물때는 날짜와 위치에 따라, 수온은 위치·시간에 맞는 관측값이 있을 때 자동 입력되며 직접 수정하거나 지울 수 있습니다.',
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
@@ -1467,10 +1460,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   },
                   maxLength: FishingRecordValidator.maxTideLength,
                   decoration: InputDecoration(
-                    labelText: '물때 *',
+                    labelText: '물때 (선택)',
                     hintText: '예: 7물',
                     helperText: _calculatedTideName == null
-                        ? '자동 계산할 수 없는 위치·날짜는 직접 입력해 주세요.'
+                        ? '필요한 경우 직접 입력해 주세요.'
                         : '계산 물때: ${_calculatedTideName!.label} · '
                               '${_calculatedTideName!.lunarDate.label} · '
                               '${_calculatedTideName!.convention.label} · '
@@ -1539,7 +1532,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                     signed: true,
                   ),
                   decoration: InputDecoration(
-                    labelText: '수온 *',
+                    labelText: '수온 (선택)',
                     hintText: '예: 16.2',
                     suffixText: '℃',
                     helperText: _automaticHistoricalWaterTemperature

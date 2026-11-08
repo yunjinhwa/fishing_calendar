@@ -89,8 +89,6 @@ void main() {
         place.name,
       );
       await _tap(tester, find.widgetWithText(ChoiceChip, '루어'));
-      await _enter(tester, _field('물때 *'), '해당 없음');
-      await _enter(tester, _field('수온 *'), '19');
 
       // These are two individual fish from one trip. Their maxima differ.
       await _enter(tester, _field('어종').at(0), 'Bass');
@@ -111,6 +109,8 @@ void main() {
       expect(persisted.longitude, place.longitude);
       expect(persisted.weather, '맑음');
       expect(persisted.airTemperature, 22);
+      expect(persisted.tide, isNull);
+      expect(persisted.waterTemperature, isNull);
       expect(persisted.catches, hasLength(2));
       expect(persisted.catches.map((fish) => fish.lengthCm), [60, 40]);
       expect(persisted.catches.map((fish) => fish.weightG), [400, 1200]);
