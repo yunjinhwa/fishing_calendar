@@ -14,6 +14,7 @@ import 'package:fishing_build/data/services/network_status_service.dart';
 import 'package:fishing_build/data/services/paid_record_cache_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/presentation/calendar/calendar_page.dart';
+import 'package:fishing_build/presentation/personal_best/personal_best_detail_page.dart';
 import 'package:fishing_build/presentation/personal_best/personal_best_page.dart';
 import 'package:fishing_build/presentation/record/record_history_scope.dart';
 import 'package:flutter/material.dart';
@@ -179,9 +180,76 @@ void main() {
       expect(find.textContaining('60.0 cm'), findsOneWidget);
       expect(find.textContaining('Historical harbor'), findsOneWidget);
       expect(records.getRecordById('old-largest'), isNotNull);
+
+      await tester.tap(find.text('Rockfish'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PersonalBestDetailPage), findsOneWidget);
+      expect(policy.holdsHistory(owner), isTrue);
+
+      connectivity.connected = false;
+      await tester.runAsync(network.refresh);
+      expect(await tester.runAsync(cache.trimNow), 0);
+      await _flush(tester, cache);
+      expect(records.getRecordById('old-largest'), isNotNull);
+      expect(find.textContaining('60.0 cm'), findsOneWidget);
+      expect(gateway.fetchCount, 1);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(policy.holdsHistory(owner), isTrue);
+      expect(records.getRecordById('old-largest'), isNotNull);
       await _dispose(tester, cache);
+      expect(policy.holdsHistory(owner), isFalse);
       expect(records.getRecordById('old-largest'), isNull);
       expect(records.getRecordById('recent'), isNotNull);
+    },
+  );
+
+  testWidgets(
+    'open history moves its lease to a new owner and rejects the old response',
+    (tester) async {
+      final previousOwner = owner;
+      gateway.seedActive(auth.memberId!, record('previous-owner'));
+      final gate = Completer<void>();
+      gates.add(gate);
+      gateway.fetchGate = gate.future;
+
+      await tester.pumpWidget(history());
+      await tester.pump();
+      expect(gateway.fetchCount, 1);
+      expect(policy.holdsHistory(previousOwner), isTrue);
+
+      await tester.runAsync(
+        () => auth.setSessionForTesting(
+          plan: UserPlan.paid,
+          email: 'next-history-owner@example.com',
+        ),
+      );
+      final nextOwner = auth.dataOwnerKey;
+      gateway.seedActive(auth.memberId!, record('next-owner'));
+      await tester.pump();
+      expect(policy.holdsHistory(previousOwner), isFalse);
+      expect(policy.holdsHistory(nextOwner), isTrue);
+      expect(gateway.fetchCount, 2);
+
+      gate.complete();
+      await _flush(tester, cache);
+      expect(
+        await tester.runAsync(
+          () => LocalDataStore.instance.readRecordForOwner(
+            previousOwner,
+            'previous-owner',
+          ),
+        ),
+        isNull,
+      );
+      expect(records.getRecordById('previous-owner'), isNull);
+      expect(records.getRecordById('next-owner'), isNotNull);
+      expect(cache.historyState, CachedMonthState.ready);
+
+      await _dispose(tester, cache);
+      expect(policy.holdsHistory(nextOwner), isFalse);
+      expect(records.getRecordById('next-owner'), isNull);
     },
   );
 
