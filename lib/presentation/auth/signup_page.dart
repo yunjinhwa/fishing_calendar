@@ -8,6 +8,7 @@ import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../common/hold_to_reveal_password_field.dart';
+import '../legal/policy_document_page.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
 import 'login_page.dart';
@@ -38,6 +39,14 @@ class _SignupPageState extends State<SignupPage> {
     passwordConfirmController.dispose();
     nicknameController.dispose();
     super.dispose();
+  }
+
+  void _openPolicy(PolicyDocument document) {
+    if (isSubmitting) return;
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => PolicyDocumentPage(document: document)),
+    );
   }
 
   Future<void> signup() async {
@@ -216,28 +225,54 @@ class _SignupPageState extends State<SignupPage> {
             ),
             const SizedBox(height: 16),
 
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: agreeTerms,
-              onChanged: (value) {
-                setState(() {
-                  agreeTerms = value ?? false;
-                });
-              },
-              title: const Text('이용약관 동의 (필수)'),
-              controlAffinity: ListTileControlAffinity.leading,
+            Row(
+              children: [
+                Expanded(
+                  child: CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: agreeTerms,
+                    onChanged: (value) {
+                      setState(() {
+                        agreeTerms = value ?? false;
+                      });
+                    },
+                    title: const Text('이용약관 동의 (필수)'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ),
+                TextButton(
+                  key: const ValueKey('signup-view-terms'),
+                  onPressed: isSubmitting
+                      ? null
+                      : () => _openPolicy(PolicyDocument.terms),
+                  child: const Text('내용 보기'),
+                ),
+              ],
             ),
 
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: agreePrivacy,
-              onChanged: (value) {
-                setState(() {
-                  agreePrivacy = value ?? false;
-                });
-              },
-              title: const Text('개인정보 처리방침 동의 (필수)'),
-              controlAffinity: ListTileControlAffinity.leading,
+            Row(
+              children: [
+                Expanded(
+                  child: CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: agreePrivacy,
+                    onChanged: (value) {
+                      setState(() {
+                        agreePrivacy = value ?? false;
+                      });
+                    },
+                    title: const Text('개인정보 처리방침 동의 (필수)'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ),
+                TextButton(
+                  key: const ValueKey('signup-view-privacy'),
+                  onPressed: isSubmitting
+                      ? null
+                      : () => _openPolicy(PolicyDocument.privacy),
+                  child: const Text('내용 보기'),
+                ),
+              ],
             ),
             const SizedBox(height: 24),
 
@@ -250,8 +285,9 @@ class _SignupPageState extends State<SignupPage> {
             ),
             const SizedBox(height: 24),
 
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Text('이미 계정이 있으신가요?'),
                 TextButton(
