@@ -64,12 +64,13 @@ void main() {
     'a changed place hides the reference and preserves manual fields',
     (tester) async {
       await _open(tester, _reference());
-      await tester.enterText(_field('물때 *'), '7물');
+      // A real edit must differ from today's automatically calculated tide.
+      await tester.enterText(_field('물때 *'), '직접 확인한 7물');
       await tester.enterText(_field('수온 *'), '16.5');
       await tester.enterText(_field('위치 *'), '다른 출조 장소');
       await tester.pump();
       expect(find.byType(TideDataCard), findsNothing);
-      expect(_text(tester, '물때 *'), '7물');
+      expect(_text(tester, '물때 *'), '직접 확인한 7물');
       expect(_text(tester, '수온 *'), '16.5');
     },
   );
