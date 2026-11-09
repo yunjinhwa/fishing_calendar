@@ -6,6 +6,7 @@ import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/account_deletion_service.dart';
 import '../../data/services/network_status_service.dart';
+import '../app_info/app_info_page.dart';
 import '../auth/auth_access_guard.dart';
 import '../auth/auth_error_message.dart';
 import '../auth/login_choice_page.dart';
@@ -385,6 +386,19 @@ class MyPage extends StatelessWidget {
                         ),
                       );
                     },
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.info_outline),
+                    title: const Text('앱 정보'),
+                    subtitle: const Text('버전·자료 출처·오픈소스 라이선스'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(builder: (_) => const AppInfoPage()),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
