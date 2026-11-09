@@ -109,6 +109,15 @@ class FishSpeciesRepository {
       ? partialDetailTtl
       : detailTtl;
 
+  /// Public attribution may inspect existing data without refreshing the
+  /// encyclopedia, updating recency, or writing the public cache.
+  Future<List<FishSpecies>> readCachedSpecies() async {
+    await (_readFlight ??= _readDisk());
+    return List.unmodifiable(
+      (_catalog ?? const <FishSpecies>[]).map(_displayFish),
+    );
+  }
+
   Future<FishCatalogSnapshot> load({
     bool forceRefresh = false,
     bool allowNetwork = true,
