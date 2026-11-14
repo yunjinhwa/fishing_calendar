@@ -27,7 +27,7 @@
 | 지도·외부 정보 | 카카오 장소·주소 검색, 현재 위치, 수역 판별, 날씨·조석·수온과 과거 관측 정보 조회 |
 | 어류도감 | 기본 800종 목록, 어종 검색·상세 조회, 공개 자료 기반 사진·설명 보완 |
 | 내 기록어·공유 | 어종별 최고 크기와 무게의 독립 집계, 이름·크기·무게 정렬, 어종명 검색, 공유 카드 PNG 저장·기기 공유 |
-| 계정·동기화 | 이메일 인증, 닉네임 중복 방지, 서버 요금제 확인, Outbox 전송·재시도, 다중 기기 충돌 해결 |
+| 계정·동기화 | 이메일 인증, 비밀번호 재설정 요청·재전송 제한·로그인 복귀, 닉네임 중복 방지, 서버 요금제 확인, Outbox 전송·재시도, 다중 기기 충돌 해결 |
 | 앱 정보 | 이용약관·개인정보 처리방침 열람, 버전·데이터 제공기관·라이선스 안내 |
 
 지도에서 조회한 정보는 장소와 출조 시점이 맞을 때 기록에 자동 입력합니다. **물때·수온은 선택 입력**이며, 바다 전용 정보를 민물에 적용하지 않습니다. 도감의 800종 모두에 사진·상세 설명이 확보된 것은 아니며, 확인하지 못한 정보를 임의로 채우지 않습니다.
@@ -215,7 +215,7 @@ flutter run
 flutter run --dart-define=FIREBASE_AUTH_ENABLED=true
 ```
 
-프로젝트 연결과 로컬 에뮬레이터 사용은 [Firebase 설정](docs/firebase_auth_setup.md), 동기화 규칙·인덱스는 [Firestore 설정](docs/firestore_record_sync.md)을 참고합니다. 릴리스 빌드는 Firebase 인증이 기본 활성화됩니다.
+프로젝트 연결과 로컬 에뮬레이터 사용은 [Firebase 설정](docs/firebase_auth_setup.md), 동기화 규칙·인덱스는 [Firestore 설정](docs/firestore_record_sync.md), 재설정 메일과 전용 웹 화면은 [비밀번호 재설정 설정·테스트](docs/password_reset.md)를 참고합니다. 릴리스 빌드는 Firebase 인증이 기본 활성화됩니다.
 
 ### 3. 지도·외부 데이터 설정
 
@@ -247,6 +247,7 @@ flutter run --dart-define=FIREBASE_AUTH_ENABLED=true --dart-define-from-file=kak
 | 시나리오 | 확인할 내용 |
 | --- | --- |
 | 계정·접근 | 비회원은 지도·도감 이용, 회원은 기록 관리 |
+| 비밀번호 재설정 | 새로 요청한 메일의 전용 웹 화면에서 비밀번호 변경 후 앱 재로그인, 기존 닉네임·요금제·기록 보존 확인 |
 | 기록·캘린더 | 작성·수정·삭제가 날짜별 목록과 캘린더에 반영 |
 | 지도·외부 정보 | 장소 검색 → 정보 조회 → 기록 작성으로 연결 |
 | 검색·기록어·공유 | 조건별 검색, 어종별 최고 기록, 이미지 저장·공유 |
@@ -293,11 +294,13 @@ firebase emulators:exec --only auth,firestore --project demo-fishing-readme "nod
 | 우선 수정 | 첫 이전 충돌 후 재동기화 중단 |
 | 안정성 | 서버 스키마·DB 복구·사진 디코딩·지도 갱신·실패 테스트 |
 | 사용성 | 화면 정리, 월 선택·스와이프, 상단 알림, 오늘의 요약, 프로필 |
-| 출시 준비 | 운영 약관·서명·스토어 설정, 결제 범위, 비밀번호 재설정 연결 |
+| 출시 준비 | 운영 약관·서명·스토어 설정, 결제 범위, 비밀번호 재설정 실계정 통합 검증 |
 
 발생 조건과 수정 우선순위는 [코드 감사 보고서](docs/pre-release-audit.md)에 정리했습니다.
 
 인증 작업 경합은 중복 실행 차단과 UID 검사로 보완했으며, 관련 테스트 67개를 통과했습니다. [수정 내용과 기기 확인 절차](docs/auth_operation_race.md)를 참고합니다.
+
+비밀번호 재설정 요청·재전송 제한·로그인 복귀와 전용 웹 화면은 구현했습니다. Firebase 메일 템플릿의 맞춤 작업 URL 설정은 완료했으며, 새로 발송한 메일로 링크를 열어 비밀번호 변경·앱 재로그인·기존 데이터 보존을 확인하는 실계정 통합 검증은 남아 있습니다. [설정·테스트 절차](docs/password_reset.md)를 참고합니다.
 
 ## 문서 안내
 
@@ -307,6 +310,7 @@ firebase emulators:exec --only auth,firestore --project demo-fishing-readme "nod
 | 주제 | 문서 |
 | --- | --- |
 | 요구사항·통합 검증 | [MVP 통합 점검](docs/mvp_integration_check.md), [실제 기기 체크리스트](docs/mvp_test_checklist.md) |
+| 인증 | [Firebase 설정](docs/firebase_auth_setup.md), [비밀번호 재설정](docs/password_reset.md), [인증 작업 경합 방지](docs/auth_operation_race.md) |
 | 저장·복구 | [저장 실패·작성 취소](docs/record_save_recovery.md), [계정 탈퇴](docs/account_deletion.md), [좌표 저장](docs/location_coordinates.md) |
 | 데이터 정책 | [선택 입력](docs/optional_record_conditions.md), [캐시](docs/paid_cache_policy.md), [요금제 이전](docs/plan_migration_integrity.md) |
 | 어류 데이터 | [연동 방식](docs/fish_encyclopedia_api.md), [정보 제공 범위](docs/fish_data_coverage.md) |

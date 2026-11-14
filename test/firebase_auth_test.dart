@@ -1509,6 +1509,11 @@ class FakeAuthGateway implements AuthGateway {
   Completer<void>? signInStarted;
   Completer<void>? registrationGate;
   Completer<void>? registrationStarted;
+  final List<String> passwordResetEmails = <String>[];
+  AuthFailure? passwordResetFailure;
+  Completer<void>? passwordResetStarted;
+  Completer<void>? passwordResetGate;
+  int get passwordResetCount => passwordResetEmails.length;
   AuthFailure? nicknameLookupFailure;
   AuthFailure? entitlementLookupFailure;
   AuthFailure? accountDeletionLookupFailure;
@@ -1632,6 +1637,31 @@ class FakeAuthGateway implements AuthGateway {
     }
     _setCurrentUser(account.user);
     return account.user;
+  }
+
+  @override
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    passwordResetEmails.add(email);
+    final started = passwordResetStarted;
+    if (started != null && !started.isCompleted) {
+      started.complete();
+    }
+    await passwordResetGate?.future;
+    final failure = passwordResetFailure;
+    if (failure != null) {
+      throw failure;
+    }
+  }
+
+  void completePasswordResetForTesting({
+    required String email,
+    required String password,
+  }) {
+    final account = _accounts[email.trim().toLowerCase()];
+    if (account == null) {
+      throw StateError('Cannot reset an unregistered test account.');
+    }
+    account.password = password;
   }
 
   @override

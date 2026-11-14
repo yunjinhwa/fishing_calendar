@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/presentation/auth/login_choice_page.dart';
 import 'package:fishing_build/presentation/auth/login_page.dart';
+import 'package:fishing_build/presentation/auth/password_reset_page.dart';
 import 'package:fishing_build/presentation/auth/signup_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +36,8 @@ void main() {
       '이메일': 'missing@example.com',
       '비밀번호': 'Password1',
     });
+    final resetLink = find.widgetWithText(TextButton, '비밀번호를 잊으셨나요?');
+    final openReset = tester.widget<TextButton>(resetLink).onPressed!;
 
     final submit = tester
         .widget<FilledButton>(find.widgetWithText(FilledButton, '로그인'))
@@ -43,6 +46,10 @@ void main() {
     submit();
     await tester.pumpAndSettle();
     expect(gateway.signInStarted!.isCompleted, isTrue);
+    expect(tester.widget<TextButton>(resetLink).onPressed, isNull);
+    openReset();
+    await tester.pumpAndSettle();
+    expect(find.byType(PasswordResetPage), findsNothing);
     expect(
       tester
           .widget<TextButton>(find.widgetWithText(TextButton, '회원가입'))
@@ -59,6 +66,7 @@ void main() {
     gate.complete();
     await tester.pumpAndSettle();
     expect(find.text('가입된 계정을 찾을 수 없습니다.'), findsOneWidget);
+    expect(tester.widget<TextButton>(resetLink).onPressed, isNotNull);
     expect(
       tester
           .widget<TextButton>(find.widgetWithText(TextButton, '회원가입'))

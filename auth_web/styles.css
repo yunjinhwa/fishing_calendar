@@ -1,0 +1,38 @@
+:root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #142c44; background: #eef5f5; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; min-height: 100svh; display: grid; place-items: center; padding: 32px 20px; background: radial-gradient(ellipse at top, #e0f0ec 0, #f3f7f8 65%); }
+.card { width: 100%; max-width: 460px; padding: 36px; background: #fff; border: 1px solid #dce6e9; border-radius: 24px; box-shadow: 0 18px 55px #142c440c; }
+.brand { margin: 0 0 34px; display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 750; letter-spacing: 1.5px; }
+.brand-mark { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 9px; background: #142c44; color: white; font-size: 17px; font-weight: 800; letter-spacing: 0; }
+.lock-mark { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 17px; background: #e5f4f0; color: #117a70; font-size: 38px; }
+h1 { margin: 20px 0 10px; font-size: 27px; line-height: 1.35; letter-spacing: -0.8px; }
+.intro, .status, .account, .success p { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.intro { margin: 0 0 22px; color: #627385; }
+.status { color: #546c7a; margin: 0 0 18px; }
+.account { margin: 0 0 22px; padding: 12px 14px; border-radius: 10px; background: #f3f7f8; color: #425b6d; }
+fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+label { display: block; margin: 22px 0 9px; font-size: 14px; font-weight: 650; }
+input { display: block; width: 100%; height: 49px; padding: 12px 13px; border: 1px solid #bdcdd4; border-radius: 10px; background: #fff; color: #142c44; font: inherit; font-size: 16px; }
+input:focus-visible { outline: 3px solid #bde2da; border-color: #137c70; outline-offset: 1px; }
+input[aria-invalid="true"] { border-color: #b43f3f; }
+input:disabled { background: #f5f7f8; color: #71808c; }
+.hint, .field-error { margin: 8px 0 0; font-size: 12px; line-height: 1.65; }
+.hint { color: #667b89; }
+.field-error { color: #a62f36; }
+button, .action-link { font: inherit; font-size: 15px; font-weight: 650; cursor: pointer; border-radius: 10px; min-height: 48px; }
+.primary { margin-top: 27px; width: 100%; padding: 13px 18px; color: #fff; background: #137b70; border: 1px solid #137b70; }
+.primary:hover:not(:disabled) { background: #0d655d; }
+button:disabled { background: #d6e4e2; color: #69827e; border-color: #d6e4e2; cursor: default; }
+button:focus-visible, a:focus-visible { outline: 3px solid #86c6bb; outline-offset: 3px; }
+.secondary { width: 100%; margin: 0 0 4px; padding: 12px; background: #fff; color: #137b70; border: 1px solid #9bbfb8; }
+.action-link { display: block; text-align: center; text-decoration: none; }
+.error-banner { padding: 13px 14px; border: 1px solid #f0cecb; border-radius: 10px; background: #fff4f2; color: #9b3538; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.success { padding-top: 8px; }
+.success-mark { display: grid; place-items: center; width: 45px; height: 45px; border-radius: 50%; color: #137b70; background: #e3f4ec; font-size: 26px; }
+.success h2 { font-size: 21px; line-height: 1.5; }
+.success p { color: #536c79; }
+.success .return-label { margin: 24px 0 0; padding: 14px; text-align: center; background: #e8f3f0; border-radius: 10px; color: #126c62; font-weight: 700; }
+.footer { margin: 30px 0 0; color: #8a9aa6; font-size: 11px; text-align: center; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+[hidden] { display: none !important; }
+@media (max-width: 480px) { body { padding: 20px 14px; } .card { padding: 27px 23px; border-radius: 20px; } h1 { font-size: 25px; } }
