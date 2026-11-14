@@ -64,6 +64,7 @@ class ConflictResolutionService {
 
   Future<void> useTheirs(ConflictItem conflict) async {
     final current = _requireCurrentConflict(conflict);
+    final generation = _authSession.sessionGeneration;
     final uid = _authSession.memberId;
     if (uid == null) {
       throw StateError('로그인 후 충돌을 해결할 수 있습니다.');
@@ -72,7 +73,7 @@ class ConflictResolutionService {
     final latest = await RecordSyncService.instance.fetchLatestRevision(
       current.recordId,
     );
-    _ensureOwner(current);
+    _ensureOwner(current, expectedGeneration: generation);
 
     final remoteStatus = latest?.status ?? RemoteRecordStatus.missing;
     final remoteVersionNo = latest?.versionNo ?? 0;
@@ -87,6 +88,7 @@ class ConflictResolutionService {
     final sourceItem = _sourceOutboxItem(current);
 
     await AppDatabase.instance.transaction((transaction) async {
+      _ensureOwner(current, expectedGeneration: generation);
       await _store.deleteUnfinishedOutboxItemsForRecord(
         transaction,
         ownerKey: current.ownerKey,
@@ -138,6 +140,7 @@ class ConflictResolutionService {
           clearResolutionOutboxId: true,
         ),
       );
+      _ensureOwner(current, expectedGeneration: generation);
     });
     await _reload(current.ownerKey);
     await PlanPolicyService.instance.completeMigrationIfPossible();
@@ -276,9 +279,11 @@ class ConflictResolutionService {
     return current;
   }
 
-  void _ensureOwner(ConflictItem conflict) {
+  void _ensureOwner(ConflictItem conflict, {int? expectedGeneration}) {
     if (!_authSession.isPaid ||
-        conflict.ownerKey != _authSession.dataOwnerKey) {
+        conflict.ownerKey != _authSession.dataOwnerKey ||
+        (expectedGeneration != null &&
+            expectedGeneration != _authSession.sessionGeneration)) {
       throw StateError('현재 계정의 충돌만 해결할 수 있습니다.');
     }
   }

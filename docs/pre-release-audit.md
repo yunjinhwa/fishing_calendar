@@ -43,6 +43,8 @@
 
 ### A-02 · High · 첫 서버 동기화의 이전 충돌을 해결해도 다음 동기화가 막힘
 
+> 후속 수정: `fix/initial-sync-conflict-retry`에서 서버본을 채택한 이전 요청의 재전송을 차단하고, 기존에 멈춘 요청의 복구·후속 수정/삭제 보존·세션 검사를 구현했다. 관련 테스트 67개가 통과했으며, [수정 내용과 기기 확인 절차](initial_sync_conflict_retry.md)에 검증 범위를 정리했다. 아래 내용은 최초 발견 당시의 기록이다.
+
 - **근거:** [lib/data/services/conflict_resolution_service.dart:120](../lib/data/services/conflict_resolution_service.dart:120); [lib/data/services/record_sync_service.dart:317](../lib/data/services/record_sync_service.dart:317), `:886`, `:779`; [lib/data/local/app_database.dart:475](../lib/data/local/app_database.dart:475); [lib/data/repositories/conflict_repository.dart:70](../lib/data/repositories/conflict_repository.dart:70).
 - **발생 조건:** 첫 실제 서버 동기화가 완료되지 않은 기기에서 무료→유료 이전 기록이 서버 기록과 충돌하고, 사용자가 ‘서버 기록 사용’을 선택한 뒤 다시 동기화한다.
 - **원인:** 해결 과정에서 이전 Outbox 항목을 `succeeded`로 남기지만 기존 `baseVersionNo`를 유지한다. 첫 동기화 준비 코드는 모든 succeeded 항목을 재전송 대상으로 바꾼다. 이 항목은 서버에서 처리된 요청의 영수증이 없고 기준 버전도 오래되어 다시 충돌한다. 새 충돌 행을 넣을 때 이미 해결된 충돌의 `(owner_key, outbox_id)` UNIQUE 제약과 충돌한다.

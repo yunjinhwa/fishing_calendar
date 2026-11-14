@@ -133,6 +133,7 @@ class RecordSyncService extends ChangeNotifier {
     final gateway = _gateway;
     final uid = _authSession.memberId;
     final ownerKey = _authSession.dataOwnerKey;
+    final generation = _authSession.sessionGeneration;
     if (gateway == null) {
       throw StateError('Firebase가 연결된 빌드에서 충돌을 해결할 수 있습니다.');
     }
@@ -146,7 +147,9 @@ class RecordSyncService extends ChangeNotifier {
       uid: uid,
       recordId: recordId,
     );
-    if (!_isCurrentSession(uid, ownerKey)) {
+    if (!_isCurrentSession(uid, ownerKey) ||
+        generation != _authSession.sessionGeneration ||
+        !identical(gateway, _gateway)) {
       throw StateError('계정이 변경되어 충돌 해결을 중단했습니다.');
     }
     return revision;
@@ -324,6 +327,7 @@ class RecordSyncService extends ChangeNotifier {
           uid: uid,
           ownerKey: ownerKey,
           serverSnapshot: serverBeforePush,
+          isCurrent: sessionIsCurrent,
         );
         if (!sessionIsCurrent()) {
           return _skip(RecordSyncSkipReason.sessionChanged);
@@ -830,47 +834,55 @@ class RecordSyncService extends ChangeNotifier {
     required String uid,
     required String ownerKey,
     required RemoteRecordSnapshot serverSnapshot,
+    required bool Function() isCurrent,
   }) async {
     // Older builds exposed mock success buttons. Replaying their succeeded
     // items is safe because the server receipt makes a real prior commit
     // idempotent, while a mock-only success has no receipt and is uploaded now.
-    final existingItems = List<OutboxItem>.of(
-      _outboxRepository.getAllItemsForOwner(ownerKey),
-    );
-    final localRecords = List.of(
-      _recordRepository.getAllRecordsForOwner(ownerKey),
-    );
-    final recordIdsWithHistory = existingItems
-        .map((item) => item.recordId)
-        .toSet();
-    final bootstrapItems = <OutboxItem>[];
-    var sequence = 0;
-    for (final record in localRecords) {
-      if (recordIdsWithHistory.contains(record.id) ||
-          serverSnapshot.knownRecordIds.contains(record.id)) {
-        continue;
-      }
-
-      final now = _now();
-      bootstrapItems.add(
-        OutboxItem(
-          id: 'bootstrap-${now.microsecondsSinceEpoch}-${sequence++}-${record.id}',
-          userId: uid,
-          recordId: record.id,
-          operationType: OutboxOperationType.create,
-          status: OutboxStatus.pending,
-          createdAt: now,
-          isMigration: true,
-          baseVersionNo: 0,
-          payload: record.toJson(),
-        ),
-      );
-    }
-
     // Use the captured owner key for the whole transaction. A logout/account
     // switch during this await can stop the sync, but can never move one
     // account's replay/bootstrap items into another account's SQLite partition.
     await AppDatabase.instance.transaction((transaction) async {
+      if (!isCurrent()) {
+        throw StateError('계정이 변경되어 초기 동기화를 중단했습니다.');
+      }
+      final serverAdopted = await _localDataStore
+          .settleServerAdoptedMigrationItems(transaction, ownerKey: ownerKey);
+      // Read inside the transaction: conflict resolution or a local edit may
+      // have committed while the initial server snapshot was being fetched.
+      final existingItems = await _localDataStore.readOutboxItemsForOwner(
+        ownerKey,
+        executor: transaction,
+      );
+      final localRecords = await _localDataStore.readRecordsForOwner(
+        ownerKey,
+        executor: transaction,
+      );
+      final recordIdsWithHistory = existingItems
+          .map((item) => item.recordId)
+          .toSet();
+      final bootstrapItems = <OutboxItem>[];
+      var sequence = 0;
+      for (final record in localRecords) {
+        if (recordIdsWithHistory.contains(record.id) ||
+            serverSnapshot.knownRecordIds.contains(record.id)) {
+          continue;
+        }
+        final now = _now();
+        bootstrapItems.add(
+          OutboxItem(
+            id: 'bootstrap-${now.microsecondsSinceEpoch}-${sequence++}-${record.id}',
+            userId: uid,
+            recordId: record.id,
+            operationType: OutboxOperationType.create,
+            status: OutboxStatus.pending,
+            createdAt: now,
+            isMigration: true,
+            baseVersionNo: 0,
+            payload: record.toJson(),
+          ),
+        );
+      }
       for (final revision in serverSnapshot.revisions) {
         await _localDataStore.writeRecordSyncMetadata(
           transaction,
@@ -884,7 +896,8 @@ class RecordSyncService extends ChangeNotifier {
         );
       }
       for (final item in existingItems) {
-        if (item.status != OutboxStatus.succeeded) {
+        if (item.status != OutboxStatus.succeeded ||
+            serverAdopted.contains(item.id)) {
           continue;
         }
         await _localDataStore.insertOutboxItem(
@@ -914,6 +927,9 @@ class RecordSyncService extends ChangeNotifier {
           ownerKey: ownerKey,
           item: item,
         );
+      }
+      if (!isCurrent()) {
+        throw StateError('계정이 변경되어 초기 동기화를 중단했습니다.');
       }
     });
     await _outboxRepository.reloadOwner(ownerKey);

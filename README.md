@@ -170,7 +170,7 @@ docs/                          # 설계 정책, API 설정, 검증·감사 기�
 - 관련 PR: [카카오 지도 #41](https://github.com/yunjinhwa/fishing_calendar/pull/41), [날씨 #42](https://github.com/yunjinhwa/fishing_calendar/pull/42), [조석 #43](https://github.com/yunjinhwa/fishing_calendar/pull/43), [수온 #44](https://github.com/yunjinhwa/fishing_calendar/pull/44), [과거 관측 #45](https://github.com/yunjinhwa/fishing_calendar/pull/45)
 - 설계 문서: [수역 판별](docs/water_area_detection.md), [과거 관측 조회](docs/historical_external_data.md)
 
-위 내용은 현재 구현의 설계 방향입니다. 감사에서 추가로 확인한 인증 경합과 첫 동기화 재시도 문제 등은 아래의 [현재 보완 사항](#현재-보완-사항)에 공개하고 있습니다.
+위 내용은 현재 구현의 설계 방향입니다. 감사에서 확인한 추가 보완 사항과 후속 수정 결과는 아래의 [현재 보완 사항](#현재-보완-사항)에 공개하고 있습니다.
 
 </details>
 
@@ -291,14 +291,16 @@ firebase emulators:exec --only auth,firestore --project demo-fishing-readme "nod
 
 | 구분 | 남은 작업 |
 | --- | --- |
-| 우선 수정 | 첫 이전 충돌 후 재동기화 중단 |
-| 안정성 | 서버 스키마·DB 복구·사진 디코딩·지도 갱신·실패 테스트 |
+| 우선 수정 | 서버가 허용하는 조과 형식과 앱 디코더의 불일치 |
+| 안정성 | DB 복구·사진 디코딩·지도 갱신·실패 테스트 |
 | 사용성 | 화면 정리, 월 선택·스와이프, 상단 알림, 오늘의 요약, 프로필 |
 | 출시 준비 | 운영 약관·서명·스토어 설정, 결제 범위, 비밀번호 재설정 실계정 통합 검증 |
 
 발생 조건과 수정 우선순위는 [코드 감사 보고서](docs/pre-release-audit.md)에 정리했습니다.
 
 인증 작업 경합은 중복 실행 차단과 UID 검사로 보완했으며, 관련 테스트 67개를 통과했습니다. [수정 내용과 기기 확인 절차](docs/auth_operation_race.md)를 참고합니다.
+
+첫 동기화에서 ‘서버 기록 사용’으로 해결한 이전 요청의 재전송과 대기열 중단을 수정했습니다. 기존에 멈춘 요청의 복구와 후속 수정·삭제 보존을 포함해 관련 테스트 67개가 통과했습니다. [수정 내용과 기기 확인 절차](docs/initial_sync_conflict_retry.md)를 참고합니다.
 
 비밀번호 재설정 요청·재전송 제한·로그인 복귀와 전용 웹 화면은 구현했습니다. Firebase 메일 템플릿의 맞춤 작업 URL 설정은 완료했으며, 새로 발송한 메일로 링크를 열어 비밀번호 변경·앱 재로그인·기존 데이터 보존을 확인하는 실계정 통합 검증은 남아 있습니다. [설정·테스트 절차](docs/password_reset.md)를 참고합니다.
 

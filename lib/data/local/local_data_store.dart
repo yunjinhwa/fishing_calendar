@@ -539,6 +539,48 @@ class LocalDataStore {
     );
   }
 
+  /// A resolved server choice is a local terminal marker, not a server commit
+  /// receipt. Older first-sync retries could revive it as pending/sending.
+  /// Repair only that exact owner/record/request; later intentions stay queued.
+  Future<Set<String>> settleServerAdoptedMigrationItems(
+    DatabaseExecutor executor, {
+    required String ownerKey,
+  }) async {
+    const where =
+        '''
+      owner_key = ? AND is_migration = 1 AND EXISTS (
+        SELECT 1 FROM ${AppDatabase.recordConflictsTable} AS adoption
+        WHERE adoption.owner_key = ${AppDatabase.outboxItemsTable}.owner_key
+          AND adoption.record_id = ${AppDatabase.outboxItemsTable}.record_id
+          AND adoption.outbox_id = ${AppDatabase.outboxItemsTable}.outbox_id
+          AND adoption.status = ? AND adoption.resolution_type = ?
+      )
+    ''';
+    final args = <Object?>[
+      ownerKey,
+      ConflictStatus.resolved.name,
+      ConflictResolutionType.useTheirs.name,
+    ];
+    final rows = await executor.query(
+      AppDatabase.outboxItemsTable,
+      columns: const ['outbox_id'],
+      where: where,
+      whereArgs: args,
+    );
+    if (rows.isNotEmpty) {
+      await executor.update(
+        AppDatabase.outboxItemsTable,
+        <String, Object?>{
+          'status': OutboxStatus.succeeded.name,
+          'error_message': null,
+        },
+        where: '($where) AND (status != ? OR error_message IS NOT NULL)',
+        whereArgs: <Object?>[...args, OutboxStatus.succeeded.name],
+      );
+    }
+    return {for (final row in rows) row['outbox_id']! as String};
+  }
+
   Future<void> markOutboxItemsConflicted(
     DatabaseExecutor executor, {
     required String ownerKey,
