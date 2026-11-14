@@ -30,6 +30,8 @@
 
 ### A-01 · High · 이전 회원가입의 실패 정리가 나중에 로그인한 계정을 삭제할 수 있음
 
+> 후속 수정: `fix/auth-operation-race`에서 인증 작업 중첩 차단·UID별 실패 정리·화면 이동 보호를 구현했다. 회귀 테스트와 실제 기기 확인 절차는 [인증 요청 경합 방어](auth_operation_race.md)를 참고한다. 아래 내용은 최초 발견 당시의 기록이다.
+
 - **근거:** [lib/data/repositories/auth_session_repository.dart:668](../lib/data/repositories/auth_session_repository.dart:668), `:709`, `:1925`, 특히 `:1943`; [lib/data/auth/firebase_auth_gateway.dart:501](../lib/data/auth/firebase_auth_gateway.dart:501); [lib/presentation/auth/signup_page.dart:293](../lib/presentation/auth/signup_page.dart:293).
 - **발생 조건:** A 계정 가입이 Firebase 계정 생성 후 닉네임 검사에서 대기한다. 그 사이 가입 화면의 로그인 링크나 뒤로 이동으로 B 계정에 로그인한다. A의 닉네임 중복 응답이 늦게 도착한다.
 - **원인:** 가입/로그인 전체 흐름을 구분하는 작업 식별자나 직렬화가 없다. 롤백은 생성한 `user.uid`를 전달받지만 삭제할 때는 `gateway.deleteCurrentUser()`를 호출한다. 실제 게이트웨이도 호출 시점의 `_auth.currentUser`를 삭제한다. 가입 버튼만 비활성화되고 다른 인증 화면으로 이동하는 링크는 활성 상태다.

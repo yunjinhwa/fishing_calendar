@@ -1791,10 +1791,16 @@ class FakeAuthGateway implements AuthGateway {
   }
 
   @override
-  Future<void> deleteCurrentUser() async {
+  Future<void> deleteCurrentUser({required String expectedUid}) async {
     final current = _currentUser;
     if (current == null) {
       return;
+    }
+    if (current.uid != expectedUid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.sessionExpired,
+        message: 'wrong user',
+      );
     }
     await releaseNickname(
       uid: current.uid,
