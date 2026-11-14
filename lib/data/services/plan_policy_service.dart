@@ -131,9 +131,14 @@ class PlanPolicyService {
     }
     final session = _captureSession();
     var complete = false;
+    List<OutboxItem>? committedItems;
     await AppDatabase.instance
         .transaction((transaction) async {
           _ensurePaidSession(session);
+          final serverAdopted = await _store.settleServerAdoptedMigrationItems(
+            transaction,
+            ownerKey: session.ownerKey,
+          );
           final changes = await _store.readLocalRecordChangesForOwner(
             session.ownerKey,
             executor: transaction,
@@ -155,12 +160,20 @@ class PlanPolicyService {
               records.every((record) {
                 final latest = latestByRecord[record.id];
                 return latest != null &&
-                    latest.operationType != OutboxOperationType.delete &&
+                    (latest.operationType != OutboxOperationType.delete ||
+                        serverAdopted.contains(latest.id)) &&
                     jsonEncode(latest.payload) == jsonEncode(record.toJson());
               });
           _ensurePaidSession(session);
+          committedItems = items;
         })
         .onError<_MigrationCancelled>((_, _) {});
+    if (committedItems != null && _isCurrent(session)) {
+      _outboxRepository.publishCommittedSnapshot(
+        ownerKey: session.ownerKey,
+        items: committedItems!,
+      );
+    }
     if (!complete || !_isCurrent(session) || !_authSession.canUseOutbox) return;
     await _authSession.changeMemberPlan(
       UserPlan.paid,
@@ -177,6 +190,10 @@ class PlanPolicyService {
         executor: transaction,
       );
       if (!_authSession.isPlanMigrationPending && changes.isEmpty) return;
+      final serverAdopted = await _store.settleServerAdoptedMigrationItems(
+        transaction,
+        ownerKey: session.ownerKey,
+      );
       final records = await _store.readRecordsForOwner(
         session.ownerKey,
         executor: transaction,
@@ -196,7 +213,8 @@ class PlanPolicyService {
         final latest = history.isEmpty ? null : history.last;
         final payload = record.toJson();
         if (latest == null ||
-            latest.operationType == OutboxOperationType.delete ||
+            (latest.operationType == OutboxOperationType.delete &&
+                !serverAdopted.contains(latest.id)) ||
             jsonEncode(latest.payload) != jsonEncode(payload)) {
           await _appendIntent(
             transaction,
@@ -224,7 +242,8 @@ class PlanPolicyService {
             change.recordId,
             executor: transaction,
           );
-          if (latest?.operationType != OutboxOperationType.delete &&
+          if ((latest?.operationType != OutboxOperationType.delete ||
+                  serverAdopted.contains(latest?.id)) &&
               (history.isNotEmpty || (metadata?.serverVersionNo ?? 0) > 0)) {
             await _appendIntent(
               transaction,
