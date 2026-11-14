@@ -40,6 +40,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> login() async {
+    if (isSubmitting) return;
+
     final email = emailController.text.trim();
     final password = passwordController.text;
 
@@ -154,115 +156,126 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('로그인')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            const SizedBox(height: 24),
+    return PopScope(
+      canPop: !isSubmitting,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('로그인')),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              const SizedBox(height: 24),
 
-            Text(
-              '다시 오신 것을 환영합니다',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-
-            Text(
-              '출조 기록을 안전하게 관리하려면 로그인하세요.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 32),
-
-            TextField(
-              controller: emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: '이메일',
-                hintText: '이메일을 입력하세요',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            HoldToRevealPasswordField(
-              controller: passwordController,
-              autofillHints: const [AutofillHints.password],
-              decoration: const InputDecoration(
-                labelText: '비밀번호',
-                hintText: '비밀번호를 입력하세요',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: rememberLogin,
-              onChanged: (value) {
-                setState(() {
-                  rememberLogin = value ?? false;
-                });
-              },
-              title: const Text('로그인 상태 유지'),
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-            const SizedBox(height: 24),
-
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: isSubmitting ? null : login,
-                child: Text(isSubmitting ? '로그인 중...' : '로그인'),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            const OutlinedButton(
-              onPressed: null,
-              child: Text('Google로 계속하기 (준비 중)'),
-            ),
-            const SizedBox(height: 8),
-
-            const OutlinedButton(
-              onPressed: null,
-              child: Text('Apple로 계속하기 (준비 중)'),
-            ),
-            const SizedBox(height: 24),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('계정이 없으신가요?'),
-                TextButton(
-                  onPressed: () async {
-                    if (!widget.returnToPrevious) {
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(builder: (_) => const SignupPage()),
-                      );
-                      return;
-                    }
-
-                    final signedUp = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            const SignupPage(returnToPrevious: true),
-                      ),
-                    );
-
-                    if (signedUp == true && context.mounted) {
-                      Navigator.of(context).pop(true);
-                    }
-                  },
-                  child: const Text('회원가입'),
+              Text(
+                '다시 오신 것을 환영합니다',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 8),
+
+              Text(
+                '출조 기록을 안전하게 관리하려면 로그인하세요.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 32),
+
+              TextField(
+                controller: emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: '이메일',
+                  hintText: '이메일을 입력하세요',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              HoldToRevealPasswordField(
+                controller: passwordController,
+                autofillHints: const [AutofillHints.password],
+                decoration: const InputDecoration(
+                  labelText: '비밀번호',
+                  hintText: '비밀번호를 입력하세요',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: rememberLogin,
+                onChanged: (value) {
+                  setState(() {
+                    rememberLogin = value ?? false;
+                  });
+                },
+                title: const Text('로그인 상태 유지'),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+              const SizedBox(height: 24),
+
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: isSubmitting ? null : login,
+                  child: Text(isSubmitting ? '로그인 중...' : '로그인'),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              const OutlinedButton(
+                onPressed: null,
+                child: Text('Google로 계속하기 (준비 중)'),
+              ),
+              const SizedBox(height: 8),
+
+              const OutlinedButton(
+                onPressed: null,
+                child: Text('Apple로 계속하기 (준비 중)'),
+              ),
+              const SizedBox(height: 24),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('계정이 없으신가요?'),
+                  TextButton(
+                    onPressed: isSubmitting
+                        ? null
+                        : () async {
+                            if (isSubmitting) return;
+
+                            if (!widget.returnToPrevious) {
+                              Navigator.of(context).pushReplacement(
+                                MaterialPageRoute(
+                                  builder: (_) => const SignupPage(),
+                                ),
+                              );
+                              return;
+                            }
+
+                            final signedUp = await Navigator.of(context)
+                                .push<bool>(
+                                  MaterialPageRoute(
+                                    builder: (_) => const SignupPage(
+                                      returnToPrevious: true,
+                                    ),
+                                  ),
+                                );
+
+                            if (signedUp == true && context.mounted) {
+                              Navigator.of(context).pop(true);
+                            }
+                          },
+                    child: const Text('회원가입'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

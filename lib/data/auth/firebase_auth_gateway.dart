@@ -498,10 +498,16 @@ class FirebaseAuthGateway implements AuthGateway {
   }
 
   @override
-  Future<void> deleteCurrentUser() async {
+  Future<void> deleteCurrentUser({required String expectedUid}) async {
     final user = _auth.currentUser;
     if (user == null) {
       return;
+    }
+    if (user.uid != expectedUid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.sessionExpired,
+        message: '로그인 계정이 변경되어 계정 삭제를 중단했습니다.',
+      );
     }
     try {
       await user.delete();
