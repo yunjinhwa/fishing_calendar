@@ -301,7 +301,7 @@ class RecordSyncService extends ChangeNotifier {
         _isCurrentSession(uid, ownerKey) &&
         generation == _authSession.sessionGeneration &&
         identical(gateway, _gateway);
-    _statusOwnerKey = ownerKey;
+    _adoptStatusOwner(ownerKey);
     _state = RecordSyncState.syncing;
     _lastError = null;
     notifyListeners();
@@ -949,11 +949,22 @@ class RecordSyncService extends ChangeNotifier {
     });
   }
 
+  void _adoptStatusOwner(String ownerKey) {
+    if (_statusOwnerKey == ownerKey) return;
+    _statusOwnerKey = ownerKey;
+    _lastResult = null;
+    _lastSyncedAt = null;
+    _lastError = null;
+  }
+
   RecordSyncResult _skip(RecordSyncSkipReason reason) {
     final result = RecordSyncResult(skipReason: reason);
-    _statusOwnerKey = _authSession.dataOwnerKey;
+    // A canceled old session must not publish its result under the new owner.
+    if (reason != RecordSyncSkipReason.sessionChanged) {
+      _adoptStatusOwner(_authSession.dataOwnerKey);
+    }
     _state = RecordSyncState.idle;
-    _lastResult = result;
+    _lastResult = reason == RecordSyncSkipReason.sessionChanged ? null : result;
     _lastError = null;
     notifyListeners();
     return result;

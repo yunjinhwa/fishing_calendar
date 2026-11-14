@@ -80,9 +80,11 @@ class AuthSessionRepository extends ChangeNotifier {
   StreamSubscription<bool>? _accountDeletionSubscription;
   int _accountDeletionWatchGeneration = 0;
   int _sessionGeneration = 0;
+  Object? _activeAuthOperation;
   RemoteAccountDeletionCleanup? _remoteAccountDeletionCleanup;
 
   bool get hasActiveSession => _hasActiveSession;
+  bool get isAuthOperationInProgress => _activeAuthOperation != null;
   int get sessionGeneration => _sessionGeneration;
   bool get persistsAcrossRestarts => _persistsAcrossRestarts;
   UserPlan get plan => _hasExpiredServerEntitlement ? UserPlan.free : _plan;
@@ -218,6 +220,7 @@ class AuthSessionRepository extends ChangeNotifier {
   /// Passing a gateway opts this repository into Firebase-backed member auth.
   /// A null gateway keeps the existing local-only development behavior.
   void configureAuthGateway(AuthGateway? gateway) {
+    _requireNoAuthOperation();
     if (!identical(_authGateway, gateway)) {
       _sessionGeneration += 1;
     }
@@ -235,7 +238,9 @@ class AuthSessionRepository extends ChangeNotifier {
     _remoteAccountDeletionCleanup = cleanup;
   }
 
-  Future<void> loadSession() async {
+  Future<void> loadSession() => _runAuthOperation(_loadSession);
+
+  Future<void> _loadSession() async {
     final gateway = _authGateway;
     if (gateway != null) {
       await _loadFirebaseSession(gateway);
@@ -382,7 +387,7 @@ class AuthSessionRepository extends ChangeNotifier {
       _lastAuthFailure = null;
     } on Object catch (error, stackTrace) {
       _lastAuthFailure = _asAuthFailure(error, stackTrace);
-      await _bestEffortSignOut(gateway);
+      await _bestEffortSignOut(gateway, expectedUid: user.uid);
       _applySignedOut(notify: false);
     }
   }
@@ -409,7 +414,9 @@ class AuthSessionRepository extends ChangeNotifier {
     return _requiresPasswordSetup;
   }
 
-  Future<void> continueAsGuest() async {
+  Future<void> continueAsGuest() => _runAuthOperation(_continueAsGuest);
+
+  Future<void> _continueAsGuest() async {
     final gateway = _authGateway;
     var needsSignOutRetry = false;
     if (gateway != null) {
@@ -486,6 +493,20 @@ class AuthSessionRepository extends ChangeNotifier {
     required String password,
     String? nickname,
     bool rememberSession = true,
+  }) => _runAuthOperation(
+    () => _signIn(
+      email: email,
+      password: password,
+      nickname: nickname,
+      rememberSession: rememberSession,
+    ),
+  );
+
+  Future<AuthSignInResult> _signIn({
+    required String email,
+    required String password,
+    required String? nickname,
+    required bool rememberSession,
   }) async {
     final normalizedEmail = DataOwnerKey.normalizeEmail(email);
     if (!AuthInputValidator.isValidEmail(normalizedEmail) || password.isEmpty) {
@@ -622,7 +643,7 @@ class AuthSessionRepository extends ChangeNotifier {
       _lastAuthFailure = null;
       return AuthSignInResult.success;
     } on Object catch (error, stackTrace) {
-      await _bestEffortSignOut(gateway);
+      await _bestEffortSignOut(gateway, expectedUid: user.uid);
       throw _asAuthFailure(error, stackTrace);
     }
   }
@@ -632,6 +653,20 @@ class AuthSessionRepository extends ChangeNotifier {
     required String password,
     required String nickname,
     bool rememberSession = true,
+  }) => _runAuthOperation(
+    () => _registerAsFree(
+      email: email,
+      password: password,
+      nickname: nickname,
+      rememberSession: rememberSession,
+    ),
+  );
+
+  Future<bool> _registerAsFree({
+    required String email,
+    required String password,
+    required String nickname,
+    required bool rememberSession,
   }) async {
     final normalizedEmail = DataOwnerKey.normalizeEmail(email);
     final normalizedNickname = NicknamePolicy.displayValue(nickname);
@@ -761,6 +796,7 @@ class AuthSessionRepository extends ChangeNotifier {
     bool allowOfflineAccountDeletionCheck = false,
     bool notify = true,
   }) async {
+    _requireCurrentFirebaseUser(gateway, user);
     if (user.isAnonymous || user.uid.trim().isEmpty) {
       throw const AuthFailure(
         code: AuthFailureCode.accountConflict,
@@ -791,6 +827,7 @@ class AuthSessionRepository extends ChangeNotifier {
       }
       accountDeletionStatusKnown = false;
     }
+    _requireCurrentFirebaseUser(gateway, user);
 
     if (hasPendingAccountDeletion ||
         (!accountDeletionStatusKnown &&
@@ -841,6 +878,7 @@ class AuthSessionRepository extends ChangeNotifier {
       authenticatedEmail: normalizedEmail,
       allowInitialClaim: migrateLegacyAccount,
     );
+    _requireCurrentFirebaseUser(gateway, user);
 
     var localState = await _readFirebaseAccountState(user.uid);
     if (localState == null && migrateLegacyAccount) {
@@ -859,6 +897,7 @@ class AuthSessionRepository extends ChangeNotifier {
       uid: user.uid,
       localState: localState,
     );
+    _requireCurrentFirebaseUser(gateway, user);
     final state = resolution.accountState;
 
     String? nickname;
@@ -876,6 +915,7 @@ class AuthSessionRepository extends ChangeNotifier {
         rethrow;
       }
     }
+    _requireCurrentFirebaseUser(gateway, user);
     if (nickname == null) {
       var nicknameCandidate = nicknameOverride?.trim();
       nicknameCandidate = nicknameCandidate == null || nicknameCandidate.isEmpty
@@ -898,11 +938,21 @@ class AuthSessionRepository extends ChangeNotifier {
         nickname: nicknameCandidate,
       );
     }
+    _requireCurrentFirebaseUser(gateway, user);
 
     if (user.displayName != nickname) {
       try {
-        user = await gateway.updateDisplayName(nickname);
-      } on AuthFailure {
+        final updatedUser = await gateway.updateDisplayName(nickname);
+        _requireCurrentFirebaseUser(gateway, user);
+        if (updatedUser.uid != user.uid) {
+          throw const AuthFailure(
+            code: AuthFailureCode.sessionExpired,
+            message: '인증 처리 중 로그인 계정이 변경되었습니다.',
+          );
+        }
+        user = updatedUser;
+      } on AuthFailure catch (failure) {
+        if (failure.code == AuthFailureCode.sessionExpired) rethrow;
         // Firestore owns nickname uniqueness. The Firebase Auth display name
         // can be repaired on a later successful sign-in.
       }
@@ -912,6 +962,7 @@ class AuthSessionRepository extends ChangeNotifier {
     if (migrateLegacyAccount) {
       await _removeAccountPasswordHash(normalizedEmail);
     }
+    _requireCurrentFirebaseUser(gateway, user);
     await _saveSession(
       plan: state.plan,
       migrationStatus: state.migrationStatus,
@@ -943,7 +994,10 @@ class AuthSessionRepository extends ChangeNotifier {
     }
   }
 
-  Future<void> setPasswordForCurrentMember(String password) async {
+  Future<void> setPasswordForCurrentMember(String password) =>
+      _runAuthOperation(() => _setPasswordForCurrentMember(password));
+
+  Future<void> _setPasswordForCurrentMember(String password) async {
     final currentEmail = _email;
     if (!isMember ||
         currentEmail == null ||
@@ -1080,7 +1134,9 @@ class AuthSessionRepository extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> logout() async {
+  Future<void> logout() => _runAuthOperation(_logout);
+
+  Future<void> _logout() async {
     if (isMember && _requiresPasswordSetup) {
       throw StateError('로그아웃하기 전에 계정 비밀번호를 설정해야 합니다.');
     }
@@ -1140,7 +1196,7 @@ class AuthSessionRepository extends ChangeNotifier {
       String? firebaseUid,
     )
     purgeLocalData,
-  }) async {
+  }) => _runAuthOperation(() async {
     final currentEmail = _email;
     if (!isMember ||
         currentEmail == null ||
@@ -1226,7 +1282,7 @@ class AuthSessionRepository extends ChangeNotifier {
           uid: currentUid,
           nickname: currentNickname,
         );
-        await firebaseGateway.deleteCurrentUser();
+        await firebaseGateway.deleteCurrentUser(expectedUid: currentUid);
         accountIdentityRemoved = true;
         await _setAccountDeletionOriginBestEffort(
           currentUid,
@@ -1276,7 +1332,7 @@ class AuthSessionRepository extends ChangeNotifier {
       }
       rethrow;
     }
-  }
+  });
 
   Future<void> clearDeletedAccountLocalState({
     required String email,
@@ -1947,7 +2003,48 @@ class AuthSessionRepository extends ChangeNotifier {
     }
   }
 
-  Future<void> _bestEffortSignOut(AuthGateway gateway) async {
+  void _requireCurrentFirebaseUser(AuthGateway gateway, AuthUser user) {
+    if (!identical(_authGateway, gateway) ||
+        gateway.currentUser?.uid != user.uid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.sessionExpired,
+        message: '인증 처리 중 로그인 계정이 변경되었습니다.',
+      );
+    }
+  }
+
+  // Firebase's native auth calls cannot be cancelled. Keep the whole transition
+  // exclusive through preference writes and failure cleanup, rather than allowing
+  // a later login to be undone by an earlier operation's completion.
+  Future<T> _runAuthOperation<T>(Future<T> Function() action) async {
+    _requireNoAuthOperation();
+    final operation = Object();
+    _activeAuthOperation = operation;
+    notifyListeners();
+    try {
+      return await action();
+    } finally {
+      if (identical(_activeAuthOperation, operation)) {
+        _activeAuthOperation = null;
+        notifyListeners();
+      }
+    }
+  }
+
+  void _requireNoAuthOperation() {
+    if (isAuthOperationInProgress) {
+      throw const AuthFailure(
+        code: AuthFailureCode.operationInProgress,
+        message: '다른 인증 요청이 진행 중입니다.',
+      );
+    }
+  }
+
+  Future<void> _bestEffortSignOut(
+    AuthGateway gateway, {
+    required String expectedUid,
+  }) async {
+    if (gateway.currentUser?.uid != expectedUid) return;
     try {
       await gateway.signOut();
     } on Object {
@@ -1961,6 +2058,7 @@ class AuthSessionRepository extends ChangeNotifier {
     required String nickname,
     required AuthFailure failure,
   }) async {
+    if (gateway.currentUser?.uid != user.uid) return;
     var canDeleteAccount = failure.code == AuthFailureCode.nicknameAlreadyInUse;
     if (!canDeleteAccount) {
       try {
@@ -1973,12 +2071,12 @@ class AuthSessionRepository extends ChangeNotifier {
 
     if (canDeleteAccount) {
       try {
-        await gateway.deleteCurrentUser();
+        await gateway.deleteCurrentUser(expectedUid: user.uid);
       } on Object {
         // The original registration failure is more useful to the caller.
       }
     }
-    await _bestEffortSignOut(gateway);
+    await _bestEffortSignOut(gateway, expectedUid: user.uid);
   }
 
   Future<void> _scheduleRestartSignOut() async {

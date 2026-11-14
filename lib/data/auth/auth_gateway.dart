@@ -14,6 +14,7 @@ enum AuthFailureCode {
   tooManyRequests,
   networkUnavailable,
   operationNotAllowed,
+  operationInProgress,
   requiresRecentLogin,
   noCurrentUser,
   sessionExpired,
@@ -129,7 +130,8 @@ abstract interface class AuthGateway {
 
   Future<void> deleteAccountData({required String uid});
 
-  Future<void> deleteCurrentUser();
+  /// Deletes only the current user whose UID matches the captured operation.
+  Future<void> deleteCurrentUser({required String expectedUid});
 
   Future<void> signOut();
 
@@ -227,5 +229,6 @@ class UnavailableAuthGateway implements AuthGateway {
       Future<void>.error(failure);
 
   @override
-  Future<void> deleteCurrentUser() => Future<void>.error(failure);
+  Future<void> deleteCurrentUser({required String expectedUid}) =>
+      Future<void>.error(failure);
 }

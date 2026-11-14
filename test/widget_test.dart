@@ -211,7 +211,7 @@ void main() {
     expect(find.text('출조 기록과 내 정보 관리는 로그인 후 사용할 수 있습니다.'), findsOneWidget);
   });
 
-  testWidgets('record form requires external data before saving', (
+  testWidgets('record form still requires weather before saving', (
     WidgetTester tester,
   ) async {
     await AuthSessionRepository.instance.setSessionForTesting(
@@ -234,7 +234,7 @@ void main() {
     await tester.tap(saveButton);
     await tester.pump();
 
-    expect(find.text('물때를 입력하세요.'), findsOneWidget);
+    expect(find.text('날씨를 입력하세요.'), findsOneWidget);
     expect(FishingRecordRepository.instance.getAllRecords(), isEmpty);
   });
 

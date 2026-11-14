@@ -115,6 +115,7 @@ void main() {
 
     await tester.scrollUntilVisible(find.text('회원 탈퇴 처리가 중단되었습니다'), 300);
     expect(find.text('회원 탈퇴 처리가 중단되었습니다'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('회원 탈퇴 계속하기'), 200);
     expect(find.text('회원 탈퇴 계속하기'), findsOneWidget);
     expect(find.text('해당 계정은 탈퇴되었습니다'), findsNothing);
   });
