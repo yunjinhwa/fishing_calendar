@@ -29,18 +29,23 @@ class ExternalData {
   final DateTime fetchedAt;
   final String sourceName;
 
+  /// Current-hour forecasts expire at the next hour, irrespective of device TZ.
+  bool isUsableAt(DateTime now) {
+    final instant = now.toUtc();
+    final start = validAt.toUtc();
+    return !instant.isBefore(start) &&
+        instant.isBefore(start.add(const Duration(hours: 1)));
+  }
+
   bool appliesToRecord({
     required DateTime startAt,
     required String locationName,
     double? latitude,
     double? longitude,
   }) {
-    final instant = startAt.toUtc();
-    final validFrom = validAt.toUtc();
     return locationName.trim() == this.locationName.trim() &&
         latitude == this.latitude &&
         longitude == this.longitude &&
-        !instant.isBefore(validFrom) &&
-        instant.isBefore(validFrom.add(const Duration(hours: 1)));
+        isUsableAt(startAt);
   }
 }

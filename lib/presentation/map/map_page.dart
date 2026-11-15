@@ -48,6 +48,7 @@ class MapPage extends StatefulWidget {
     this.tideStations,
     this.waterAreaService,
     this.waterTemperatureService,
+    this.clock,
   });
 
   final bool isActive;
@@ -59,12 +60,15 @@ class MapPage extends StatefulWidget {
   final TideStationCatalog? tideStations;
   final WaterAreaService? waterAreaService;
   final WaterTemperatureService? waterTemperatureService;
+  final DateTime Function()? clock;
 
   @override
   State<MapPage> createState() => _MapPageState();
 }
 
-class _MapPageState extends State<MapPage> {
+class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
+  static const _refreshInterval = Duration(minutes: 10);
+  static const _retryDelay = Duration(minutes: 5);
   final _searchController = TextEditingController();
   final _network = NetworkStatusService.instance;
   late final MapSelectionController _controller;
@@ -91,6 +95,20 @@ class _MapPageState extends State<MapPage> {
   MapLocation? _waterTemperatureRequestedFor;
   bool _loadingWaterTemperature = false;
   int _waterTemperatureRevision = 0;
+  Timer? _freshnessTimer;
+  bool _isForeground = true;
+  DateTime? _weatherRefreshAt;
+  DateTime? _waterRefreshAt;
+
+  DateTime _now() => (widget.clock ?? DateTime.now)().toUtc();
+  bool get _canRefresh =>
+      mounted &&
+      widget.isActive &&
+      _isForeground &&
+      !_controller.isLocating &&
+      !_controller.isResolving;
+  ExternalData? get _currentExternalData =>
+      _externalData?.isUsableAt(_now()) == true ? _externalData : null;
 
   WaterArea get _waterArea => _waterAreaOverride ?? _detectedWaterArea;
   WaterTemperatureService get _temperatureService =>
@@ -100,7 +118,7 @@ class _MapPageState extends State<MapPage> {
     return _waterArea.providesMarineData &&
             observation != null &&
             observation.matchesLocation(_controller.selection) &&
-            observation.isUsableAt(DateTime.now())
+            observation.isUsableAt(_now())
         ? observation
         : null;
   }
@@ -111,11 +129,16 @@ class _MapPageState extends State<MapPage> {
     _waterTemperatureFailure = null;
     _waterTemperatureRequestedFor = null;
     _loadingWaterTemperature = false;
+    _waterRefreshAt = null;
   }
 
   @override
   void initState() {
     super.initState();
+    _isForeground =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
     _controller =
         widget.controller ??
         MapSelectionController(
@@ -136,6 +159,7 @@ class _MapPageState extends State<MapPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isActive == widget.isActive) return;
     if (!widget.isActive) {
+      _freshnessTimer?.cancel();
       _resetWaterTemperature();
       _tideReference = null;
       _tideName = null;
@@ -146,6 +170,7 @@ class _MapPageState extends State<MapPage> {
       _externalRevision++;
       _loadingExternal = false;
       _externalRequestedFor = null;
+      _weatherRefreshAt = null;
       _controller.cancelPendingLocation();
       _controller.setGateway(null);
     } else {
@@ -154,10 +179,83 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _isForeground = state == AppLifecycleState.resumed;
+    _freshnessTimer?.cancel();
+    if (_isForeground && widget.isActive) _refreshCurrentData();
+  }
+
+  // A single deadline timer replaces polling; hidden tabs and background apps
+  // neither schedule refreshes nor start API calls.
+  void _scheduleFreshnessCheck() {
+    _freshnessTimer?.cancel();
+    if (!_canRefresh) return;
+    final now = _now();
+    final deadlines = <DateTime>[];
+    final weather = _currentExternalData;
+    if (weather != null) {
+      deadlines.add(weather.validAt.toUtc().add(const Duration(hours: 1)));
+    }
+    final water = _currentWaterTemperature;
+    if (water != null) {
+      deadlines.add(_waterExpiresAt(water));
+    }
+    if (!_network.isDisconnected) {
+      if (!_loadingExternal && _weatherRefreshAt != null) {
+        deadlines.add(_weatherRefreshAt!);
+      }
+      if (_waterArea.providesMarineData &&
+          !_loadingWaterTemperature &&
+          _waterRefreshAt != null) {
+        deadlines.add(_waterRefreshAt!);
+      }
+    }
+    if (deadlines.isEmpty) return;
+    final next = deadlines.reduce((a, b) => a.isBefore(b) ? a : b);
+    final delay = next.difference(now);
+    _freshnessTimer = Timer(
+      delay.isNegative ? Duration.zero : delay,
+      _refreshCurrentData,
+    );
+  }
+
+  void _refreshCurrentData() {
+    if (!_canRefresh) return;
+    // Rebuild even offline so expired values stop looking like current data.
+    setState(() {});
+    if (!_network.isDisconnected) {
+      unawaited(_fetchExternalData(ifStale: true));
+      unawaited(_fetchWaterTemperature(ifStale: true));
+      if (_waterAreaRequestedFor == null) unawaited(_classifyWaterArea());
+    }
+    _scheduleFreshnessCheck();
+  }
+
+  DateTime _nextRefresh(DateTime fetchedAt, DateTime expiresAt) {
+    final cachedUntil = fetchedAt.toUtc().add(_refreshInterval);
+    final deadline = cachedUntil.isBefore(expiresAt) ? cachedUntil : expiresAt;
+    final now = _now();
+    // An injected/cached response with an old fetch time must not spin a timer.
+    return deadline.isAfter(now) ? deadline : now.add(_retryDelay);
+  }
+
+  DateTime _waterExpiresAt(WaterTemperatureObservation observation) =>
+      observation.observedAt
+          .toUtc()
+          .add(WaterTemperatureObservation.maxObservationAge)
+          .add(const Duration(milliseconds: 1));
+
+  bool _isRefreshDue(DateTime? deadline) =>
+      deadline != null && !deadline.isAfter(_now());
+
   void _locateOnEntry() {
     final revision = ++_locationEntryRevision;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted || !widget.isActive || revision != _locationEntryRevision) {
+      if (!mounted ||
+          !widget.isActive ||
+          !_isForeground ||
+          revision != _locationEntryRevision) {
         return;
       }
       await _controller.useCurrentLocation(requestPermission: false);
@@ -176,6 +274,7 @@ class _MapPageState extends State<MapPage> {
       _observedSelection = selection;
       _externalRevision++;
       _externalData = null;
+      _weatherRefreshAt = null;
       _resetWaterTemperature();
       _tideReference = null;
       _waterAreaRevision++;
@@ -197,6 +296,7 @@ class _MapPageState extends State<MapPage> {
       unawaited(_classifyWaterArea());
       unawaited(_fetchWaterTemperature());
     }
+    _scheduleFreshnessCheck();
   }
 
   // The weather card can enter the viewport before the lazy tide panel does.
@@ -209,7 +309,7 @@ class _MapPageState extends State<MapPage> {
     );
     if (stations.isEmpty) return null;
     return TideName.calculate(
-      day: day ?? TideDay.fromInstant(DateTime.now()),
+      day: day ?? TideDay.fromInstant(_now()),
       station: stations.first,
     );
   }
@@ -217,29 +317,36 @@ class _MapPageState extends State<MapPage> {
   void _onNetworkChanged() {
     final disconnected = _network.isDisconnected;
     final recovered = _wasDisconnected && _network.isConnected;
-    _wasDisconnected = disconnected;
+    if (disconnected || _network.isConnected) _wasDisconnected = disconnected;
     if (!mounted) return;
     if (disconnected || recovered) _controller.setGateway(null);
     setState(() {
       if (recovered) _mapAttempt++;
       if (disconnected) {
-        _waterTemperatureRevision++;
-        _loadingWaterTemperature = false;
-        _waterTemperatureRequestedFor = null;
+        if (_loadingExternal) {
+          _externalRevision++;
+          _loadingExternal = false;
+          _externalRequestedFor = null;
+        }
+        if (_loadingWaterTemperature) {
+          _waterTemperatureRevision++;
+          _loadingWaterTemperature = false;
+          _waterTemperatureRequestedFor = null;
+        }
       }
     });
     if (recovered && widget.isActive) {
-      unawaited(_fetchExternalData(force: true));
       if (_detectedWaterArea == WaterArea.unknown) {
         _waterAreaRequestedFor = null;
       }
-      unawaited(_classifyWaterArea());
-      unawaited(_fetchWaterTemperature(force: true));
+      _refreshCurrentData();
     }
+    _scheduleFreshnessCheck();
   }
 
   Future<void> _classifyWaterArea({bool force = false}) async {
     if (!widget.isActive ||
+        !_isForeground ||
         _controller.isLocating ||
         _controller.isResolving ||
         _waterAreaOverride != null ||
@@ -301,20 +408,26 @@ class _MapPageState extends State<MapPage> {
     unawaited(_fetchWaterTemperature());
   }
 
-  Future<void> _fetchWaterTemperature({bool force = false}) async {
-    if (!widget.isActive ||
-        _controller.isLocating ||
-        _controller.isResolving ||
+  Future<void> _fetchWaterTemperature({
+    bool force = false,
+    bool ifStale = false,
+  }) async {
+    if (!_canRefresh ||
         !_waterArea.providesMarineData ||
         _network.isDisconnected) {
       return;
     }
     final location = _controller.selection;
+    final sameRequest = identical(location, _waterTemperatureRequestedFor);
     if (!location.hasCoordinates ||
-        (!force && identical(location, _waterTemperatureRequestedFor))) {
+        (sameRequest && _loadingWaterTemperature) ||
+        (!force &&
+            sameRequest &&
+            (!ifStale || !_isRefreshDue(_waterRefreshAt)))) {
       return;
     }
     _waterTemperatureRequestedFor = location;
+    _waterRefreshAt = null;
     final revision = ++_waterTemperatureRevision;
     setState(() {
       _waterTemperatureFailure = null;
@@ -337,12 +450,16 @@ class _MapPageState extends State<MapPage> {
           WaterTemperatureFailure.invalidResponse,
         );
       }
-      if (!observation.isUsableAt(DateTime.now())) {
+      if (!observation.isUsableAt(_now())) {
         throw const WaterTemperatureException(WaterTemperatureFailure.noData);
       }
       setState(() {
         _waterTemperatureObservation = observation;
         _loadingWaterTemperature = false;
+        _waterRefreshAt = _nextRefresh(
+          observation.fetchedAt,
+          _waterExpiresAt(observation),
+        );
       });
     } on Object catch (error) {
       if (!current()) return;
@@ -352,19 +469,39 @@ class _MapPageState extends State<MapPage> {
         _waterTemperatureFailure = error is WaterTemperatureException
             ? error.reason
             : WaterTemperatureFailure.invalidResponse;
+        _waterRefreshAt = switch (_waterTemperatureFailure) {
+          WaterTemperatureFailure.configuration ||
+          WaterTemperatureFailure.unauthorized ||
+          WaterTemperatureFailure.coordinatesRequired ||
+          WaterTemperatureFailure.unsupportedLocation => null,
+          _ => _now().add(_retryDelay),
+        };
       });
+    } finally {
+      if (current()) _scheduleFreshnessCheck();
     }
   }
 
-  Future<void> _fetchExternalData({bool force = false}) async {
-    if (!widget.isActive || _controller.isLocating || _controller.isResolving) {
+  Future<void> _fetchExternalData({
+    bool force = false,
+    bool ifStale = false,
+  }) async {
+    if (!_canRefresh) {
       return;
     }
     final selection = _controller.selection;
-    if (!force && identical(selection, _externalRequestedFor)) return;
+    final sameRequest = identical(selection, _externalRequestedFor);
+    if ((sameRequest && _loadingExternal) ||
+        (!force &&
+            sameRequest &&
+            (!ifStale || !_isRefreshDue(_weatherRefreshAt)))) {
+      return;
+    }
     _externalRequestedFor = selection;
+    _weatherRefreshAt = null;
     final revision = ++_externalRevision;
     if (_network.isDisconnected) {
+      _externalRequestedFor = null;
       setState(() {
         _externalError = '인터넷에 연결한 뒤 다시 조회해 주세요.';
         _loadingExternal = false;
@@ -381,9 +518,16 @@ class _MapPageState extends State<MapPage> {
         forceRefresh: force,
       );
       if (!mounted || !widget.isActive || revision != _externalRevision) return;
+      if (!data.isUsableAt(_now())) {
+        throw const ExternalDataException(ExternalDataFailure.noData);
+      }
       setState(() {
         _externalData = data;
         _loadingExternal = false;
+        _weatherRefreshAt = _nextRefresh(
+          data.fetchedAt,
+          data.validAt.toUtc().add(const Duration(hours: 1)),
+        );
       });
     } on ExternalDataException catch (error) {
       if (!mounted || !widget.isActive || revision != _externalRevision) return;
@@ -391,6 +535,13 @@ class _MapPageState extends State<MapPage> {
         _externalData = null;
         _loadingExternal = false;
         _externalError = error.message;
+        _weatherRefreshAt = switch (error.reason) {
+          ExternalDataFailure.configuration ||
+          ExternalDataFailure.unauthorized ||
+          ExternalDataFailure.coordinatesRequired ||
+          ExternalDataFailure.unsupportedLocation => null,
+          _ => _now().add(_retryDelay),
+        };
       });
     } on Object {
       if (!mounted || !widget.isActive || revision != _externalRevision) return;
@@ -398,7 +549,10 @@ class _MapPageState extends State<MapPage> {
         _externalData = null;
         _loadingExternal = false;
         _externalError = '외부 데이터를 가져오지 못했습니다.';
+        _weatherRefreshAt = _now().add(_retryDelay);
       });
+    } finally {
+      if (mounted && revision == _externalRevision) _scheduleFreshnessCheck();
     }
   }
 
@@ -423,7 +577,7 @@ class _MapPageState extends State<MapPage> {
     );
     if (!allowed || !mounted) return;
     final location = _controller.selection;
-    final data = _externalData;
+    final data = _currentExternalData;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => RecordFormPage(
@@ -442,6 +596,8 @@ class _MapPageState extends State<MapPage> {
 
   @override
   void dispose() {
+    _freshnessTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _waterAreaRevision++;
     _waterTemperatureRevision++;
     _locationEntryRevision++;
@@ -609,6 +765,7 @@ class _MapPageState extends State<MapPage> {
               ),
             ),
             TidePanel(
+              clock: widget.clock,
               key: const ValueKey('map-tide-panel'),
               location: selected,
               isActive: widget.isActive && !choosing,
@@ -622,7 +779,7 @@ class _MapPageState extends State<MapPage> {
                 onChanged: _chooseWaterArea,
                 onRetry: () => unawaited(_classifyWaterArea(force: true)),
               ),
-              weatherData: choosing ? null : _externalData,
+              weatherData: choosing ? null : _currentExternalData,
               weatherLoading: widget.isActive && _loadingExternal,
               weatherError: _externalError,
               onRetryWeather: () => unawaited(_fetchExternalData(force: true)),
@@ -691,7 +848,7 @@ class _MapPageState extends State<MapPage> {
                                   selectedLocation: selected.name,
                                   latitude: selected.latitude,
                                   longitude: selected.longitude,
-                                  externalData: _externalData,
+                                  externalData: _currentExternalData,
                                   tideReference: _tideReference,
                                   tideName: _tideName,
                                   waterArea: _waterArea,

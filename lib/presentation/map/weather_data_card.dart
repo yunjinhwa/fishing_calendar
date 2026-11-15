@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/history/historical_conditions.dart';
@@ -6,7 +8,7 @@ import '../../data/models/external_data.dart';
 import '../../data/tides/tide_name.dart';
 import '../../data/water_temperature/water_temperature_models.dart';
 
-class WeatherDataCard extends StatelessWidget {
+class WeatherDataCard extends StatefulWidget {
   const WeatherDataCard({
     super.key,
     this.data,
@@ -17,6 +19,7 @@ class WeatherDataCard extends StatelessWidget {
     this.waterTemperatureObservation,
     this.historicalWeather,
     this.historicalWaterTemperature,
+    this.clock,
   });
 
   final ExternalData? data;
@@ -27,6 +30,82 @@ class WeatherDataCard extends StatelessWidget {
   final WaterTemperatureObservation? waterTemperatureObservation;
   final HistoricalWeatherObservation? historicalWeather;
   final HistoricalWaterTemperatureObservation? historicalWaterTemperature;
+  final DateTime Function()? clock;
+
+  @override
+  State<WeatherDataCard> createState() => _WeatherDataCardState();
+}
+
+class _WeatherDataCardState extends State<WeatherDataCard>
+    with WidgetsBindingObserver {
+  Timer? _expiryTimer;
+  bool _isForeground = true;
+
+  DateTime _now() => (widget.clock ?? DateTime.now)().toUtc();
+
+  @override
+  void initState() {
+    super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _isForeground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleExpiry();
+  }
+
+  @override
+  void didUpdateWidget(WeatherDataCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _scheduleExpiry();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _isForeground = state == AppLifecycleState.resumed;
+    _expiryTimer?.cancel();
+    if (_isForeground) {
+      setState(() {});
+      _scheduleExpiry();
+    }
+  }
+
+  // Snapshot/detail cards can outlive their originating map build. These
+  // deadlines update only the display; the card never requests remote data.
+  void _scheduleExpiry() {
+    _expiryTimer?.cancel();
+    if (!_isForeground) return;
+    final now = _now();
+    final weather = widget.historicalWeather == null ? widget.data : null;
+    final water =
+        widget.historicalWaterTemperature == null &&
+            widget.waterArea.providesMarineData
+        ? widget.waterTemperatureObservation
+        : null;
+    final deadlines = <DateTime>[
+      if (weather != null) ...[
+        weather.validAt.toUtc(),
+        weather.validAt.toUtc().add(const Duration(hours: 1)),
+      ],
+      if (water != null)
+        water.observedAt
+            .toUtc()
+            .add(WaterTemperatureObservation.maxObservationAge)
+            .add(const Duration(milliseconds: 1)),
+    ].where((deadline) => deadline.isAfter(now));
+    if (deadlines.isEmpty) return;
+    final next = deadlines.reduce((a, b) => a.isBefore(b) ? a : b);
+    _expiryTimer = Timer(next.difference(now), () {
+      if (!mounted) return;
+      setState(() {});
+      _scheduleExpiry();
+    });
+  }
+
+  @override
+  void dispose() {
+    _expiryTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,15 +116,19 @@ class WeatherDataCard extends StatelessWidget {
         const spacing = 12.0;
         final width =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
-        final history = historicalWeather;
-        final weather = (history == null ? data?.weather : history.weather)
+        final history = widget.historicalWeather;
+        final now = (widget.clock ?? DateTime.now)();
+        final current = widget.data?.isUsableAt(now) == true
+            ? widget.data
+            : null;
+        final weather = (history == null ? current?.weather : history.weather)
             ?.trim();
-        final historicalWater = historicalWaterTemperature;
+        final historicalWater = widget.historicalWaterTemperature;
         final archivedWater = historicalWater?.hasValidData == true
             ? historicalWater
             : null;
-        final observation = waterTemperatureObservation;
-        final measured = observation?.isUsableAt(DateTime.now()) == true
+        final observation = widget.waterTemperatureObservation;
+        final measured = observation?.isUsableAt(now) == true
             ? observation
             : null;
         return Wrap(
@@ -71,20 +154,23 @@ class WeatherDataCard extends StatelessWidget {
                 label: '기온',
                 value: _temperature(
                   history == null
-                      ? data?.airTemperature
+                      ? current?.airTemperature
                       : history.airTemperature,
                 ),
               ),
             ),
-            if (waterArea.providesMarineData) ...[
-              if (marineControls != null)
-                SizedBox(width: constraints.maxWidth, child: marineControls),
+            if (widget.waterArea.providesMarineData) ...[
+              if (widget.marineControls != null)
+                SizedBox(
+                  width: constraints.maxWidth,
+                  child: widget.marineControls,
+                ),
               SizedBox(
                 width: width,
                 child: _WeatherValue(
                   icon: Icons.waves_outlined,
                   label: '물때',
-                  value: tideName?.label ?? '제공되지 않음',
+                  value: widget.tideName?.label ?? '제공되지 않음',
                 ),
               ),
               SizedBox(
@@ -111,7 +197,7 @@ class WeatherDataCard extends StatelessWidget {
         );
       },
     );
-    if (embedded) return metrics;
+    if (widget.embedded) return metrics;
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: Padding(

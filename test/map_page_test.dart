@@ -389,6 +389,7 @@ void main() {
         tester,
         controller: controller,
         externalDataService: _ExternalService(result: data),
+        clock: () => DateTime.utc(2026, 11, 2, 0, 10),
       );
       expect(find.byType(LocationConditionsCard), findsOneWidget);
       expect(find.text('날씨·낚시 정보'), findsOneWidget);
@@ -546,6 +547,7 @@ Future<void> _openMap(
   required MapSelectionController controller,
   MapCanvasBuilder? mapBuilder,
   ExternalDataService? externalDataService,
+  DateTime Function()? clock,
 }) async {
   _prepareView(tester);
   addTearDown(controller.dispose);
@@ -556,6 +558,7 @@ Future<void> _openMap(
         waterAreaService: const FixedWaterAreaService(),
         controller: controller,
         externalDataService: externalDataService ?? _ExternalService(),
+        clock: clock,
         mapBuilder:
             mapBuilder ??
             (_, _, _) => const SizedBox(key: ValueKey('fake-map')),

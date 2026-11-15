@@ -59,13 +59,20 @@ class TidePanel extends StatefulWidget {
 }
 
 class _TidePanelState extends State<TidePanel>
-    with AutomaticKeepAliveClientMixin<TidePanel> {
+    with AutomaticKeepAliveClientMixin<TidePanel>, WidgetsBindingObserver {
+  static const _retryDelay = Duration(minutes: 5);
   final _network = NetworkStatusService.instance;
+  final _inFlight = <(TideService, String, TideDay), Future<TideForecast>>{};
   late TideDay _day;
+  late bool _appResumed;
+  Timer? _freshnessTimer;
   List<TideStation> _stations = const [];
   TideStation? _station;
   TideRecordReference? _reference;
+  TideForecast? _forecast;
   TideFailure? _failure;
+  DateTime? _retryAfter;
+  bool _automaticRetryBlocked = false;
   String? _message;
   bool _loading = false;
   bool _followsToday = true;
@@ -74,6 +81,17 @@ class _TidePanelState extends State<TidePanel>
   int _notification = 0;
 
   TideService get _service => widget.service ?? KhoaTideService.instance;
+  DateTime get _now => (widget.clock ?? DateTime.now)().toUtc();
+  Duration get _forecastLifetime => switch (_service) {
+    KhoaTideService service => service.cacheTtl,
+    _ => const Duration(minutes: 10),
+  };
+  bool get _canRefresh =>
+      mounted &&
+      widget.isActive &&
+      _appResumed &&
+      widget.waterArea.providesMarineData &&
+      _station != null;
 
   @override
   bool get wantKeepAlive => widget.isActive;
@@ -81,7 +99,10 @@ class _TidePanelState extends State<TidePanel>
   @override
   void initState() {
     super.initState();
-    _day = TideDay.fromInstant((widget.clock ?? DateTime.now)());
+    _day = TideDay.fromInstant(_now);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _appResumed = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
     _wasDisconnected = _network.isDisconnected;
     _network.addListener(_onNetworkChanged);
     _selectNearby();
@@ -97,14 +118,35 @@ class _TidePanelState extends State<TidePanel>
         oldWidget.catalog != widget.catalog;
     final changedActive = oldWidget.isActive != widget.isActive;
     final changedArea = oldWidget.waterArea != widget.waterArea;
+    final changedClock = oldWidget.clock != widget.clock;
     if (changedActive) updateKeepAlive();
-    if (!moved && !changedSource && !changedActive && !changedArea) return;
-    if (changedActive && widget.isActive && _followsToday) {
-      _day = TideDay.fromInstant((widget.clock ?? DateTime.now)());
+    if (!moved && !changedSource && !changedActive && !changedArea) {
+      if (changedClock) _scheduleLoad();
+      return;
     }
-    if (moved || changedSource || changedArea) _selectNearby();
-    _invalidate();
+    final changedContext = moved || changedSource || changedArea;
+    if (changedContext) _selectNearby();
+    _invalidate(clearForecast: changedContext, resetRetry: changedContext);
     if (widget.isActive) _scheduleLoad();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final resumed = state == AppLifecycleState.resumed;
+    if (_appResumed == resumed) return;
+    _appResumed = resumed;
+    _freshnessTimer?.cancel();
+    if (resumed) {
+      // Retained background results must repaint even when a retry cooldown
+      // prevents starting another request.
+      setState(() {});
+      _refreshIfNeeded();
+    } else {
+      // A still-running request can be reused on resume, but cannot publish
+      // into a hidden screen in the meantime.
+      _generation++;
+      _loading = false;
+    }
   }
 
   void _selectNearby() {
@@ -121,7 +163,7 @@ class _TidePanelState extends State<TidePanel>
     final generation = _generation;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && generation == _generation && widget.isActive) {
-        unawaited(_load());
+        _refreshIfNeeded();
       }
     });
   }
@@ -150,36 +192,113 @@ class _TidePanelState extends State<TidePanel>
     });
   }
 
-  void _invalidate() {
+  void _invalidate({bool clearForecast = true, bool resetRetry = true}) {
+    _freshnessTimer?.cancel();
     _generation++;
     _loading = false;
-    _failure = null;
+    if (clearForecast) _forecast = null;
+    if (resetRetry) {
+      _failure = null;
+      _retryAfter = null;
+      _automaticRetryBlocked = false;
+    }
     _publish(null);
+  }
+
+  bool _isFresh(TideForecast? forecast, DateTime now) {
+    if (forecast == null) return false;
+    final age = now.difference(forecast.fetchedAt.toUtc());
+    return !age.isNegative && age < _forecastLifetime;
+  }
+
+  void _refreshIfNeeded({bool forceRefresh = false}) {
+    if (!_canRefresh) return;
+    final now = _now;
+    final today = TideDay.fromInstant(now);
+    if (_followsToday && _day != today) {
+      setState(() {
+        _day = today;
+        _invalidate(resetRetry: !_automaticRetryBlocked);
+      });
+    }
+    if (_loading) return;
+    if (!forceRefresh && _isFresh(_forecast, now)) {
+      if (_reference == null && !_network.isDisconnected) {
+        setState(() {
+          _publish(
+            TideRecordReference(
+              location: widget.location,
+              forecast: _forecast!,
+            ),
+          );
+        });
+      }
+      _scheduleFreshnessCheck();
+      return;
+    }
+    if (_automaticRetryBlocked ||
+        (_retryAfter != null && now.isBefore(_retryAfter!))) {
+      _scheduleFreshnessCheck();
+      return;
+    }
+    unawaited(_load(forceRefresh: forceRefresh));
+  }
+
+  void _scheduleFreshnessCheck() {
+    _freshnessTimer?.cancel();
+    if (!_canRefresh) return;
+    final now = _now;
+    DateTime? nextCheck;
+    if (_followsToday) {
+      final kst = now.add(const Duration(hours: 9));
+      nextCheck = DateTime.utc(
+        kst.year,
+        kst.month,
+        kst.day + 1,
+      ).subtract(const Duration(hours: 9));
+    }
+    if (!_network.isDisconnected && !_loading && !_automaticRetryBlocked) {
+      var expiresAt =
+          _forecast?.fetchedAt.toUtc().add(_forecastLifetime) ?? now;
+      final retryAfter = _retryAfter;
+      if (retryAfter != null && retryAfter.isAfter(expiresAt)) {
+        expiresAt = retryAfter;
+      }
+      if (nextCheck == null || expiresAt.isBefore(nextCheck)) {
+        nextCheck = expiresAt;
+      }
+    }
+    if (nextCheck == null) return;
+    final delay = nextCheck.difference(now);
+    _freshnessTimer = Timer(
+      delay <= Duration.zero ? const Duration(milliseconds: 1) : delay,
+      _refreshIfNeeded,
+    );
   }
 
   void _onNetworkChanged() {
     final disconnected = _network.isDisconnected;
     final recovered = _wasDisconnected && _network.isConnected;
-    _wasDisconnected = disconnected;
+    if (disconnected) _wasDisconnected = true;
+    if (recovered) _wasDisconnected = false;
     if (!mounted) return;
     if (disconnected) {
       setState(() {
-        _invalidate();
+        _invalidate(resetRetry: false);
         if (_station != null) {
           _message = '인터넷에 연결하면 만조·간조 예보를 조회할 수 있습니다.';
         }
       });
-    } else if (recovered && widget.isActive) {
-      unawaited(_load(forceRefresh: true));
+      _scheduleFreshnessCheck();
+    } else if (recovered) {
+      _refreshIfNeeded(forceRefresh: true);
     }
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
-    if (!widget.isActive ||
-        !widget.waterArea.providesMarineData ||
-        _station == null) {
-      return;
-    }
+    if (!_canRefresh || _loading) return;
+    _freshnessTimer?.cancel();
+    final service = _service;
     final station = _station!;
     final location = widget.location;
     final day = _day;
@@ -192,46 +311,101 @@ class _TidePanelState extends State<TidePanel>
           ? '인터넷에 연결하면 만조·간조 예보를 조회할 수 있습니다.'
           : null;
     });
-    if (_network.isDisconnected) return;
+    _scheduleFreshnessCheck();
+    if (_network.isDisconnected) {
+      return;
+    }
     try {
-      final forecast = await _service.fetchForecast(
-        station: station,
-        day: day,
-        forceRefresh: forceRefresh,
-      );
-      if (!_isCurrent(generation)) return;
+      final key = (service, station.code, day);
+      final operation = _inFlight.putIfAbsent(key, () {
+        return Future.sync(
+          () => service.fetchForecast(
+            station: station,
+            day: day,
+            forceRefresh: forceRefresh,
+          ),
+        ).whenComplete(() {
+          _inFlight.remove(key);
+        });
+      });
+      final forecast = await operation;
       if (forecast.station.code != station.code || forecast.day != day) {
         throw const TideException(TideFailure.invalidResponse);
       }
       if (forecast.events.isEmpty) {
         throw const TideException(TideFailure.noData);
       }
+      if (!_isCurrent(generation)) {
+        if (_matchesSelection(service, station, day, location) &&
+            !_network.isDisconnected) {
+          _forecast = forecast;
+          _retryAfter = _isFresh(forecast, _now) ? null : _now.add(_retryDelay);
+          _automaticRetryBlocked = false;
+        }
+        return;
+      }
       setState(() {
         _loading = false;
+        _forecast = forecast;
+        _retryAfter = _isFresh(forecast, _now) ? null : _now.add(_retryDelay);
+        _automaticRetryBlocked = false;
         _publish(TideRecordReference(location: location, forecast: forecast));
       });
     } on TideException catch (error) {
-      if (!_isCurrent(generation)) return;
+      if (!_isCurrent(generation)) {
+        if (_matchesSelection(service, station, day, location)) {
+          _recordFailure(error.reason);
+        }
+        return;
+      }
       setState(() {
         _loading = false;
-        _failure = error.reason;
-        _message = error.message;
+        _recordFailure(error.reason);
         _publish(null);
       });
     } on Object {
-      if (!_isCurrent(generation)) return;
+      if (!_isCurrent(generation)) {
+        if (_matchesSelection(service, station, day, location)) {
+          _recordFailure(TideFailure.network);
+        }
+        return;
+      }
       setState(() {
         _loading = false;
-        _failure = TideFailure.network;
+        _recordFailure(TideFailure.network);
         _message = '만조·간조 예보를 가져오지 못했습니다. 잠시 후 다시 조회해 주세요.';
         _publish(null);
       });
+    } finally {
+      if (_isCurrent(generation)) _scheduleFreshnessCheck();
     }
   }
+
+  void _recordFailure(TideFailure failure) {
+    _failure = failure;
+    _message = TideException(failure).message;
+    _retryAfter = _now.add(_retryDelay);
+    _automaticRetryBlocked =
+        failure == TideFailure.configuration ||
+        failure == TideFailure.unauthorized;
+  }
+
+  bool _matchesSelection(
+    TideService service,
+    TideStation station,
+    TideDay day,
+    MapLocation location,
+  ) =>
+      mounted &&
+      service == _service &&
+      station.code == _station?.code &&
+      day == _day &&
+      _sameLocation(location, widget.location);
 
   bool _isCurrent(int generation) =>
       mounted &&
       widget.isActive &&
+      _appResumed &&
       widget.waterArea.providesMarineData &&
       !_network.isDisconnected &&
       generation == _generation;
@@ -246,7 +420,11 @@ class _TidePanelState extends State<TidePanel>
     );
     if (!mounted || !widget.isActive || date == null) return;
     final day = TideDay.fromCalendar(date);
-    if (day == _day) return;
+    if (day == _day) {
+      _followsToday = false;
+      _scheduleFreshnessCheck();
+      return;
+    }
     setState(() {
       _day = day;
       _followsToday = false;
@@ -259,6 +437,8 @@ class _TidePanelState extends State<TidePanel>
   void dispose() {
     _generation++;
     _notification++;
+    _freshnessTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _network.removeListener(_onNetworkChanged);
     super.dispose();
   }
@@ -273,6 +453,7 @@ class _TidePanelState extends State<TidePanel>
         ? null
         : TideName.calculate(day: _day, station: station);
     return LocationConditionsCard(
+      clock: widget.clock,
       waterArea: widget.waterArea,
       waterAreaSelector: widget.waterAreaSelector,
       weatherData: widget.weatherData,

@@ -106,6 +106,8 @@
 
 ### A-07 · Medium · 같은 지도 화면에 머무르거나 장시간 백그라운드 후 복귀할 때 현재 정보가 갱신되지 않음
 
+> 후속 수정: `fix/map-data-freshness`에서 앱 복귀·정보 만료 시 활성 지도만 갱신하고 중복 요청·실패 반복을 방지했다. 한국 시간 자정에는 오늘을 따르는 날짜만 변경하며 수동 날짜는 보존한다. 상세 카드도 만료된 현재 정보를 숨긴다. [수정 내용과 기기 확인 절차](map_data_freshness.md)를 참고한다. 아래 내용은 최초 발견 당시의 기록이다.
+
 - **근거:** [lib/presentation/map/map_page.dart:135](../lib/presentation/map/map_page.dart:135), `:304`, `:359`; [lib/presentation/map/weather_data_card.dart:41](../lib/presentation/map/weather_data_card.dart:41); [lib/app.dart:62](../lib/app.dart:62).
 - **발생 조건:** 지도 탭을 유지한 채 시간이 지나거나 네트워크 상태 변화 없이 오래 후 앱으로 복귀한다.
 - **원인:** 지도 진입/위치 변경/네트워크 복구로 조회하지만 시간 경과·resume에 따른 정보 만료 갱신 경로가 없다. 같은 MapLocation 객체면 재조회도 막는다. 앱 resume 처리는 네트워크·요금제·기록 동기화에 한정된다. WeatherDataCard는 현재 예보의 `validAt`을 검사하지 않는다.
