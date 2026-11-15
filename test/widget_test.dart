@@ -65,6 +65,10 @@ void main() {
   testWidgets('calendar returns to the current month', (
     WidgetTester tester,
   ) async {
+    await AuthSessionRepository.instance.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'calendar-month-smoke@example.com',
+    );
     final today = DateTime.now();
     final previousMonth = DateTime(today.year, today.month - 1);
 
