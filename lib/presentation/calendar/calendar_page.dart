@@ -11,7 +11,6 @@ import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/paid_record_cache_service.dart';
 import '../../data/services/network_status_service.dart';
 import '../../data/services/record_sync_service.dart';
-//import 'calendar_settings_page.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key, this.isActive = true});
@@ -132,17 +131,6 @@ class _CalendarPageState extends State<CalendarPage> {
             icon: const Icon(Icons.today_outlined),
             tooltip: '이번 달로 이동',
           ),
-          // IconButton(
-          //   onPressed: () {
-          //     Navigator.of(context).push(
-          //       MaterialPageRoute(
-          //         builder: (_) => const CalendarSettingsPage(),
-          //       ),
-          //     );
-          //   },
-          //   icon: const Icon(Icons.settings_outlined),
-          //   tooltip: '캘린더 설정',
-          // ),
         ],
       ),
       body: Column(
