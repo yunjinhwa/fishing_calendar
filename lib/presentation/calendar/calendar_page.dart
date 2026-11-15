@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'daily_record_list_page.dart';
 import 'calendar_record_layout.dart';
+import 'calendar_month_picker.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
@@ -13,26 +14,36 @@ import '../../data/services/network_status_service.dart';
 import '../../data/services/record_sync_service.dart';
 
 class CalendarPage extends StatefulWidget {
-  const CalendarPage({super.key, this.isActive = true});
+  const CalendarPage({super.key, this.isActive = true, this.initialMonth});
 
   final bool isActive;
+  final DateTime? initialMonth;
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  DateTime focusedMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  late DateTime focusedMonth;
   final _recordRepository = FishingRecordRepository.instance;
   final _auth = AuthSessionRepository.instance;
   final _cache = PaidRecordCacheService.instance;
   VoidCallback? _releaseMonth;
   int? _heldGeneration;
   bool _loadScheduled = false;
+  bool _isChoosingMonth = false;
+  double _horizontalDragDistance = 0;
+
+  bool get _canNavigate => widget.isActive && _auth.canManageRecords;
+  bool get _canGoBack => focusedMonth.year > 1 || focusedMonth.month > 1;
+  bool get _canGoForward => focusedMonth.year < 9999 || focusedMonth.month < 12;
 
   @override
   void initState() {
     super.initState();
+    final initial = widget.initialMonth ?? DateTime.now();
+    RangeError.checkValueInInterval(initial.year, 1, 9999, 'initialMonth.year');
+    focusedMonth = DateTime(initial.year, initial.month);
     _recordRepository.addListener(_refreshRecords);
     _auth.addListener(_onSessionChanged);
     _cache.addListener(_onCacheChanged);
@@ -96,26 +107,61 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void goToPreviousMonth() {
-    setState(() {
-      focusedMonth = DateTime(focusedMonth.year, focusedMonth.month - 1);
-    });
-    _updateMonthLease();
+    _goToMonth(DateTime(focusedMonth.year, focusedMonth.month - 1));
   }
 
   void goToNextMonth() {
-    setState(() {
-      focusedMonth = DateTime(focusedMonth.year, focusedMonth.month + 1);
-    });
-    _updateMonthLease();
+    _goToMonth(DateTime(focusedMonth.year, focusedMonth.month + 1));
   }
 
   void goToCurrentMonth() {
     final today = DateTime.now();
 
-    setState(() {
-      focusedMonth = DateTime(today.year, today.month);
-    });
+    _goToMonth(DateTime(today.year, today.month));
+  }
+
+  void _goToMonth(DateTime month) {
+    if (!mounted || !_canNavigate || month.year < 1 || month.year > 9999) {
+      return;
+    }
+    final target = DateTime(month.year, month.month);
+    if (target == focusedMonth) return;
+    setState(() => focusedMonth = target);
     _updateMonthLease();
+  }
+
+  Future<void> _chooseMonth() async {
+    if (!_canNavigate || _isChoosingMonth) return;
+    _isChoosingMonth = true;
+    final owner = _auth.dataOwnerKey;
+    final generation = _auth.sessionGeneration;
+    try {
+      final selected = await showCalendarMonthPicker(
+        context,
+        initialMonth: focusedMonth,
+      );
+      if (!mounted ||
+          !_canNavigate ||
+          owner != _auth.dataOwnerKey ||
+          generation != _auth.sessionGeneration ||
+          selected == null) {
+        return;
+      }
+      _goToMonth(selected);
+    } finally {
+      _isChoosingMonth = false;
+    }
+  }
+
+  void _finishMonthSwipe(DragEndDetails details) {
+    final distance = _horizontalDragDistance;
+    _horizontalDragDistance = 0;
+    if (distance.abs() < 48) return;
+    if (distance < 0) {
+      goToNextMonth();
+    } else {
+      goToPreviousMonth();
+    }
   }
 
   @override
@@ -127,7 +173,7 @@ class _CalendarPageState extends State<CalendarPage> {
         title: const Text('낚시 캘린더'),
         actions: [
           IconButton(
-            onPressed: goToCurrentMonth,
+            onPressed: _canNavigate ? goToCurrentMonth : null,
             icon: const Icon(Icons.today_outlined),
             tooltip: '이번 달로 이동',
           ),
@@ -137,8 +183,9 @@ class _CalendarPageState extends State<CalendarPage> {
         children: [
           _MonthHeader(
             focusedMonth: focusedMonth,
-            onPrevious: goToPreviousMonth,
-            onNext: goToNextMonth,
+            onPrevious: _canNavigate && _canGoBack ? goToPreviousMonth : null,
+            onNext: _canNavigate && _canGoForward ? goToNextMonth : null,
+            onChoose: _canNavigate ? _chooseMonth : null,
           ),
           _MonthLoadStatus(
             state: _cache.stateFor(focusedMonth),
@@ -148,12 +195,25 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
           const _WeekHeader(),
           Expanded(
-            child: _CalendarGrid(
-              focusedMonth: focusedMonth,
-              records: records,
-              onChanged: () {
-                setState(() {});
-              },
+            child: GestureDetector(
+              key: const ValueKey('calendar-month-grid'),
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: _canNavigate
+                  ? (_) => _horizontalDragDistance = 0
+                  : null,
+              onHorizontalDragUpdate: _canNavigate
+                  ? (details) =>
+                        _horizontalDragDistance += details.primaryDelta ?? 0
+                  : null,
+              onHorizontalDragEnd: _canNavigate ? _finishMonthSwipe : null,
+              onHorizontalDragCancel: () => _horizontalDragDistance = 0,
+              child: _CalendarGrid(
+                focusedMonth: focusedMonth,
+                records: records,
+                onChanged: () {
+                  setState(() {});
+                },
+              ),
             ),
           ),
           _TodaySummaryCard(
@@ -222,13 +282,15 @@ class _MonthLoadStatus extends StatelessWidget {
 
 class _MonthHeader extends StatelessWidget {
   final DateTime focusedMonth;
-  final VoidCallback onPrevious;
-  final VoidCallback onNext;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+  final VoidCallback? onChoose;
 
   const _MonthHeader({
     required this.focusedMonth,
     required this.onPrevious,
     required this.onNext,
+    required this.onChoose,
   });
 
   @override
@@ -240,18 +302,37 @@ class _MonthHeader extends StatelessWidget {
           IconButton(
             onPressed: onPrevious,
             icon: const Icon(Icons.chevron_left),
+            tooltip: '이전 달',
           ),
           Expanded(
-            child: Center(
-              child: Text(
-                '${focusedMonth.year}년 ${focusedMonth.month}월',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            child: Tooltip(
+              message: '연·월 선택',
+              child: TextButton(
+                key: const ValueKey('calendar-month-picker'),
+                onPressed: onChoose,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '${focusedMonth.year}년 ${focusedMonth.month}월',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down),
+                  ],
+                ),
               ),
             ),
           ),
-          IconButton(onPressed: onNext, icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            onPressed: onNext,
+            icon: const Icon(Icons.chevron_right),
+            tooltip: '다음 달',
+          ),
         ],
       ),
     );
@@ -319,6 +400,9 @@ class _CalendarGrid extends StatelessWidget {
           overflowTop + textScaler.scale(11) + 9,
         );
         return ListView.builder(
+          key: ValueKey(
+            'calendar-grid-${focusedMonth.year}-${focusedMonth.month}',
+          ),
           padding: const EdgeInsets.all(12),
           itemCount: layout.weeks.length,
           itemBuilder: (context, index) => _CalendarWeek(
