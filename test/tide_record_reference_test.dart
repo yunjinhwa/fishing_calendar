@@ -23,21 +23,22 @@ void main() {
     );
   });
 
-  testWidgets('tide name is calculated separately from high and low events', (
-    tester,
-  ) async {
-    await _open(tester, _reference(day: TideDay(2026, 11, 2)));
-    await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
-    expect(find.byType(TideDataCard), findsOneWidget);
-    expect(find.text('간조'), findsOneWidget);
-    expect(find.text('03:00'), findsOneWidget);
-    expect(find.text('-12.5 cm'), findsOneWidget);
-    expect(find.text('만조'), findsOneWidget);
-    expect(find.text('09:00'), findsOneWidget);
-    expect(find.text('483 cm'), findsOneWidget);
-    expect(_text(tester, '물때 (선택)'), '조금');
-    expect(_text(tester, '수온 (선택)'), isEmpty);
-  });
+  testWidgets(
+    'tide name is calculated without displaying high and low event cards',
+    (tester) async {
+      await _open(tester, _reference(day: TideDay(2026, 11, 2)));
+      await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
+      expect(find.byType(TideDataCard), findsNothing);
+      expect(find.text('간조'), findsNothing);
+      expect(find.text('03:00'), findsNothing);
+      expect(find.text('-12.5 cm'), findsNothing);
+      expect(find.text('만조'), findsNothing);
+      expect(find.text('09:00'), findsNothing);
+      expect(find.text('483 cm'), findsNothing);
+      expect(_text(tester, '물때 (선택)'), '조금');
+      expect(_text(tester, '수온 (선택)'), isEmpty);
+    },
+  );
 
   testWidgets(
     'changing the date refreshes the automatic name without old events',
@@ -102,30 +103,33 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'invalid coordinates clear automatic tide and retain manual tide',
-    (tester) async {
-      await _open(tester, _reference(day: TideDay(2026, 11, 2)));
-      await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
-      expect(_text(tester, '물때 (선택)'), '조금');
+  testWidgets('invalid source coordinates never calculate an automatic tide', (
+    tester,
+  ) async {
+    await _open(tester, _reference(day: TideDay(2026, 11, 2)), latitude: 91);
+    await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
+    expect(_text(tester, '물때 (선택)'), isEmpty);
+    expect(find.byType(TideDataCard), findsNothing);
+    expect(find.byKey(const ValueKey('record-latitude')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
-      await tester.ensureVisible(_field('위도'));
-      await tester.enterText(_field('위도'), '91');
-      await tester.pump();
-      expect(_text(tester, '물때 (선택)'), isEmpty);
-      expect(find.byType(TideDataCard), findsNothing);
-
-      await tester.enterText(_field('위도'), '35.9756');
-      await tester.pump();
-      expect(_text(tester, '물때 (선택)'), '조금');
-      await tester.enterText(_field('물때 (선택)'), '7물');
-      await tester.ensureVisible(_field('위도'));
-      await tester.enterText(_field('위도'), '91');
-      await tester.pump();
-      expect(_text(tester, '물때 (선택)'), '7물');
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('manual tide remains editable with invalid source coordinates', (
+    tester,
+  ) async {
+    await _open(
+      tester,
+      _reference(day: TideDay(2026, 11, 2)),
+      latitude: 91,
+      initialTide: '직접 확인한 7물',
+    );
+    await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 3));
+    expect(_text(tester, '물때 (선택)'), '직접 확인한 7물');
+    await tester.enterText(_field('물때 (선택)'), '');
+    await tester.pump();
+    expect(_text(tester, '물때 (선택)'), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'coordinates calculate a tide without an API forecast reference',
@@ -149,8 +153,8 @@ void main() {
       );
       await _pickDateTime(tester, '시작 시간 *', DateTime(2026, 11, 2));
 
-      expect(_text(tester, '위도'), '35.9756');
-      expect(_text(tester, '경도'), '126.5631');
+      expect(find.byKey(const ValueKey('record-latitude')), findsNothing);
+      expect(find.byKey(const ValueKey('record-longitude')), findsNothing);
       expect(_text(tester, '물때 (선택)'), isEmpty);
       expect(find.byType(TideDataCard), findsNothing);
       expect(find.text('03:00'), findsNothing);
@@ -263,6 +267,7 @@ Future<void> _open(
   TideRecordReference? reference, {
   String? initialTide,
   bool allowAutomaticTide = true,
+  double? latitude,
 }) async {
   tester.view.physicalSize = const Size(1000, 3000);
   tester.view.devicePixelRatio = 1;
@@ -272,7 +277,7 @@ Future<void> _open(
     MaterialApp(
       home: RecordFormPage(
         initialLocation: reference?.location.name ?? '조석 테스트 항구',
-        initialLatitude: reference?.location.latitude ?? 35.9756,
+        initialLatitude: latitude ?? reference?.location.latitude ?? 35.9756,
         initialLongitude: reference?.location.longitude ?? 126.5631,
         initialTide: initialTide,
         initialTideReference: reference,

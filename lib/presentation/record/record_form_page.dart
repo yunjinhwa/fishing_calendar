@@ -24,7 +24,6 @@ import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_photo_cleanup_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
-import '../map/tide_data_card.dart';
 import 'record_photo_thumbnail.dart';
 import 'record_photo_viewer.dart';
 
@@ -78,8 +77,17 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool get isEditMode => widget.editingRecord != null;
 
   final locationController = TextEditingController();
-  final latitudeController = TextEditingController();
-  final longitudeController = TextEditingController();
+  String _coordinateLocation = '';
+  double? _sourceLatitude;
+  double? _sourceLongitude;
+
+  // Coordinates belong to the place selected on the map or the loaded record.
+  // Renaming a place cannot silently attach that place's old coordinates.
+  bool get _matchesCoordinateLocation =>
+      locationController.text.trim() == _coordinateLocation;
+  double? get _latitude => _matchesCoordinateLocation ? _sourceLatitude : null;
+  double? get _longitude =>
+      _matchesCoordinateLocation ? _sourceLongitude : null;
   final tideController = TextEditingController();
   final weatherController = TextEditingController();
   final airTemperatureController = TextEditingController();
@@ -112,8 +120,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool _weatherManuallyEdited = false;
   bool _airTemperatureManuallyEdited = false;
   bool _reconcilingWeather = false;
-  bool _tideReferenceApplies = false;
-  bool _automaticTide = false;
   bool _tideManuallyEdited = false;
   bool _reconcilingTide = false;
   bool _automaticWaterTemperature = false;
@@ -154,8 +160,9 @@ class _RecordFormPageState extends State<RecordFormPage> {
     );
 
     locationController.text = widget.initialLocation ?? '';
-    latitudeController.text = widget.initialLatitude?.toString() ?? '';
-    longitudeController.text = widget.initialLongitude?.toString() ?? '';
+    _coordinateLocation = locationController.text.trim();
+    _sourceLatitude = widget.initialLatitude;
+    _sourceLongitude = widget.initialLongitude;
     tideController.text = widget.initialTide ?? '';
     _tideManuallyEdited = widget.initialTide != null;
     weatherController.text = widget.initialWeather ?? '';
@@ -202,7 +209,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
       ownerKey: _editingOwnerKey,
       paths: _photoPaths,
     );
-    _tideReferenceApplies = _matchesTideReference;
     _reconcileTidePrefill();
     _reconcileWaterTemperaturePrefill();
     _resetDraftBaseline();
@@ -216,8 +222,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   Iterable<TextEditingController> get _textControllers => [
     locationController,
-    latitudeController,
-    longitudeController,
     tideController,
     weatherController,
     airTemperatureController,
@@ -231,6 +235,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   String _captureDraft() => jsonEncode([
     for (final controller in _textControllers) controller.text,
+    _latitude?.toString(),
+    _longitude?.toString(),
     startAt.toIso8601String(),
     endAt.toIso8601String(),
     selectedGenre,
@@ -261,36 +267,23 @@ class _RecordFormPageState extends State<RecordFormPage> {
     final tideNameChanged = _reconcileTidePrefill();
     final waterTemperatureChanged = _reconcileWaterTemperaturePrefill();
     final changed = _captureDraft() != _draftBaseline;
-    final tideApplies = _matchesTideReference;
     if (changed != _hasUnsavedChanges ||
         clearedForecast ||
         historicalWeatherChanged ||
         tideNameChanged ||
-        waterTemperatureChanged ||
-        tideApplies != _tideReferenceApplies) {
+        waterTemperatureChanged) {
       setState(() {
         _hasUnsavedChanges = changed;
-        _tideReferenceApplies = tideApplies;
       });
     }
   }
-
-  bool get _matchesTideReference =>
-      widget.allowAutomaticTide &&
-      (widget.initialTideReference?.appliesToRecord(
-            startAt: startAt,
-            locationName: locationController.text,
-            latitude: double.tryParse(latitudeController.text),
-            longitude: double.tryParse(longitudeController.text),
-          ) ??
-          false);
 
   bool get _forecastApplies =>
       widget.initialExternalData?.appliesToRecord(
         startAt: startAt,
         locationName: locationController.text,
-        latitude: double.tryParse(latitudeController.text),
-        longitude: double.tryParse(longitudeController.text),
+        latitude: _latitude,
+        longitude: _longitude,
       ) ??
       false;
 
@@ -298,8 +291,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
     final input = (
       day: TideDay.fromInstant(startAt),
       location: locationController.text.trim(),
-      latitude: double.tryParse(latitudeController.text),
-      longitude: double.tryParse(longitudeController.text),
+      latitude: _latitude,
+      longitude: _longitude,
     );
     if (input == _tideNameInput) return false;
     _tideNameInput = input;
@@ -350,7 +343,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
       _reconcilingTide = true;
       try {
         tideController.text = _calculatedTideName?.label ?? '';
-        _automaticTide = _calculatedTideName != null;
       } finally {
         _reconcilingTide = false;
       }
@@ -388,8 +380,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
         observation?.appliesToRecord(
           startAt: startAt,
           locationName: locationController.text,
-          latitude: double.tryParse(latitudeController.text),
-          longitude: double.tryParse(longitudeController.text),
+          latitude: _latitude,
+          longitude: _longitude,
         ) ??
         false;
     final weatherApplies =
@@ -437,8 +429,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
         (historical?.appliesToRecord(
               startAt: startAt,
               locationName: locationController.text,
-              latitude: double.tryParse(latitudeController.text),
-              longitude: double.tryParse(longitudeController.text),
+              latitude: _latitude,
+              longitude: _longitude,
             ) ??
             false);
     final observation = widget.initialWaterTemperatureObservation;
@@ -448,8 +440,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
             (observation?.appliesToRecord(
                   startAt: startAt,
                   locationName: locationController.text,
-                  latitude: double.tryParse(latitudeController.text),
-                  longitude: double.tryParse(longitudeController.text),
+                  latitude: _latitude,
+                  longitude: _longitude,
                 ) ??
                 false));
     if (applies == _automaticWaterTemperature &&
@@ -639,9 +631,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   void _initializeEditingRecord(FishingRecord record) {
+    _coordinateLocation = record.location.trim();
+    _sourceLatitude = record.latitude;
+    _sourceLongitude = record.longitude;
     locationController.text = record.location;
-    latitudeController.text = record.latitude?.toString() ?? '';
-    longitudeController.text = record.longitude?.toString() ?? '';
     tideController.text = record.tide ?? '';
     weatherController.text = record.weather ?? '';
     airTemperatureController.text = record.airTemperature?.toString() ?? '';
@@ -698,8 +691,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
       FishingRecordRepository.instance.removeListener(_handleEditSourceChange);
     }
     locationController.dispose();
-    latitudeController.dispose();
-    longitudeController.dispose();
     tideController.dispose();
     weatherController.dispose();
     airTemperatureController.dispose();
@@ -778,19 +769,8 @@ class _RecordFormPageState extends State<RecordFormPage> {
       return;
     }
 
-    final latitudeText = latitudeController.text.trim();
-    final longitudeText = longitudeController.text.trim();
-    final latitude = latitudeText.isEmpty
-        ? null
-        : double.tryParse(latitudeText);
-    final longitude = longitudeText.isEmpty
-        ? null
-        : double.tryParse(longitudeText);
-    if ((latitudeText.isNotEmpty && latitude == null) ||
-        (longitudeText.isNotEmpty && longitude == null)) {
-      showMessage('위도와 경도는 숫자로 입력하세요.');
-      return;
-    }
+    final latitude = _latitude;
+    final longitude = _longitude;
     final coordinateError = FishingRecordValidator.validateCoordinates(
       latitude,
       longitude,
@@ -1183,10 +1163,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
         '${twoDigits(dateTime.hour)}:${twoDigits(dateTime.minute)}';
   }
 
-  String _historicalObservationLabel(String station, DateTime observedAt) =>
-      '$station · 과거 관측 '
-      '${formatDateTime(observedAt.toUtc().add(const Duration(hours: 9)))} KST';
-
   Future<void> pickStartDateTime() async {
     if (_isSaving || _isPreparingEdit) return;
     final pickedDate = await showDatePicker(
@@ -1292,32 +1268,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
                       ),
                     ),
                   ),
-                if (widget.initialLocation != null ||
-                    widget.initialFishName != null) ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.check_circle_outline,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              widget.initialFishName != null
-                                  ? '도감에서 선택한 어종을 자동 입력했습니다.'
-                                  : '지도에서 가져온 정보를 자동 입력했습니다.',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-
                 _SectionTitle(title: '필수 정보'),
                 const SizedBox(height: 12),
 
@@ -1329,71 +1279,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
                     hintText: '예: 부산 영도구 동삼동',
                     border: OutlineInputBorder(),
                   ),
-                ),
-                const SizedBox(height: 16),
-
-                ExpansionTile(
-                  key: const ValueKey('record-coordinates'),
-                  tilePadding: EdgeInsets.zero,
-                  title: const Text('위도·경도 (선택)'),
-                  initiallyExpanded:
-                      latitudeController.text.isNotEmpty ||
-                      longitudeController.text.isNotEmpty,
-                  maintainState: true,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        '좌표를 아는 경우 두 값을 함께 입력하세요. 장소 이름만 입력해도 저장할 수 있습니다.',
-                      ),
-                    ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            key: const ValueKey('record-latitude'),
-                            controller: latitudeController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                              signed: true,
-                            ),
-                            decoration: const InputDecoration(
-                              labelText: '위도',
-                              helperText: '-90 ~ 90',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            key: const ValueKey('record-longitude'),
-                            controller: longitudeController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                              signed: true,
-                            ),
-                            decoration: const InputDecoration(
-                              labelText: '경도',
-                              helperText: '-180 ~ 180',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () {
-                          latitudeController.clear();
-                          longitudeController.clear();
-                        },
-                        child: const Text('좌표 지우기'),
-                      ),
-                    ),
-                  ],
                 ),
                 const SizedBox(height: 16),
 
@@ -1450,46 +1335,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
                 const SizedBox(height: 24),
 
-                _SectionTitle(title: '외부 데이터'),
-                const SizedBox(height: 4),
-                if (widget.initialTideReference != null) ...[
-                  if (_tideReferenceApplies)
-                    TideDataCard(
-                      reference: widget.initialTideReference!,
-                      compact: true,
-                    )
-                  else
-                    const Text('조회한 만조·간조 예보는 현재 기록의 날짜·장소와 다릅니다.'),
-                  const SizedBox(height: 8),
-                ],
-                if (!isEditMode &&
-                    widget.initialExternalData != null &&
-                    (_automaticWeather || _automaticAirTemperature)) ...[
-                  Text(
-                    '${widget.initialExternalData!.sourceName} · 예보 '
-                    '${formatDateTime(widget.initialExternalData!.validAt.toUtc().add(const Duration(hours: 9)))} KST',
-                  ),
-                  const Text('예보 시간대나 장소가 달라지면 자동 입력값이 해제됩니다.'),
-                  const SizedBox(height: 8),
-                ],
-                if (_automaticHistoricalWeather ||
-                    _automaticHistoricalAirTemperature) ...[
-                  Text(
-                    _historicalObservationLabel(
-                      widget.initialHistoricalWeather!.station.name,
-                      widget.initialHistoricalWeather!.observedAt,
-                    ),
-                    key: const ValueKey('record-historical-weather-reference'),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                Text(
-                  '물때와 수온은 선택 항목으로 비워 두어도 저장할 수 있습니다. 물때는 날짜와 위치에 따라, 수온은 위치·시간에 맞는 관측값이 있을 때 자동 입력되며 직접 수정하거나 지울 수 있습니다.',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-                ),
+                _SectionTitle(title: '날씨·낚시 정보'),
                 const SizedBox(height: 12),
 
                 TextField(
@@ -1498,22 +1344,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   onChanged: (_) {
                     setState(() {
                       _tideManuallyEdited = true;
-                      _automaticTide = false;
                     });
                   },
                   maxLength: FishingRecordValidator.maxTideLength,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     labelText: '물때 (선택)',
                     hintText: '예: 7물',
-                    helperText: _calculatedTideName == null
-                        ? '필요한 경우 직접 입력해 주세요.'
-                        : '계산 물때: ${_calculatedTideName!.label} · '
-                              '${_calculatedTideName!.lunarDate.label} · '
-                              '${_calculatedTideName!.convention.label} · '
-                              '${_calculatedTideName!.station.name} 기준'
-                              '${_automaticTide ? ' (자동 입력)' : ' (직접 입력값 유지)'}',
-                    helperMaxLines: 3,
-                    border: const OutlineInputBorder(),
+                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -1574,26 +1411,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
                     decimal: true,
                     signed: true,
                   ),
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     labelText: '수온 (선택)',
                     hintText: '예: 16.2',
                     suffixText: '℃',
-                    helperText: _automaticHistoricalWaterTemperature
-                        ? _historicalObservationLabel(
-                            widget
-                                .initialHistoricalWaterTemperature!
-                                .station
-                                .name,
-                            widget
-                                .initialHistoricalWaterTemperature!
-                                .observedAt,
-                          )
-                        : _automaticWaterTemperature
-                        ? '${widget.initialWaterTemperatureObservation!.station.name} · 관측 '
-                              '${formatDateTime(widget.initialWaterTemperatureObservation!.observedAt.toUtc().add(const Duration(hours: 9)))} KST (자동 입력)'
-                        : null,
-                    helperMaxLines: 3,
-                    border: const OutlineInputBorder(),
+                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 24),

@@ -63,8 +63,7 @@ void main() {
     tester,
   ) async {
     await _openPage(tester, _newForm(latitude: 35.1796, longitude: 129.0756));
-    expect(_coordinateText(tester, 'record-latitude'), '35.1796');
-    expect(_coordinateText(tester, 'record-longitude'), '129.0756');
+    _expectNoCoordinateInputs();
     await _selectGenre(tester);
 
     await _save(tester);
@@ -84,13 +83,12 @@ void main() {
   });
 
   testWidgets(
-    'editing preserves coordinates until both are explicitly cleared',
+    'editing unrelated fields preserves hidden coordinates and their queue payload',
     (tester) async {
       final original = _record();
       await records.addRecord(original);
       await _openPage(tester, RecordFormPage(editingRecord: original));
-      expect(_coordinateText(tester, 'record-latitude'), '35.1796');
-      expect(_coordinateText(tester, 'record-longitude'), '129.0756');
+      _expectNoCoordinateInputs();
       await tester.ensureVisible(_field('메모'));
       await tester.enterText(_field('메모'), '장소를 유지하고 메모만 수정');
       await _save(tester);
@@ -98,76 +96,80 @@ void main() {
       expect(edited.latitude, original.latitude);
       expect(edited.longitude, original.longitude);
 
-      await _openPage(tester, RecordFormPage(editingRecord: edited));
-      final clear = find.widgetWithText(TextButton, '좌표 지우기');
-      await tester.ensureVisible(clear);
-      await tester.tap(clear);
-      await tester.pump();
-      expect(_coordinateText(tester, 'record-latitude'), isEmpty);
-      expect(_coordinateText(tester, 'record-longitude'), isEmpty);
-      await _save(tester);
-
-      final cleared = (await store.readRecordForOwner(
-        auth.dataOwnerKey,
-        original.id,
-      ))!;
-      expect(cleared.location, original.location);
-      expect(cleared.latitude, isNull);
-      expect(cleared.longitude, isNull);
       final latest = (await store.readOutboxItemsForOwner(
         auth.dataOwnerKey,
       )).last;
-      expect(latest.payload!.containsKey('latitude'), isFalse);
-      expect(latest.payload!.containsKey('longitude'), isFalse);
+      expect(latest.payload!['latitude'], original.latitude);
+      expect(latest.payload!['longitude'], original.longitude);
       expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('partial invalid and non-finite coordinates cannot be saved', (
-    tester,
-  ) async {
-    await _openPage(tester, _newForm(latitude: 35.1796, longitude: 129.0756));
-    await _selectGenre(tester);
-    const cases = [
-      ('35', '', '위도와 경도를 함께 입력하세요.'),
-      ('문자', '129', '위도와 경도는 숫자로 입력하세요.'),
-      ('91', '129', '위도는 -90부터 90 사이의 유한한 숫자로 입력하세요.'),
-      ('35', '-181', '경도는 -180부터 180 사이의 유한한 숫자로 입력하세요.'),
-      ('NaN', '129', '위도는 -90부터 90 사이의 유한한 숫자로 입력하세요.'),
-    ];
-    for (final (latitude, longitude, error) in cases) {
-      ScaffoldMessenger.of(
-        tester.element(find.byType(RecordFormPage)),
-      ).clearSnackBars();
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const ValueKey('record-latitude')));
-      await tester.enterText(
-        find.byKey(const ValueKey('record-latitude')),
-        latitude,
-      );
-      await tester.enterText(
-        find.byKey(const ValueKey('record-longitude')),
-        longitude,
-      );
-
-      await _save(tester);
-
-      expect(find.byType(RecordFormPage), findsOneWidget);
-      expect(find.text(error), findsOneWidget);
-      expect(await store.readRecordsForOwner(auth.dataOwnerKey), isEmpty);
-      expect(await store.readOutboxItemsForOwner(auth.dataOwnerKey), isEmpty);
-    }
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('changing only coordinates prompts before discarding the draft', (
-    tester,
-  ) async {
-    await _openPage(tester, _newForm(latitude: 35.1796, longitude: 129.0756));
-    await tester.enterText(
-      find.byKey(const ValueKey('record-latitude')),
-      '35.2',
+  for (final (latitude, longitude, error) in <(double?, double?, String)>[
+    (35, null, '위도와 경도를 함께 입력하세요.'),
+    (91, 129, '위도는 -90부터 90 사이의 유한한 숫자로 입력하세요.'),
+    (35, -181, '경도는 -180부터 180 사이의 유한한 숫자로 입력하세요.'),
+    (double.nan, 129, '위도는 -90부터 90 사이의 유한한 숫자로 입력하세요.'),
+  ]) {
+    testWidgets(
+      'invalid source coordinates $latitude/$longitude cannot be saved',
+      (tester) async {
+        await _openPage(
+          tester,
+          _newForm(latitude: latitude, longitude: longitude),
+        );
+        _expectNoCoordinateInputs();
+        await _selectGenre(tester);
+        await _save(tester);
+        expect(find.byType(RecordFormPage), findsOneWidget);
+        expect(find.text(error), findsOneWidget);
+        expect(await store.readRecordsForOwner(auth.dataOwnerKey), isEmpty);
+        expect(await store.readOutboxItemsForOwner(auth.dataOwnerKey), isEmpty);
+        expect(tester.takeException(), isNull);
+      },
     );
+  }
+
+  testWidgets(
+    'changing a map place does not attach the old hidden coordinates',
+    (tester) async {
+      await _openPage(tester, _newForm(latitude: 35.1796, longitude: 129.0756));
+      await tester.enterText(_field('위치 *'), '다른 장소 직접 입력');
+      await _selectGenre(tester);
+      await _save(tester);
+      final saved = (await store.readRecordsForOwner(auth.dataOwnerKey)).single;
+      expect(saved.location, '다른 장소 직접 입력');
+      expect(saved.latitude, isNull);
+      expect(saved.longitude, isNull);
+      final queued = (await store.readOutboxItemsForOwner(
+        auth.dataOwnerKey,
+      )).single;
+      expect(queued.payload!.containsKey('latitude'), isFalse);
+      expect(queued.payload!.containsKey('longitude'), isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'restoring a map place restores its original coordinate association',
+    (tester) async {
+      await _openPage(tester, _newForm(latitude: 35.1796, longitude: 129.0756));
+      await tester.enterText(_field('위치 *'), '다른 장소');
+      await tester.enterText(_field('위치 *'), ' 좌표 테스트 방파제 ');
+      await _selectGenre(tester);
+      await _save(tester);
+      final saved = (await store.readRecordsForOwner(auth.dataOwnerKey)).single;
+      expect(saved.latitude, 35.1796);
+      expect(saved.longitude, 129.0756);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('changing a place prompts before discarding the draft', (
+    tester,
+  ) async {
+    await _openPage(tester, _newForm(latitude: 35.1796, longitude: 129.0756));
+    await tester.enterText(_field('위치 *'), '다른 출조 장소');
 
     // Let the controller listener rebuild PopScope before platform back.
     await tester.pump();
@@ -177,8 +179,11 @@ void main() {
     expect(find.text('저장하지 않고 나가시겠습니까?'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, '계속 작성'));
     await tester.pumpAndSettle();
-    expect(_coordinateText(tester, 'record-latitude'), '35.2');
-    expect(_coordinateText(tester, 'record-longitude'), '129.0756');
+    expect(
+      tester.widget<TextField>(_field('위치 *')).controller!.text,
+      '다른 출조 장소',
+    );
+    _expectNoCoordinateInputs();
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '나가기'));
@@ -241,8 +246,17 @@ Finder _field(String label) => find.byWidgetPredicate(
   (widget) => widget is TextField && widget.decoration?.labelText == label,
 );
 
-String _coordinateText(WidgetTester tester, String key) =>
-    tester.widget<TextField>(find.byKey(ValueKey(key))).controller!.text;
+void _expectNoCoordinateInputs() {
+  for (final key in [
+    'record-coordinates',
+    'record-latitude',
+    'record-longitude',
+  ]) {
+    expect(find.byKey(ValueKey(key)), findsNothing);
+  }
+  expect(find.text('위도·경도 (선택)'), findsNothing);
+  expect(find.text('좌표 지우기'), findsNothing);
+}
 
 FishingRecord _record() => FishingRecord(
   id: 'coordinate-form-edit',

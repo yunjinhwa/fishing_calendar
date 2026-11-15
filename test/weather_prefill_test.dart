@@ -29,7 +29,35 @@ void main() {
     expect(_text(tester, '기온 *'), '-2.5');
     expect(_text(tester, '물때 (선택)'), isNotEmpty);
     expect(_text(tester, '수온 (선택)'), isEmpty);
-    expect(find.textContaining('기상청 초단기예보'), findsOneWidget);
+    expect(find.textContaining('기상청 초단기예보'), findsNothing);
+    expect(find.text('지도에서 가져온 정보를 자동 입력했습니다.'), findsNothing);
+    expect(find.text('예보 시간대나 장소가 달라지면 자동 입력값이 해제됩니다.'), findsNothing);
+    expect(find.byKey(const ValueKey('record-latitude')), findsNothing);
+    expect(find.byKey(const ValueKey('record-longitude')), findsNothing);
+    expect(_field('위도'), findsNothing);
+    expect(_field('경도'), findsNothing);
+    expect(
+      tester.widget<TextField>(_field('물때 (선택)')).decoration!.helperText,
+      isNull,
+    );
+    expect(
+      tester.widget<TextField>(_field('수온 (선택)')).decoration!.helperText,
+      isNull,
+    );
+    final tide = _text(tester, '물때 (선택)');
+    final genre = find.widgetWithText(ChoiceChip, '루어');
+    await tester.ensureVisible(genre);
+    await tester.tap(genre);
+    final save = find.widgetWithText(FilledButton, '저장');
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    final saved = FishingRecordRepository.instance.getAllRecords().single;
+    expect(saved.weather, '흐림');
+    expect(saved.airTemperature, -2.5);
+    expect(saved.tide, tide);
+    expect(saved.waterTemperature, isNull);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('old forecasts and mismatched coordinates are never prefilled', (

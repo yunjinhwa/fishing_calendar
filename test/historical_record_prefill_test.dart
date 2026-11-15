@@ -51,8 +51,16 @@ void main() {
     expect(_text(tester, '날씨 *'), '맑음');
     expect(_text(tester, '기온 *'), '24.6');
     expect(_text(tester, '수온 (선택)'), '21.8');
-    expect(find.text('부산 기상관측소 · 과거 관측 2025.07.13 00:00 KST'), findsOneWidget);
-    expect(find.text('부산 수온관측소 · 과거 관측 2025.07.13 00:00 KST'), findsOneWidget);
+    expect(find.textContaining(_weatherStation.name), findsNothing);
+    expect(find.textContaining(_waterStation.name), findsNothing);
+    expect(
+      find.byKey(const ValueKey('record-historical-weather-reference')),
+      findsNothing,
+    );
+    expect(
+      tester.widget<TextField>(_field('수온 (선택)')).decoration!.helperText,
+      isNull,
+    );
     await _selectGenreAndSave(tester);
     final saved = FishingRecordRepository.instance.getAllRecords().single;
     expect(saved.startAt.isAtSameMomentAs(_target), isTrue);
@@ -60,6 +68,8 @@ void main() {
     expect(saved.weather, '맑음');
     expect(saved.airTemperature, 24.6);
     expect(saved.waterTemperature, 21.8);
+    expect(saved.latitude, _location.latitude);
+    expect(saved.longitude, _location.longitude);
     expect(tester.takeException(), isNull);
   });
 
@@ -67,6 +77,7 @@ void main() {
     testWidgets('historical values require matching $mismatch', (tester) async {
       await _open(
         tester,
+        key: ValueKey('mismatched-$mismatch'),
         name: mismatch == 'name' ? '다른 항구' : _location.name,
         latitude: mismatch == 'latitude' ? 34 : _location.latitude!,
         longitude: mismatch == 'longitude' ? 128 : _location.longitude!,
@@ -75,30 +86,10 @@ void main() {
             : _target,
       );
       _expectValues(tester, weather: '', air: '', water: '');
-      expect(
-        find.byKey(const ValueKey('record-historical-weather-reference')),
-        findsNothing,
-      );
+      await _open(tester, key: ValueKey('matching-$mismatch'));
+      _expectValues(tester);
       expect(tester.takeException(), isNull);
     });
-  }
-
-  for (final coordinate in ['record-latitude', 'record-longitude']) {
-    testWidgets(
-      'changing $coordinate invalidates untouched historical fields',
-      (tester) async {
-        await _open(tester);
-        final field = find.byKey(ValueKey(coordinate));
-        final original = tester.widget<TextField>(field).controller!.text;
-        await tester.enterText(field, '34');
-        await tester.pump();
-        _expectValues(tester, weather: '', air: '', water: '');
-        await tester.enterText(field, original);
-        await tester.pump();
-        _expectValues(tester);
-        expect(tester.takeException(), isNull);
-      },
-    );
   }
 
   testWidgets(
@@ -124,10 +115,6 @@ void main() {
       await _open(tester);
       await _chooseStart(tester, _target.add(offset).toLocal());
       _expectValues(tester, weather: '', air: '', water: '');
-      expect(
-        find.byKey(const ValueKey('record-historical-weather-reference')),
-        findsNothing,
-      );
       await _chooseStart(tester, _target.toLocal());
       _expectValues(tester);
       expect(tester.takeException(), isNull);
@@ -153,11 +140,13 @@ void main() {
         );
         await _chooseStart(tester, _target.toLocal());
         _expectValues(tester, weather: weather, air: air, water: water);
-        expect(
-          find.byKey(const ValueKey('record-historical-weather-reference')),
-          findsNothing,
-        );
-        expect(find.textContaining('수온관측소 · 과거 관측'), findsNothing);
+        if (!clear) {
+          await _selectGenreAndSave(tester);
+          final saved = FishingRecordRepository.instance.getAllRecords().single;
+          expect(saved.weather, weather);
+          expect(saved.airTemperature, double.parse(air));
+          expect(saved.waterTemperature, double.parse(water));
+        }
         expect(tester.takeException(), isNull);
       },
     );
@@ -185,10 +174,11 @@ void main() {
     await _chooseStart(tester, _target.add(const Duration(days: 1)).toLocal());
     await _chooseStart(tester, _target.toLocal());
     _expectValues(tester, weather: '직접 입력', air: '12.3', water: '14.5');
-    expect(
-      find.byKey(const ValueKey('record-historical-weather-reference')),
-      findsNothing,
-    );
+    await _selectGenreAndSave(tester);
+    final saved = FishingRecordRepository.instance.getAllRecords().single;
+    expect(saved.weather, '직접 입력');
+    expect(saved.airTemperature, 12.3);
+    expect(saved.waterTemperature, 14.5);
   });
 
   for (final stored in [true, false]) {
@@ -222,10 +212,6 @@ void main() {
           air: stored ? '18.0' : '',
           water: stored ? '17.0' : '',
         );
-        expect(
-          find.byKey(const ValueKey('record-historical-weather-reference')),
-          findsNothing,
-        );
         expect(tester.takeException(), isNull);
       },
     );
@@ -240,7 +226,6 @@ void main() {
     await tester.enterText(_field('위치 *'), _location.name);
     await tester.pump();
     _expectValues(tester, water: '');
-    expect(find.textContaining('수온관측소 · 과거 관측'), findsNothing);
   });
 
   for (final airOnly in [true, false]) {
@@ -364,6 +349,7 @@ HistoricalWaterTemperatureObservation _water() =>
 
 Future<void> _open(
   WidgetTester tester, {
+  Key? key,
   DateTime? startAt,
   String name = '과거 기록 항구',
   double latitude = 35,
@@ -384,6 +370,7 @@ Future<void> _open(
   await tester.pumpWidget(
     MaterialApp(
       home: RecordFormPage(
+        key: key,
         editingRecord: editingRecord,
         initialStartAt: startAt ?? _target,
         initialLocation: name,
