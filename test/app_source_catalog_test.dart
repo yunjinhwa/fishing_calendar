@@ -38,7 +38,6 @@ void main() {
         'mbris',
         'gbif_taxonomy',
         'inaturalist_photos',
-        'share_card_background',
       ]),
     );
     for (final source in appSourceCatalog) {
@@ -127,23 +126,27 @@ void main() {
   );
 
   test(
-    'local generated background does not claim an external image license',
+    'local share background stays bundled outside the external source catalog',
     () {
-      final background = appSourceCatalog.singleWhere(
-        (source) => source.id == 'share_card_background',
-      );
       expect(
         File('assets/images/share_record_background.png').existsSync(),
         isTrue,
       );
-      expect(background.provider, contains('AI'));
-      expect(background.sourceUrl, isNull);
-      expect(background.licenseLabel, isNull);
-      expect(background.licenseUrl, isNull);
       expect(
-        appSourceCatalog.where((source) => source.sourceUrl == null),
-        everyElement(same(background)),
+        appSourceCatalog.map((source) => source.id),
+        isNot(contains('share_card_background')),
       );
+      for (final source in appSourceCatalog) {
+        expect(
+          source.sourceUrl,
+          isA<String>().having(
+            (url) => url.trim(),
+            'public source URL',
+            isNotEmpty,
+          ),
+          reason: source.id,
+        );
+      }
     },
   );
 
