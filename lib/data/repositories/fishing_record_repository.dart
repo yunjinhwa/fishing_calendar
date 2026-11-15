@@ -28,6 +28,8 @@ class FishingRecordRepository extends ChangeNotifier {
 
   String get _ownerKey => AuthSessionRepository.instance.dataOwnerKey;
 
+  bool isOwnerLoaded(String ownerKey) => _loadedOwners.contains(ownerKey);
+
   List<FishingRecord> get _records =>
       _recordsByOwner.putIfAbsent(_ownerKey, () => <FishingRecord>[]);
 

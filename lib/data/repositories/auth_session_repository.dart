@@ -5,6 +5,7 @@ import 'dart:developer' as developer;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart' show DatabaseException;
 
 import '../../core/validation/auth_input_validator.dart';
 import '../auth/auth_gateway.dart';
@@ -382,9 +383,14 @@ class AuthSessionRepository extends ChangeNotifier {
         migrateLegacyAccount: false,
         allowCachedNickname: true,
         allowOfflineAccountDeletionCheck: true,
+        updateAuthDisplayName: false,
         notify: false,
       );
       _lastAuthFailure = null;
+    } on DatabaseException {
+      // A local storage failure is recoverable by the startup screen. Preserve
+      // the native account and persisted session so retry can restore it.
+      rethrow;
     } on Object catch (error, stackTrace) {
       _lastAuthFailure = _asAuthFailure(error, stackTrace);
       await _bestEffortSignOut(gateway, expectedUid: user.uid);
@@ -786,6 +792,26 @@ class AuthSessionRepository extends ChangeNotifier {
     }
   }
 
+  Future<String?> _readSessionNickname(
+    AuthGateway gateway,
+    String uid, {
+    required bool allowCachedNickname,
+  }) async {
+    try {
+      return await gateway.getRegisteredNickname(uid);
+    } on AuthFailure catch (failure) {
+      if (!allowCachedNickname ||
+          failure.code != AuthFailureCode.networkUnavailable) {
+        rethrow;
+      }
+      final cached = await _readFirebaseNickname(uid);
+      if (cached == null || !AuthInputValidator.isValidNickname(cached)) {
+        rethrow;
+      }
+      return cached;
+    }
+  }
+
   Future<void> _establishFirebaseSession({
     required AuthGateway gateway,
     required AuthUser user,
@@ -794,6 +820,7 @@ class AuthSessionRepository extends ChangeNotifier {
     String? nicknameOverride,
     bool allowCachedNickname = false,
     bool allowOfflineAccountDeletionCheck = false,
+    bool updateAuthDisplayName = true,
     bool notify = true,
   }) async {
     _requireCurrentFirebaseUser(gateway, user);
@@ -892,30 +919,30 @@ class AuthSessionRepository extends ChangeNotifier {
         );
       }
     }
-    final resolution = await _resolveServerAccountState(
-      gateway: gateway,
-      uid: user.uid,
-      localState: localState,
-    );
+    late _ResolvedServerAccountState resolution;
+    String? fetchedNickname;
+    // Both reads depend on the deletion barrier above, but not on each other.
+    // Join both before propagating errors so another auth operation cannot
+    // start while a previous read is still updating its local plan cache.
+    await Future.wait<void>([
+      _resolveServerAccountState(
+        gateway: gateway,
+        uid: user.uid,
+        localState: localState,
+      ).then((value) {
+        resolution = value;
+      }),
+      _readSessionNickname(
+        gateway,
+        user.uid,
+        allowCachedNickname: allowCachedNickname,
+      ).then((value) {
+        fetchedNickname = value;
+      }),
+    ]);
     _requireCurrentFirebaseUser(gateway, user);
     final state = resolution.accountState;
-
-    String? nickname;
-    try {
-      nickname = await gateway.getRegisteredNickname(user.uid);
-    } on AuthFailure catch (failure) {
-      final canUseCache =
-          allowCachedNickname &&
-          failure.code == AuthFailureCode.networkUnavailable;
-      if (!canUseCache) {
-        rethrow;
-      }
-      nickname = await _readFirebaseNickname(user.uid);
-      if (nickname == null || !AuthInputValidator.isValidNickname(nickname)) {
-        rethrow;
-      }
-    }
-    _requireCurrentFirebaseUser(gateway, user);
+    var nickname = fetchedNickname;
     if (nickname == null) {
       var nicknameCandidate = nicknameOverride?.trim();
       nicknameCandidate = nicknameCandidate == null || nicknameCandidate.isEmpty
@@ -940,7 +967,9 @@ class AuthSessionRepository extends ChangeNotifier {
     }
     _requireCurrentFirebaseUser(gateway, user);
 
-    if (user.displayName != nickname) {
+    // The verified Firestore nickname already drives the UI. Repairing the
+    // optional Auth mirror can wait until an interactive sign-in.
+    if (updateAuthDisplayName && user.displayName != nickname) {
       try {
         final updatedUser = await gateway.updateDisplayName(nickname);
         _requireCurrentFirebaseUser(gateway, user);
