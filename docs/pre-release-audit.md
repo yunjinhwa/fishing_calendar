@@ -82,6 +82,8 @@
 
 ### A-05 · Medium · 현재 전체 자동 테스트 3개 실패
 
+> 후속 수정: `test/app-info-source-alignment`에서 제거된 공유 배경 항목과 이전 메뉴명에 대한 기대값을 현재 정책에 맞췄다. 공개 URL·개별 라이선스·실제 화면 이동과 링크 실행 검증은 유지했으며 관련 13개와 전체 Flutter 테스트 1,433개가 모두 통과했다. [현재 정책과 검증 기록](app_info_and_licenses.md)을 참고한다. 아래 내용은 최초 발견 당시의 기록이다.
+
 - **근거:** [test/app_source_catalog_test.dart:10](../test/app_source_catalog_test.dart:10), `:132`; [test/app_info_page_test.dart:72](../test/app_info_page_test.dart:72); [lib/presentation/app_info/app_info_page.dart:76](../lib/presentation/app_info/app_info_page.dart:76); [lib/data/app_info/app_source_catalog.dart](../lib/data/app_info/app_source_catalog.dart).
 - **발생 조건:** 현재 HEAD에서 전체 `flutter test --no-pub` 실행.
 - **원인:** 테스트는 제거된 `share_card_background` 항목을 기대한다(2건). 화면 테스트는 ‘API·데이터·이미지 출처’를 찾지만 실제 문구는 ‘API·데이터·사진 출처’다(1건).

@@ -55,6 +55,9 @@ void main() {
     tester,
   ) async {
     final opened = <Uri>[];
+    final selectedSource = appSourceCatalog.singleWhere(
+      (source) => source.id == 'firebase_auth',
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: AppInfoPage(
@@ -69,29 +72,31 @@ void main() {
     expect(find.text('버전 2.3.4 (56)'), findsOneWidget);
     expect(find.text('어종별 사진·정보 출처'), findsNothing);
     expect(opened, isEmpty);
-    await tester.tap(find.text('API·데이터·이미지 출처'));
+    await tester.tap(find.widgetWithText(ListTile, 'API·데이터·사진 출처'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Firebase Authentication'));
+    expect(find.byType(AppSourcesPage), findsOneWidget);
+    await tester.tap(find.text(selectedSource.title));
     await tester.pumpAndSettle();
+    expect(find.byType(AppSourceDetailPage), findsOneWidget);
     expect(find.text('제공기관·제작자'), findsOneWidget);
     expect(find.text('라이선스'), findsOneWidget);
     for (final removed in ['사용 내용', '이용조건', '안내', '공식 출처']) {
       expect(find.text(removed), findsNothing);
     }
     expect(opened, isEmpty);
-    final link = find.widgetWithText(
-      TextButton,
-      appSourceCatalog.first.provider,
-    );
+    final link = find.widgetWithText(TextButton, selectedSource.provider);
     await tester.ensureVisible(link);
     await tester.tap(link);
     await tester.pumpAndSettle();
-    expect(opened, [Uri.parse(appSourceCatalog.first.sourceUrl!)]);
+    expect(opened, [Uri.parse(selectedSource.sourceUrl!)]);
     await tester.tap(
-      find.widgetWithText(TextButton, appSourceCatalog.first.licenseLabel!),
+      find.widgetWithText(TextButton, selectedSource.licenseLabel!),
     );
     await tester.pumpAndSettle();
-    expect(opened.last, Uri.parse(appSourceCatalog.first.licenseUrl!));
+    expect(opened, [
+      Uri.parse(selectedSource.sourceUrl!),
+      Uri.parse(selectedSource.licenseUrl!),
+    ]);
   });
 
   testWidgets('failed external links show an error and allow retry', (
