@@ -118,6 +118,8 @@
 
 ### A-08 · Low · 사용되지 않는 직접 의존성과 자리표시 화면
 
+> 후속 수정: `chore/remove-unused-code`에서 현재 참조를 확인하여 미사용 직접 의존성 10개와 미연결 화면 2개를 제거했다. 잠금 파일에서는 전이 의존성을 포함해 42개가 빠졌으며 남은 패키지의 버전은 유지했다. [정리 범위와 검증 기록](unused_code_cleanup.md)을 참고한다. 아래 내용은 최초 발견 당시의 기록이며 제거된 파일 경로도 당시 기준이다.
+
 - **근거:** `pubspec.yaml:37` 이후 의존성 목록; [lib/presentation/common/placeholder_screen.dart:3](../lib/presentation/common/placeholder_screen.dart:3).
 - **발생 조건/원인:** 전체 추적 Dart 소스의 import 검색에서 `go_router`, `flutter_riverpod`, `freezed_annotation`, `json_annotation`, `cupertino_icons`를 직접 사용하는 import가 없었다. PlaceholderScreen 참조도 선언 외에는 없었다.
 - **영향:** 기능 장애를 확인한 것은 아니다. 의존성 해석·버전 충돌·유지보수 대상이 불필요하게 늘어날 수 있다. 번들 크기나 빌드 시간이 얼마나 증가하는지는 측정하지 않았다.
