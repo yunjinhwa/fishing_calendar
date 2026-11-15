@@ -142,12 +142,16 @@ abstract interface class RecordSyncGateway {
 class RecordSyncGatewayException implements Exception {
   final String message;
   final String? code;
+  final String? documentId;
+  final String? fieldPath;
   final Object? cause;
   final StackTrace? causeStackTrace;
 
   const RecordSyncGatewayException({
     required this.message,
     this.code,
+    this.documentId,
+    this.fieldPath,
     this.cause,
     this.causeStackTrace,
   });

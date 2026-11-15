@@ -154,6 +154,7 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
           _MonthLoadStatus(
             state: _cache.stateFor(focusedMonth),
+            errorMessage: _cache.errorFor(focusedMonth),
             onRetry: () =>
                 unawaited(_cache.loadMonth(focusedMonth, force: true)),
           ),
@@ -193,10 +194,15 @@ class _CalendarPageState extends State<CalendarPage> {
 }
 
 class _MonthLoadStatus extends StatelessWidget {
-  const _MonthLoadStatus({required this.state, required this.onRetry});
+  const _MonthLoadStatus({
+    required this.state,
+    required this.onRetry,
+    this.errorMessage,
+  });
 
   final CachedMonthState state;
   final VoidCallback onRetry;
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +220,7 @@ class _MonthLoadStatus extends StatelessWidget {
             child: Text(
               state == CachedMonthState.offline
                   ? '과거 기록을 모두 보려면 인터넷에 연결해 주세요.'
-                  : '과거 기록을 불러오지 못했습니다.',
+                  : errorMessage ?? '과거 기록을 불러오지 못했습니다.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

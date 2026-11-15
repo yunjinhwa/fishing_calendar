@@ -33,7 +33,7 @@ users/{firebaseUid}/sync_receipts/{outboxId}
 - 기온·수온·조과 크기는 `NaN`이나 무한대가 아닌 유한한 숫자
 - 선택적 위치 좌표는 위도 -90~90, 경도 -180~180의 유한한 숫자이며 두 값을 함께 저장하거나 함께 제거한다.
 
-좌표 없는 기록은 기존 `schemaVersion: 1` 형식을 유지하고, 좌표가 있는 기록은 `schemaVersion: 2`와 `latitude`·`longitude` 필드를 사용한다. 삭제 tombstone은 v1 형식을 유지한다. 이 기록 형식 버전은 처리 영수증의 v1/v2와 별개다. 새 앱은 두 기록 형식을 모두 읽으며, 좌표 없는 요청의 기존 변경 지문도 유지한다. 좌표 기록을 사용하기 전에 보안 규칙을 배포하고 테스트 기기들을 새 빌드로 갱신한다. 자세한 계약과 절차는 [위치 좌표 저장](location_coordinates.md)을 참고한다.
+새 활성 기록은 `schemaVersion: 3`과 검증 가능한 `catchesJson` 문자열을 사용하며, 선택 좌표는 `latitude`·`longitude`를 함께 저장하거나 함께 생략한다. 기존 v1/v2 기록 읽기와 v1 삭제 tombstone, 영수증의 변경 지문은 유지한다. 새 규칙 적용 후 구형 활성 기록 쓰기는 거부되므로 규칙 배포와 테스트 기기 갱신을 함께 진행한다. 기록·영수증 형식 버전은 별개다. 자세한 계약과 적용 순서는 [Firestore 조과 형식 검증](firestore_record_schema.md), 좌표의 입력 기준은 [위치 좌표 저장](location_coordinates.md)을 참고한다.
 
 ## Firestore 규칙 배포
 

@@ -56,6 +56,8 @@
 
 ### A-03 · Medium · 서버가 허용하는 조과 형식과 앱이 읽을 수 있는 형식이 다름
 
+> 후속 수정: `fix/firestore-record-schema`에서 전체 조과를 검증하는 v3 저장 계약, v1/v2 읽기 호환, 손상 문서 식별과 조회 실패 시 기록 보존을 구현했다. 원자적 저장·정상 100개·잘못된 요청 거부는 로컬 에뮬레이터에서 검증했다. [적용 순서와 확인 절차](firestore_record_schema.md)를 참고한다. 아래 내용은 최초 발견 당시의 기록이다.
+
 - **근거:** `firestore.rules:254`; [lib/data/remote/firestore_record_sync_gateway.dart:530](../lib/data/remote/firestore_record_sync_gateway.dart:530), `:721`, `:743`.
 - **발생 조건:** 유료 사용자의 유효한 인증으로 직접 API를 호출하거나 다른/구버전 클라이언트가 `catches: [42]` 같은 잘못된 배열을 저장한다. 현재 정상 앱 폼은 이런 값을 만들지 않는다.
 - **원인:** 규칙은 `catches`가 리스트이고 100개 이하인지 검사하지만 개별 조과의 객체 형태·필드 타입을 검사하지 않는다. 앱 디코더는 각 항목을 Map으로 변환하며, 한 문서의 변환 실패가 snapshot/page 읽기 전체의 실패로 전파된다.

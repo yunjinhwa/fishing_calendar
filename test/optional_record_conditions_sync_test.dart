@@ -64,6 +64,9 @@ void main() {
         versionNo: 2,
         createdAt: Timestamp.fromDate(original.startAt),
       );
+      expect(encoded['schemaVersion'], 3);
+      expect(encoded['catchesJson'], '[]');
+      expect(encoded.containsKey('catches'), isFalse);
       expect(encoded['tide'], isNull);
       expect(encoded['waterTemperature'], isNull);
       final decoded = FirestoreRecordSyncGateway.decodeCloudRecordForTesting(

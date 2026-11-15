@@ -26,8 +26,10 @@ class PaidRecordCacheService extends ChangeNotifier {
   final _sync = RecordSyncService.instance;
   final _network = NetworkStatusService.instance;
   final _states = <(String, DateTime), CachedMonthState>{};
+  final _errors = <(String, DateTime), String>{};
   final _loads = <(String, int, int, DateTime), Future<void>>{};
   final _historyStates = <String, CachedMonthState>{};
+  final _historyErrors = <String, String>{};
   final _historyLoads = <(String, int, int), Future<void>>{};
   Future<void>? _trimFuture;
   bool _trimAgain = false;
@@ -61,6 +63,8 @@ class PaidRecordCacheService extends ChangeNotifier {
       _epoch++;
       _states.clear();
       _historyStates.clear();
+      _errors.clear();
+      _historyErrors.clear();
     }
     notifyListeners();
     requestTrim();
@@ -88,6 +92,7 @@ class PaidRecordCacheService extends ChangeNotifier {
       release();
       if (!policy.holdsMonth(owner, normalized)) {
         _states.remove((owner, normalized));
+        _errors.remove((owner, normalized));
       }
     };
   }
@@ -99,12 +104,23 @@ class PaidRecordCacheService extends ChangeNotifier {
                 ? CachedMonthState.offline
                 : CachedMonthState.local);
 
+  String? errorFor(DateTime month) => stateFor(month) == CachedMonthState.failed
+      ? _errors[(_auth.dataOwnerKey, DateTime(month.year, month.month))]
+      : null;
+
+  String? get historyError => historyState == CachedMonthState.failed
+      ? _historyErrors[_auth.dataOwnerKey]
+      : null;
+
   void Function() holdHistory() {
     final owner = _auth.dataOwnerKey;
     final release = policy.holdHistory(owner);
     return () {
       release();
-      if (!policy.holdsHistory(owner)) _historyStates.remove(owner);
+      if (!policy.holdsHistory(owner)) {
+        _historyStates.remove(owner);
+        _historyErrors.remove(owner);
+      }
     };
   }
 
@@ -135,6 +151,7 @@ class PaidRecordCacheService extends ChangeNotifier {
         _epoch == epoch &&
         policy.holdsHistory(owner);
     if (!current()) return;
+    _historyErrors.remove(owner);
     if (_network.isDisconnected) {
       _historyStates[owner] = CachedMonthState.offline;
       notifyListeners();
@@ -172,8 +189,12 @@ class PaidRecordCacheService extends ChangeNotifier {
       if (!current()) return;
       if (!reconciled.applied) throw StateError('History was not reconciled.');
       _historyStates[owner] = CachedMonthState.ready;
-    } on Object {
+    } on Object catch (error) {
       if (!current()) return;
+      if (error is RecordSyncGatewayException &&
+          error.code == 'invalid-server-data') {
+        _historyErrors[owner] = error.message;
+      }
       _historyStates[owner] = _network.isDisconnected
           ? CachedMonthState.offline
           : CachedMonthState.failed;
@@ -217,6 +238,7 @@ class PaidRecordCacheService extends ChangeNotifier {
         policy.holdsMonth(owner, month);
     if (!current()) return;
     final key = (owner, month);
+    _errors.remove(key);
     if (_network.isDisconnected) {
       _states[key] = CachedMonthState.offline;
       notifyListeners();
@@ -277,8 +299,12 @@ class PaidRecordCacheService extends ChangeNotifier {
         }
         after = page.nextCursor;
       }
-    } on Object {
+    } on Object catch (error) {
       if (!current()) return;
+      if (error is RecordSyncGatewayException &&
+          error.code == 'invalid-server-data') {
+        _errors[key] = error.message;
+      }
       _states[key] = _network.isDisconnected
           ? CachedMonthState.offline
           : CachedMonthState.failed;
@@ -420,6 +446,8 @@ class PaidRecordCacheService extends ChangeNotifier {
     await flushPending();
     _states.clear();
     _historyStates.clear();
+    _errors.clear();
+    _historyErrors.clear();
     _generation = null;
     _trimAgain = false;
     lastTrimError = null;

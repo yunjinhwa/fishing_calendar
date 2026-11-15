@@ -8,6 +8,7 @@ import '../../core/validation/fishing_record_validator.dart';
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
 import '../models/record_sync_metadata.dart';
+import 'firestore_catches_codec.dart';
 import 'record_sync_gateway.dart';
 
 class FirestoreRecordSyncGateway
@@ -21,6 +22,7 @@ class FirestoreRecordSyncGateway
 
   static const int schemaVersion = 1;
   static const int coordinateSchemaVersion = 2;
+  static const int validatedCatchesSchemaVersion = 3;
   static const String activeStatus = 'ACTIVE';
   static const String deletedStatus = 'DELETED';
 
@@ -270,29 +272,15 @@ class FirestoreRecordSyncGateway
       final result = await query
           .limit(limit)
           .get(const GetOptions(source: Source.server));
-      final revisions = <RemoteRecordRevision>[];
-      var previous = after;
-      for (final document in result.docs) {
-        final revision = _decodeRevision(
-          uid: uid,
-          recordId: document.id,
-          data: document.data(),
-        );
-        final cursor = revision.cursor!;
-        if (_compareTimestamp(cursor, since) < 0 ||
-            cursor.compareTo(through) > 0 ||
-            (previous != null && cursor.compareTo(previous) <= 0)) {
-          throw const RecordSyncGatewayException(
-            code: 'invalid-server-data',
-            message: '서버 변경 기록의 순서가 올바르지 않습니다.',
-          );
-        }
-        revisions.add(revision);
-        previous = cursor;
-      }
-      return RemoteRecordChangePage(
-        revisions: List.unmodifiable(revisions),
-        hasMore: revisions.length == limit,
+      return _decodeChangePage(
+        uid: uid,
+        since: since,
+        through: through,
+        after: after,
+        limit: limit,
+        documents: result.docs.map(
+          (document) => MapEntry(document.id, document.data()),
+        ),
       );
     } on RecordSyncGatewayException {
       rethrow;
@@ -527,6 +515,42 @@ class FirestoreRecordSyncGateway
         : left.nanoseconds.compareTo(right.nanoseconds);
   }
 
+  static RemoteRecordChangePage _decodeChangePage({
+    required String uid,
+    required RecordSyncCursor since,
+    required RecordSyncCursor through,
+    required RecordSyncCursor? after,
+    required int limit,
+    required Iterable<MapEntry<String, Map<String, dynamic>>> documents,
+  }) {
+    final revisions = <RemoteRecordRevision>[];
+    var previous = after;
+    for (final document in documents) {
+      final revision = _decodeRevision(
+        uid: uid,
+        recordId: document.key,
+        data: document.value,
+      );
+      final cursor = revision.cursor!;
+      if (_compareTimestamp(cursor, since) < 0 ||
+          cursor.compareTo(through) > 0 ||
+          (previous != null && cursor.compareTo(previous) <= 0)) {
+        throw RecordSyncGatewayException(
+          code: 'invalid-server-data',
+          message: '서버 변경 기록의 순서가 올바르지 않습니다. 기록 ID: ${document.key}',
+          documentId: document.key,
+          fieldPath: 'serverUpdatedAt',
+        );
+      }
+      revisions.add(revision);
+      previous = cursor;
+    }
+    return RemoteRecordChangePage(
+      revisions: List.unmodifiable(revisions),
+      hasMore: revisions.length == limit,
+    );
+  }
+
   static RemoteRecordSnapshot _decodeSnapshot({
     required String uid,
     required Iterable<MapEntry<String, Map<String, dynamic>>> documents,
@@ -593,38 +617,53 @@ class FirestoreRecordSyncGateway
     required String recordId,
     required Map<String, dynamic> data,
   }) {
-    final storedRecordId = data['recordId'];
-    final ownerUid = data['ownerUid'];
-    final status = data['recordStatus'];
-    if (storedRecordId is! String ||
-        storedRecordId != recordId ||
-        ownerUid != uid ||
-        (status != activeStatus && status != deletedStatus)) {
-      throw const RecordSyncGatewayException(
-        code: 'invalid-server-data',
-        message: '서버 기록 형식이 올바르지 않습니다.',
+    try {
+      final storedRecordId = data['recordId'];
+      final ownerUid = data['ownerUid'];
+      final status = data['recordStatus'];
+      if (storedRecordId is! String ||
+          storedRecordId != recordId ||
+          ownerUid != uid ||
+          (status != activeStatus && status != deletedStatus)) {
+        throw const RecordSyncGatewayException(
+          code: 'invalid-server-data',
+          message: '서버 기록 형식이 올바르지 않습니다.',
+        );
+      }
+      _validateCloudEnvelope(
+        data,
+        uid: uid,
+        recordId: recordId,
+        status: status as String,
+      );
+      final updatedAt = data['serverUpdatedAt']! as Timestamp;
+      return RemoteRecordRevision(
+        recordId: recordId,
+        versionNo: data['versionNo']! as int,
+        status: status == activeStatus
+            ? RemoteRecordStatus.active
+            : RemoteRecordStatus.deleted,
+        record: status == activeStatus ? _decodeCloudRecord(data) : null,
+        cursor: RecordSyncCursor(
+          seconds: updatedAt.seconds,
+          nanoseconds: updatedAt.nanoseconds,
+          recordId: recordId,
+        ),
+      );
+    } on RecordSyncGatewayException catch (error, stackTrace) {
+      if (error.code != 'invalid-server-data') rethrow;
+      final field = error.fieldPath;
+      throw RecordSyncGatewayException(
+        code: error.code,
+        message:
+            '서버 기록 형식이 올바르지 않습니다. 기록 ID: $recordId'
+            '${field == null ? '' : ' · 항목: $field'}',
+        documentId: recordId,
+        fieldPath: field,
+        cause: error,
+        causeStackTrace: stackTrace,
       );
     }
-    _validateCloudEnvelope(
-      data,
-      uid: uid,
-      recordId: recordId,
-      status: status as String,
-    );
-    final updatedAt = data['serverUpdatedAt']! as Timestamp;
-    return RemoteRecordRevision(
-      recordId: recordId,
-      versionNo: data['versionNo']! as int,
-      status: status == activeStatus
-          ? RemoteRecordStatus.active
-          : RemoteRecordStatus.deleted,
-      record: status == activeStatus ? _decodeCloudRecord(data) : null,
-      cursor: RecordSyncCursor(
-        seconds: updatedAt.seconds,
-        nanoseconds: updatedAt.nanoseconds,
-        recordId: recordId,
-      ),
-    );
   }
 
   CollectionReference<Map<String, dynamic>> _records(String uid) =>
@@ -680,7 +719,7 @@ class FirestoreRecordSyncGateway
   }) {
     final hasCoordinates = record.latitude != null || record.longitude != null;
     return <String, Object?>{
-      'schemaVersion': hasCoordinates ? coordinateSchemaVersion : schemaVersion,
+      'schemaVersion': validatedCatchesSchemaVersion,
       'ownerUid': uid,
       'recordId': record.id,
       'recordStatus': activeStatus,
@@ -696,15 +735,9 @@ class FirestoreRecordSyncGateway
       'weather': record.weather,
       'airTemperature': record.airTemperature,
       'waterTemperature': record.waterTemperature,
-      'catches': record.catches
-          .map(
-            (catchRecord) => <String, Object?>{
-              'speciesName': catchRecord.speciesName,
-              'lengthCm': catchRecord.lengthCm,
-              'weightG': catchRecord.weightG,
-            },
-          )
-          .toList(growable: false),
+      // One validated JSON value keeps all 100 catches inside the same atomic
+      // record write without exceeding the Security Rules expression budget.
+      'catchesJson': FirestoreCatchesCodec.encode(record.catches),
       'memo': record.memo,
       // Photo files and device-local paths never leave the device. The field
       // remains only for schema-v1 compatibility and is always false because
@@ -722,8 +755,10 @@ class FirestoreRecordSyncGateway
     try {
       final startAt = data['startAt'];
       final endAt = data['endAt'];
-      final rawCatches = data['catches'];
-      if (startAt is! Timestamp || endAt is! Timestamp || rawCatches is! List) {
+      final catches = data['schemaVersion'] == validatedCatchesSchemaVersion
+          ? _decodeValidatedCatches(data['catchesJson'])
+          : _decodeCatches(data['catches']);
+      if (startAt is! Timestamp || endAt is! Timestamp) {
         throw const FormatException('Invalid cloud record fields.');
       }
 
@@ -739,12 +774,7 @@ class FirestoreRecordSyncGateway
         weather: data['weather'] as String?,
         airTemperature: (data['airTemperature'] as num?)?.toDouble(),
         waterTemperature: (data['waterTemperature'] as num?)?.toDouble(),
-        catches: rawCatches
-            .map(
-              (item) =>
-                  CatchRecord.fromJson(Map<String, dynamic>.from(item as Map)),
-            )
-            .toList(growable: false),
+        catches: catches,
         // Firestore stores no device-local image path.
         photoPaths: const <String>[],
         memo: data['memo'] as String?,
@@ -754,6 +784,8 @@ class FirestoreRecordSyncGateway
         throw FormatException(validationMessage);
       }
       return record;
+    } on RecordSyncGatewayException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw RecordSyncGatewayException(
         code: 'invalid-server-data',
@@ -763,6 +795,63 @@ class FirestoreRecordSyncGateway
       );
     }
   }
+
+  static List<CatchRecord> _decodeValidatedCatches(Object? value) {
+    if (value is! String) throw _invalidCatchField('catchesJson');
+    try {
+      return FirestoreCatchesCodec.decode(value);
+    } on FormatException catch (error, stackTrace) {
+      throw RecordSyncGatewayException(
+        code: 'invalid-server-data',
+        message: '서버 조과 형식이 올바르지 않습니다.',
+        fieldPath: 'catchesJson',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  static List<CatchRecord> _decodeCatches(Object? value) {
+    if (value is! List || value.length > FishingRecordValidator.maxCatchCount) {
+      throw _invalidCatchField('catches');
+    }
+    final result = <CatchRecord>[];
+    for (var index = 0; index < value.length; index++) {
+      final item = value[index];
+      final path = 'catches[$index]';
+      if (item is! Map) throw _invalidCatchField(path);
+      final speciesName = item['speciesName'];
+      if (speciesName is! String ||
+          speciesName.trim().isEmpty ||
+          speciesName.length > FishingRecordValidator.maxSpeciesNameLength) {
+        throw _invalidCatchField('$path.speciesName');
+      }
+      final length = item['lengthCm'];
+      if (length != null &&
+          (length is! num || !length.isFinite || length < 0)) {
+        throw _invalidCatchField('$path.lengthCm');
+      }
+      final weight = item['weightG'];
+      if (weight != null && (weight is! int || weight < 0)) {
+        throw _invalidCatchField('$path.weightG');
+      }
+      result.add(
+        CatchRecord(
+          speciesName: speciesName,
+          lengthCm: (length as num?)?.toDouble(),
+          weightG: weight as int?,
+        ),
+      );
+    }
+    return result;
+  }
+
+  static RecordSyncGatewayException _invalidCatchField(String path) =>
+      RecordSyncGatewayException(
+        code: 'invalid-server-data',
+        message: '서버 조과 형식이 올바르지 않습니다.',
+        fieldPath: path,
+      );
 
   @visibleForTesting
   static Map<String, Object?> encodeActiveRecordForTesting({
@@ -795,6 +884,32 @@ class FirestoreRecordSyncGateway
     required String uid,
     required Map<String, Map<String, dynamic>> documents,
   }) => _decodeSnapshot(uid: uid, documents: documents.entries);
+
+  @visibleForTesting
+  static RemoteRecordChangePage decodeChangePageForTesting({
+    required String uid,
+    required RecordSyncCursor since,
+    required RecordSyncCursor through,
+    required Map<String, Map<String, dynamic>> documents,
+    RecordSyncCursor? after,
+    int limit = 100,
+  }) {
+    _validateChangeRequest(
+      uid: uid,
+      since: since,
+      through: through,
+      after: after,
+      limit: limit,
+    );
+    return _decodeChangePage(
+      uid: uid,
+      since: since,
+      through: through,
+      after: after,
+      limit: limit,
+      documents: documents.entries,
+    );
+  }
 
   @visibleForTesting
   static void validateChangeRequestForTesting({
@@ -999,17 +1114,23 @@ class FirestoreRecordSyncGateway
       'weather',
       'airTemperature',
       'waterTemperature',
-      'catches',
       'memo',
       'photoUploadPending',
     };
+    final hasValidatedCatches =
+        status == activeStatus &&
+        data['schemaVersion'] == validatedCatchesSchemaVersion;
     final hasCoordinates =
         status == activeStatus &&
-        data['schemaVersion'] == coordinateSchemaVersion;
+        (data['schemaVersion'] == coordinateSchemaVersion ||
+            (hasValidatedCatches &&
+                (data.containsKey('latitude') ||
+                    data.containsKey('longitude'))));
     final expectedKeys = status == activeStatus
         ? <String>{
             ...baseKeys,
             ...activeOnlyKeys,
+            hasValidatedCatches ? 'catchesJson' : 'catches',
             if (hasCoordinates) ...{'latitude', 'longitude'},
           }
         : baseKeys;
@@ -1017,7 +1138,9 @@ class FirestoreRecordSyncGateway
     final lastOutboxId = data['lastOutboxId'];
     final validBase =
         _hasExactKeys(data, expectedKeys) &&
-        (data['schemaVersion'] == schemaVersion || hasCoordinates) &&
+        (data['schemaVersion'] == schemaVersion ||
+            hasValidatedCatches ||
+            hasCoordinates) &&
         data['ownerUid'] == uid &&
         data['recordId'] == recordId &&
         version is int &&

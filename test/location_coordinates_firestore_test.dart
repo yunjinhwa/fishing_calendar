@@ -9,10 +9,10 @@ import 'package:flutter_test/flutter_test.dart';
 const _uid = 'coordinate-member';
 
 void main() {
-  test('text-only writes preserve the exact legacy v1 document shape', () {
+  test('text-only writes use v3 while legacy v1 reads remain supported', () {
     final record = _record();
     final encoded = _encode(record);
-    expect(encoded['schemaVersion'], 1);
+    expect(encoded['schemaVersion'], 3);
     expect(encoded, hasLength(20));
     expect(encoded.containsKey('latitude'), isFalse);
     expect(encoded.containsKey('longitude'), isFalse);
@@ -21,9 +21,9 @@ void main() {
     expect(decoded.record!.longitude, isNull);
   });
 
-  test('coordinate writes use v2 and preserve a zero coordinate pair', () {
+  test('coordinate writes use v3 and preserve a zero coordinate pair', () {
     final encoded = _encode(_record(latitude: 0, longitude: 0));
-    expect(encoded['schemaVersion'], 2);
+    expect(encoded['schemaVersion'], 3);
     expect(encoded, hasLength(22));
     expect(encoded['latitude'], 0);
     expect(encoded['longitude'], 0);
@@ -198,21 +198,16 @@ void main() {
     }
   });
 
-  test(
-    'clearing coordinates writes the legacy shape without residual fields',
-    () {
-      final withCoordinates = _encode(
-        _record(latitude: 35.1, longitude: 129.1),
-      );
-      final cleared = _encode(_record());
-      expect(withCoordinates['schemaVersion'], 2);
-      expect(cleared['schemaVersion'], 1);
-      expect(
-        cleared.keys.toSet(),
-        withCoordinates.keys.toSet().difference({'latitude', 'longitude'}),
-      );
-    },
-  );
+  test('clearing coordinates keeps v3 without residual coordinate fields', () {
+    final withCoordinates = _encode(_record(latitude: 35.1, longitude: 129.1));
+    final cleared = _encode(_record());
+    expect(withCoordinates['schemaVersion'], 3);
+    expect(cleared['schemaVersion'], 3);
+    expect(
+      cleared.keys.toSet(),
+      withCoordinates.keys.toSet().difference({'latitude', 'longitude'}),
+    );
+  });
 }
 
 final _invalidServerData = isA<RecordSyncGatewayException>().having(

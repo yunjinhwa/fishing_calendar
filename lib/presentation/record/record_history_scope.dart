@@ -112,6 +112,7 @@ class _RecordHistoryScopeState extends State<RecordHistoryScope> {
         if (showStatus)
           _HistoryStatus(
             state: state,
+            errorMessage: _cache.historyError,
             onRetry: () => _scheduleHistoryLoad(force: true),
           ),
         Expanded(child: widget.child),
@@ -121,10 +122,15 @@ class _RecordHistoryScopeState extends State<RecordHistoryScope> {
 }
 
 class _HistoryStatus extends StatelessWidget {
-  const _HistoryStatus({required this.state, required this.onRetry});
+  const _HistoryStatus({
+    required this.state,
+    required this.onRetry,
+    this.errorMessage,
+  });
 
   final CachedMonthState state;
   final VoidCallback onRetry;
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -132,7 +138,7 @@ class _HistoryStatus extends StatelessWidget {
     final message = switch (state) {
       CachedMonthState.loading => '전체 기록을 불러오는 중입니다.',
       CachedMonthState.offline => '오프라인에서는 이 기기에 저장된 기록만 표시됩니다.',
-      _ => '전체 기록을 불러오지 못했습니다. 저장된 기록을 표시합니다.',
+      _ => errorMessage ?? '전체 기록을 불러오지 못했습니다. 저장된 기록을 표시합니다.',
     };
     return Semantics(
       liveRegion: true,
