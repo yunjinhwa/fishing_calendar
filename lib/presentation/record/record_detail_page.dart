@@ -1,19 +1,18 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/models/fishing_record.dart';
 import '../../data/models/record_edit_snapshot.dart';
 import '../../data/models/record_cache_policy.dart';
-import '../../data/photos/record_photo_file_store.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 import 'record_form_page.dart';
+import 'record_photo_thumbnail.dart';
+import 'record_photo_viewer.dart';
 
 class RecordDetailPage extends StatefulWidget {
   final FishingRecord record;
@@ -373,7 +372,11 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
 
                             return ClipRRect(
                               borderRadius: BorderRadius.circular(12),
-                              child: _RecordPhotoPreview(photo: photo),
+                              child: RecordPhotoThumbnail(
+                                photo: photo,
+                                size: 120,
+                                onTap: () => openRecordPhoto(context, photo),
+                              ),
                             );
                           },
                         ),
@@ -501,88 +504,6 @@ class _EmptyInfoCard extends StatelessWidget {
           ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
         ),
       ],
-    );
-  }
-}
-
-class _RecordPhotoPreview extends StatelessWidget {
-  final RecordPhoto photo;
-
-  const _RecordPhotoPreview({required this.photo});
-
-  @override
-  Widget build(BuildContext context) {
-    final localPath = photo.localPath?.trim();
-    if (!kIsWeb && localPath != null && localPath.isNotEmpty) {
-      return Image.file(
-        File(localPath),
-        width: 120,
-        height: 120,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _placeholder(
-          context,
-          icon: Icons.broken_image_outlined,
-          label: '사진을 불러올 수 없음',
-        ),
-      );
-    }
-    if (kIsWeb && localPath != null && localPath.isNotEmpty) {
-      return FutureBuilder<Uint8List>(
-        future: RecordPhotoFileStore().readBytes(localPath),
-        builder: (context, snapshot) {
-          final bytes = snapshot.data;
-          if (bytes != null) {
-            return Image.memory(
-              bytes,
-              width: 120,
-              height: 120,
-              fit: BoxFit.cover,
-            );
-          }
-          return _placeholder(
-            context,
-            icon: snapshot.hasError
-                ? Icons.broken_image_outlined
-                : Icons.image_outlined,
-            label: snapshot.hasError ? '사진을 불러올 수 없음' : null,
-          );
-        },
-      );
-    }
-
-    return _placeholder(
-      context,
-      icon: Icons.broken_image_outlined,
-      label: '사진을 불러올 수 없음',
-    );
-  }
-
-  Widget _placeholder(
-    BuildContext context, {
-    required IconData icon,
-    String? label,
-  }) {
-    return Container(
-      width: 120,
-      height: 120,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon),
-          if (label != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          ],
-        ],
-      ),
     );
   }
 }

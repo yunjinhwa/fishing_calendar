@@ -6,6 +6,9 @@ import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
+import 'package:fishing_build/presentation/record/record_photo_image.dart';
+import 'package:fishing_build/presentation/record/record_photo_thumbnail.dart';
+import 'package:fishing_build/presentation/record/record_photo_viewer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -38,7 +41,22 @@ void main() {
     await tester.pump();
 
     expect(find.byType(Image), findsOneWidget);
+    expect(
+      tester
+          .widget<RecordPhotoThumbnail>(find.byType(RecordPhotoThumbnail))
+          .size,
+      120,
+    );
+    final image = tester.widget<Image>(find.byType(Image));
+    expect(image.image, isA<RecordPhotoImage<FileImage>>());
+    expect((image.image as RecordPhotoImage<FileImage>).pixelSize, 120);
     expect(find.byIcon(Icons.cloud_download_outlined), findsNothing);
+    await tester.tap(find.byType(RecordPhotoThumbnail));
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordPhotoViewer), findsOneWidget);
+    await tester.tap(find.byTooltip('사진 닫기'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordDetailPage), findsOneWidget);
   });
 
   testWidgets('edit form keeps a device-local photo in its photo list', (
@@ -56,6 +74,18 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
 
+    expect(find.text('사진 추가 (1/10)'), findsOneWidget);
+    expect(
+      tester
+          .widget<RecordPhotoThumbnail>(find.byType(RecordPhotoThumbnail))
+          .size,
+      96,
+    );
+    await tester.tap(find.byType(RecordPhotoThumbnail));
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordPhotoViewer), findsOneWidget);
+    await tester.tap(find.byTooltip('사진 닫기'));
+    await tester.pumpAndSettle();
     expect(find.text('사진 추가 (1/10)'), findsOneWidget);
   });
 

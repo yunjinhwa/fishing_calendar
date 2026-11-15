@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +25,8 @@ import '../../data/services/record_photo_cleanup_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../map/tide_data_card.dart';
+import 'record_photo_thumbnail.dart';
+import 'record_photo_viewer.dart';
 
 class RecordFormPage extends StatefulWidget {
   final FishingRecord? editingRecord;
@@ -124,6 +125,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
   _tideNameInput;
   VoidCallback? _stopRecordWatch;
   bool isPickingPhoto = false;
+  bool _isChoosingPhotoSource = false;
   int nextPhotoSequence = 0;
 
   late DateTime startAt;
@@ -960,7 +962,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   Future<void> pickPhoto() async {
-    if (isPickingPhoto || _isSaving || _isPreparingEdit) {
+    if (isPickingPhoto ||
+        _isChoosingPhotoSource ||
+        _isSaving ||
+        _isPreparingEdit) {
       return;
     }
     if (!_isEditingSessionCurrent) {
@@ -973,112 +978,150 @@ class _RecordFormPageState extends State<RecordFormPage> {
       );
       return;
     }
-
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('앨범에서 선택'),
-              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
-            ),
-            if (kIsWeb ||
-                defaultTargetPlatform == TargetPlatform.android ||
-                defaultTargetPlatform == TargetPlatform.iOS)
-              ListTile(
-                leading: const Icon(Icons.photo_camera_outlined),
-                title: const Text('카메라로 촬영'),
-                onTap: () => Navigator.of(context).pop(ImageSource.camera),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (source == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      isPickingPhoto = true;
-    });
-
+    _isChoosingPhotoSource = true;
     try {
-      final pickedImage = await imagePicker.pickImage(source: source);
-      if (pickedImage == null || !mounted) {
-        return;
-      }
-
-      final byteLength = await pickedImage.length();
-      if (!mounted) return;
-      if (byteLength < 1) {
-        showMessage('비어 있는 사진 파일은 첨부할 수 없습니다.');
-        return;
-      }
-      if (byteLength > FishingRecordValidator.maxPhotoBytes) {
-        showMessage('사진은 10 MiB 이하 파일만 첨부할 수 있습니다.');
-        return;
-      }
-
-      final bytes = await pickedImage.readAsBytes();
-      if (!mounted) return;
-      if (!_isEditingSessionCurrent) {
-        showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
-        return;
-      }
-      final contentType = detectRecordPhotoContentType(bytes);
-      if (contentType == null ||
-          !FishingRecordValidator.allowedPhotoContentTypes.contains(
-            contentType,
-          )) {
-        showMessage('JPEG, PNG, WebP 형식의 사진만 첨부할 수 있습니다.');
-        return;
-      }
-
-      final photoId = _newPhotoId();
-      final stored = await _photoDraft!.persistSelection(
-        recordId: recordId,
-        photoId: photoId,
-        bytes: bytes,
-        contentType: contentType,
-      );
-      if (!mounted) {
-        return;
-      }
-      if (!_isEditingSessionCurrent) {
-        _photoDraft?.updatePaths(_photoPaths);
-        showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
-        return;
-      }
-
-      setState(() {
-        photos.add(
-          RecordPhoto(
-            id: photoId,
-            localPath: stored.path,
-            contentType: stored.contentType,
-            sizeBytes: stored.byteLength,
-            checksum: stored.checksum,
+      final source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('앨범에서 선택'),
+                onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+              ),
+              if (kIsWeb ||
+                  defaultTargetPlatform == TargetPlatform.android ||
+                  defaultTargetPlatform == TargetPlatform.iOS)
+                ListTile(
+                  leading: const Icon(Icons.photo_camera_outlined),
+                  title: const Text('카메라로 촬영'),
+                  onTap: () => Navigator.of(context).pop(ImageSource.camera),
+                ),
+            ],
           ),
-        );
-      });
-      _photoDraft?.updatePaths(_photoPaths);
-      _handleDraftChange();
-    } on RecordPhotoTooLargeException {
-      if (mounted) {
-        showMessage('사진은 10 MiB 이하 파일만 첨부할 수 있습니다.');
+        ),
+      );
+      if (source == null || !mounted) return;
+      if (!_isEditingSessionCurrent) {
+        showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
+        return;
       }
-    } on RecordPhotoFileStoreException {
-      if (mounted) {
-        showMessage('사진을 앱 저장소에 복사하지 못했습니다. 다시 시도해 주세요.');
+      setState(() {
+        isPickingPhoto = true;
+      });
+      final remaining = FishingRecordValidator.maxPhotoCount - photos.length;
+      if (remaining <= 0) return;
+      final List<XFile> picked;
+      // image_picker requires a multi-selection limit of at least two.
+      if (source == ImageSource.gallery && remaining > 1) {
+        picked = await imagePicker.pickMultiImage(limit: remaining);
+      } else {
+        final single = await imagePicker.pickImage(source: source);
+        picked = single == null ? <XFile>[] : [single];
+      }
+      if (!mounted || picked.isEmpty) return;
+      var added = 0;
+      var rejected = 0;
+      var failed = 0;
+      var overflow = 0;
+      String? firstIssue;
+      // Read, validate and copy one file at a time, never ten originals at once.
+      for (var index = 0; index < picked.length; index++) {
+        if (!mounted) return;
+        if (!_isEditingSessionCurrent) {
+          _photoDraft?.updatePaths(_photoPaths);
+          showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
+          return;
+        }
+        if (photos.length >= FishingRecordValidator.maxPhotoCount) {
+          overflow = picked.length - index;
+          break;
+        }
+        try {
+          final selected = picked[index];
+          final length = await selected.length();
+          if (!mounted) return;
+          if (length < 1 || length > FishingRecordValidator.maxPhotoBytes) {
+            rejected++;
+            firstIssue ??= length < 1
+                ? '비어 있는 사진 파일은 첨부할 수 없습니다.'
+                : '사진은 10 MiB 이하 파일만 첨부할 수 있습니다.';
+            continue;
+          }
+          final bytes = await selected.readAsBytes();
+          if (!mounted) return;
+          if (!_isEditingSessionCurrent) {
+            showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
+            return;
+          }
+          final contentType = detectRecordPhotoContentType(bytes);
+          if (contentType == null ||
+              !FishingRecordValidator.allowedPhotoContentTypes.contains(
+                contentType,
+              )) {
+            rejected++;
+            firstIssue ??= 'JPEG, PNG, WebP 형식의 사진만 첨부할 수 있습니다.';
+            continue;
+          }
+          final photoId = _newPhotoId();
+          final stored = await _photoDraft!.persistSelection(
+            recordId: recordId,
+            photoId: photoId,
+            bytes: bytes,
+            contentType: contentType,
+          );
+          if (!mounted) return;
+          if (!_isEditingSessionCurrent) {
+            _photoDraft?.updatePaths(_photoPaths);
+            showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
+            return;
+          }
+          setState(() {
+            photos.add(
+              RecordPhoto(
+                id: photoId,
+                localPath: stored.path,
+                contentType: stored.contentType,
+                sizeBytes: stored.byteLength,
+                checksum: stored.checksum,
+              ),
+            );
+          });
+          _photoDraft?.updatePaths(_photoPaths);
+          _handleDraftChange();
+          added++;
+        } on RecordPhotoTooLargeException {
+          rejected++;
+          firstIssue ??= '사진은 10 MiB 이하 파일만 첨부할 수 있습니다.';
+        } on RecordPhotoFileStoreException {
+          failed++;
+          firstIssue ??= '사진을 앱 저장소에 복사하지 못했습니다. 다시 시도해 주세요.';
+        } on Object {
+          failed++;
+          firstIssue ??= '사진을 불러오지 못했습니다. 다시 선택해 주세요.';
+        }
+      }
+      if (!mounted) return;
+      if (rejected + failed + overflow > 0) {
+        if (picked.length == 1 && added == 0 && firstIssue != null) {
+          showMessage(firstIssue);
+        } else {
+          final issues = [
+            if (rejected > 0) '형식·크기 제한으로 제외 $rejected장',
+            if (failed > 0) '불러오기·저장 실패 $failed장',
+            if (overflow > 0) '10장 제한으로 제외 $overflow장',
+          ];
+          showMessage('사진 $added장을 추가했습니다. ${issues.join(' · ')}');
+        }
       }
     } on Object {
       if (mounted) {
         showMessage('사진을 불러오지 못했습니다. 다시 선택해 주세요.');
       }
     } finally {
+      _isChoosingPhotoSource = false;
       if (mounted) {
         setState(() {
           isPickingPhoto = false;
@@ -1625,7 +1668,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
                           children: [
                             ClipRRect(
                               borderRadius: BorderRadius.circular(12),
-                              child: _PhotoPreview(photo: photo),
+                              child: RecordPhotoThumbnail(
+                                photo: photo,
+                                size: 96,
+                                compact: true,
+                                errorLabel: '사진 오류',
+                                onTap: () => openRecordPhoto(context, photo),
+                              ),
                             ),
                             Positioned(
                               top: 4,
@@ -1826,87 +1875,6 @@ class _CatchItemCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _PhotoPreview extends StatelessWidget {
-  final RecordPhoto photo;
-
-  const _PhotoPreview({required this.photo});
-
-  @override
-  Widget build(BuildContext context) {
-    final localPath = photo.localPath?.trim();
-    if (!kIsWeb && localPath != null && localPath.isNotEmpty) {
-      return Image.file(
-        File(localPath),
-        width: 96,
-        height: 96,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => _placeholder(
-          context,
-          icon: Icons.broken_image_outlined,
-          label: '사진 오류',
-        ),
-      );
-    }
-    if (kIsWeb && localPath != null && localPath.isNotEmpty) {
-      return FutureBuilder<Uint8List>(
-        future: RecordPhotoFileStore().readBytes(localPath),
-        builder: (context, snapshot) {
-          final bytes = snapshot.data;
-          if (bytes != null) {
-            return Image.memory(
-              bytes,
-              width: 96,
-              height: 96,
-              fit: BoxFit.cover,
-            );
-          }
-          return _placeholder(
-            context,
-            icon: snapshot.hasError
-                ? Icons.broken_image_outlined
-                : Icons.image_outlined,
-            label: snapshot.hasError ? '사진 오류' : null,
-          );
-        },
-      );
-    }
-
-    return _placeholder(
-      context,
-      icon: Icons.broken_image_outlined,
-      label: '사진을 불러올 수 없음',
-    );
-  }
-
-  Widget _placeholder(
-    BuildContext context, {
-    required IconData icon,
-    String? label,
-  }) {
-    return Container(
-      width: 96,
-      height: 96,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      padding: const EdgeInsets.all(6),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon),
-          if (label != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          ],
-        ],
       ),
     );
   }

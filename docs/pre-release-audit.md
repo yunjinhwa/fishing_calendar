@@ -95,6 +95,8 @@
 
 ### A-06 · Medium · 작은 기록 사진 미리보기에서 원본 해상도로 디코딩할 가능성
 
+> 후속 수정: `perf/record-photo-preview`에서 작성·상세 화면의 공통 미리보기와 DPR 기반의 제한된 디코딩을 적용했다. 비율·작은 원본·극단적 비율·원본 보존을 확인했고, 실제 디코더의 사진 10장 픽셀 버퍼 합계는 약 6.6MiB였다. 실제 기기 전체 메모리 측정과는 구분한다. [수정 내용과 기기 확인 절차](record_photo_preview.md)를 참고한다. 아래 내용은 최초 발견 당시의 기록이다.
+
 - **근거:** [lib/presentation/record/record_form_page.dart:1843](../lib/presentation/record/record_form_page.dart:1843), `:1861`; [lib/presentation/record/record_detail_page.dart:517](../lib/presentation/record/record_detail_page.dart:517), `:535`; [lib/core/validation/fishing_record_validator.dart:16](../lib/core/validation/fishing_record_validator.dart:16).
 - **발생 조건:** 고해상도 사진 여러 장을 기록에 붙이고 작성/상세 화면을 연다. 파일당 10 MiB·최대 10장 제한 이내에서도 가능하다.
 - **원인:** Image.file/Image.memory의 표시 크기는 96/120으로 지정했지만 `cacheWidth/cacheHeight` 또는 ResizeImage가 없다. 압축 파일 크기 제한은 디코딩한 이미지의 픽셀 메모리 제한과 다르다. 기록어·공유·도감에는 이미 ResizeImage를 사용하지만 이 두 경로에는 적용되지 않았다.
