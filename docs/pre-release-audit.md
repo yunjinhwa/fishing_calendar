@@ -69,6 +69,8 @@
 
 ### A-04 · Medium · 초기 DB 열기 실패 시 복구 화면까지 도달하지 못함
 
+> 후속 수정: `fix/startup-database-recovery`에서 첫 화면 선표시·단계별 실패 안내와 재시도·인증 복원 중 DB 오류의 세션 보존을 구현했다. 시작 시 원격 조회의 병렬화와 중복 DB 조회 생략도 보완했다. 파일 DB 오류 복구와 성능 경로를 포함한 신규 테스트 24개가 통과했다. [수정 내용과 기기 확인 절차](startup_database_recovery.md)를 참고한다. 아래 내용은 최초 발견 당시의 기록이다.
+
 - **근거:** [lib/main.dart:38](../lib/main.dart:38), `:40`, `:49`; [lib/data/local/app_database.dart:74](../lib/data/local/app_database.dart:74); [lib/data/repositories/fishing_record_repository.dart:40](../lib/data/repositories/fishing_record_repository.dart:40).
 - **발생 조건:** 시작 시 SQLite 열기/마이그레이션이 실패한다. 실제 원인으로 저장 공간·파일 상태·플랫폼 저장소 오류 등이 가능하지만 이번 기기에 그런 장애가 있었다고 확인한 것은 아니다.
 - **원인:** 초기 데이터 로딩을 모두 `runApp` 전에 기다리며 바깥쪽 오류 처리나 재시도 화면이 없다.

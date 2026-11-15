@@ -24,6 +24,7 @@ class LocalDataMigrationService {
 
   final LocalDataStore _store = LocalDataStore.instance;
   Future<void>? _runningMigration;
+  Database? _completedMigrationDatabase;
 
   Future<void> migrateIfNeeded() {
     final runningMigration = _runningMigration;
@@ -43,11 +44,28 @@ class LocalDataMigrationService {
   Future<void> _migrateIfNeeded() async {
     final database = await AppDatabase.instance.database;
     final preferences = await SharedPreferences.getInstance();
-    await _migrateRecords(database, preferences);
-    await _migrateOutbox(database, preferences);
+    final hasScopedPreferences =
+        preferences.containsKey(scopedRecordsPreferencesKey) ||
+        preferences.containsKey(scopedOutboxPreferencesKey);
+    if (identical(_completedMigrationDatabase, database) &&
+        !hasScopedPreferences) {
+      return;
+    }
+
+    // A failed or incomplete pass must remain retryable, including when a
+    // previously completed database receives another legacy preference value.
+    _completedMigrationDatabase = null;
+    final recordsCompleted = await _migrateRecords(database, preferences);
+    final outboxCompleted = await _migrateOutbox(database, preferences);
+    if (recordsCompleted &&
+        outboxCompleted &&
+        !preferences.containsKey(scopedRecordsPreferencesKey) &&
+        !preferences.containsKey(scopedOutboxPreferencesKey)) {
+      _completedMigrationDatabase = database;
+    }
   }
 
-  Future<void> _migrateRecords(
+  Future<bool> _migrateRecords(
     Database database,
     SharedPreferences preferences,
   ) async {
@@ -56,8 +74,7 @@ class LocalDataMigrationService {
       AppDatabase.legacyRecordsPreferencesMigrationKey,
     );
     if (migrationStatus == AppDatabase.migrationCompletedValue) {
-      await preferences.remove(scopedRecordsPreferencesKey);
-      return;
+      return preferences.remove(scopedRecordsPreferencesKey);
     }
 
     final source = preferences.getString(scopedRecordsPreferencesKey);
@@ -69,7 +86,7 @@ class LocalDataMigrationService {
           backupKey: recordsMigrationBackupKey,
           hasInvalidItems: decoded.hasInvalidItems,
         )) {
-      return;
+      return false;
     }
 
     await database.transaction((transaction) async {
@@ -89,10 +106,10 @@ class LocalDataMigrationService {
         value: AppDatabase.migrationCompletedValue,
       );
     });
-    await preferences.remove(scopedRecordsPreferencesKey);
+    return preferences.remove(scopedRecordsPreferencesKey);
   }
 
-  Future<void> _migrateOutbox(
+  Future<bool> _migrateOutbox(
     Database database,
     SharedPreferences preferences,
   ) async {
@@ -101,8 +118,7 @@ class LocalDataMigrationService {
       AppDatabase.legacyOutboxPreferencesMigrationKey,
     );
     if (migrationStatus == AppDatabase.migrationCompletedValue) {
-      await preferences.remove(scopedOutboxPreferencesKey);
-      return;
+      return preferences.remove(scopedOutboxPreferencesKey);
     }
 
     final source = preferences.getString(scopedOutboxPreferencesKey);
@@ -114,7 +130,7 @@ class LocalDataMigrationService {
           backupKey: outboxMigrationBackupKey,
           hasInvalidItems: decoded.hasInvalidItems,
         )) {
-      return;
+      return false;
     }
 
     await database.transaction((transaction) async {
@@ -134,7 +150,7 @@ class LocalDataMigrationService {
         value: AppDatabase.migrationCompletedValue,
       );
     });
-    await preferences.remove(scopedOutboxPreferencesKey);
+    return preferences.remove(scopedOutboxPreferencesKey);
   }
 
   Future<bool> _preserveInvalidSource(

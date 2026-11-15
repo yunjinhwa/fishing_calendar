@@ -183,17 +183,18 @@ class PlanPolicyService {
   }
 
   Future<void> _queueMissingMigrationItems(_MigrationSession session) async {
-    await AppDatabase.instance.transaction((transaction) async {
+    final changed = await AppDatabase.instance.transaction((transaction) async {
       _ensurePaidSession(session);
       final changes = await _store.readLocalRecordChangesForOwner(
         session.ownerKey,
         executor: transaction,
       );
-      if (!_authSession.isPlanMigrationPending && changes.isEmpty) return;
+      if (!_authSession.isPlanMigrationPending && changes.isEmpty) return false;
       final serverAdopted = await _store.settleServerAdoptedMigrationItems(
         transaction,
         ownerKey: session.ownerKey,
       );
+      var outboxChanged = serverAdopted.isNotEmpty;
       final records = await _store.readRecordsForOwner(
         session.ownerKey,
         executor: transaction,
@@ -224,6 +225,7 @@ class PlanPolicyService {
             history: history,
             deleted: false,
           );
+          outboxChanged = true;
         }
         await _store.deleteLocalRecordChange(
           transaction,
@@ -253,6 +255,7 @@ class PlanPolicyService {
               history: history,
               deleted: true,
             );
+            outboxChanged = true;
           }
         }
         await _store.deleteLocalRecordChange(
@@ -262,8 +265,11 @@ class PlanPolicyService {
         );
       }
       _ensurePaidSession(session);
+      return outboxChanged;
     });
-    await _outboxRepository.reloadOwner(session.ownerKey);
+    if (changed || !_outboxRepository.isOwnerLoaded(session.ownerKey)) {
+      await _outboxRepository.reloadOwner(session.ownerKey);
+    }
   }
 
   Future<void> _appendIntent(

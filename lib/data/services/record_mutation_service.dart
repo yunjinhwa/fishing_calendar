@@ -260,18 +260,19 @@ class RecordMutationService {
     }
     final ownerKey = _authSession.dataOwnerKey;
     final generation = _authSession.sessionGeneration;
-    await AppDatabase.instance
+    final changed = await AppDatabase.instance
         .transaction((transaction) async {
-          if (generation != _authSession.sessionGeneration) return;
+          if (generation != _authSession.sessionGeneration) return false;
           final changes = await _store.readLocalRecordChangesForOwner(
             ownerKey,
             executor: transaction,
           );
-          if (changes.isNotEmpty) return;
+          if (changes.isNotEmpty) return false;
           final items = await _store.readOutboxItemsForOwner(
             ownerKey,
             executor: transaction,
           );
+          var changed = false;
           for (final item in items) {
             if (generation != _authSession.sessionGeneration) {
               throw const _ReconciliationCancelled();
@@ -289,6 +290,7 @@ class RecordMutationService {
                 ownerKey: ownerKey,
                 recordId: item.recordId,
               );
+              changed = true;
               continue;
             }
             final payload = item.payload;
@@ -307,13 +309,17 @@ class RecordMutationService {
               record: record,
               replace: true,
             );
+            changed = true;
           }
           if (generation != _authSession.sessionGeneration) {
             throw const _ReconciliationCancelled();
           }
+          return changed;
         })
-        .onError<_ReconciliationCancelled>((_, _) {});
-    await _recordRepository.reloadOwner(ownerKey);
+        .onError<_ReconciliationCancelled>((_, _) => false);
+    if (changed || !_recordRepository.isOwnerLoaded(ownerKey)) {
+      await _recordRepository.reloadOwner(ownerKey);
+    }
   }
 
   void _ensureRecordAccess() {

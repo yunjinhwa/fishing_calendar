@@ -25,6 +25,8 @@ class OutboxRepository {
 
   String get _ownerKey => AuthSessionRepository.instance.dataOwnerKey;
 
+  bool isOwnerLoaded(String ownerKey) => _loadedOwners.contains(ownerKey);
+
   List<OutboxItem> get _items =>
       _itemsByOwner.putIfAbsent(_ownerKey, () => <OutboxItem>[]);
 

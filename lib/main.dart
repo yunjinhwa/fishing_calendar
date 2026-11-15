@@ -1,51 +1,13 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'app.dart';
 import 'data/app_info/app_licenses.dart';
-import 'data/auth/firebase_auth_bootstrap.dart';
-import 'data/remote/firebase_record_sync_bootstrap.dart';
-import 'data/repositories/auth_session_repository.dart';
-import 'data/repositories/conflict_repository.dart';
-import 'data/repositories/fishing_record_repository.dart';
-import 'data/repositories/outbox_repository.dart';
-import 'data/services/account_deletion_service.dart';
-import 'data/services/network_status_service.dart';
-import 'data/services/plan_policy_service.dart';
-import 'data/services/record_mutation_service.dart';
-import 'data/services/record_photo_cleanup_coordinator.dart';
-import 'data/services/record_sync_service.dart';
-import 'data/services/paid_record_cache_service.dart';
+import 'presentation/startup/startup_gate.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
   registerAppLicenses();
 
-  unawaited(NetworkStatusService.instance.initialize());
-
-  final authSession = AuthSessionRepository.instance;
-  final authGateway = await FirebaseAuthBootstrap.initialize();
-  authSession.configureAuthGateway(authGateway);
-  final accountDeletionService = AccountDeletionService.instance;
-  authSession.configureRemoteAccountDeletionCleanup(
-    accountDeletionService.handleRemoteAccountDeletion,
-  );
-  RecordSyncService.instance.configureGateway(
-    FirebaseRecordSyncBootstrap.create(authGateway),
-  );
-  await accountDeletionService.resumePendingLocalCleanup();
-  await authSession.loadSession();
-  await FishingRecordRepository.instance.loadRecords();
-  await OutboxRepository.instance.loadItems();
-  await ConflictRepository.instance.loadItems();
-  await RecordMutationService.instance.reconcileOutboxWithLocalRecords();
-  await PlanPolicyService.instance.resumePendingMigration();
-
-  PaidRecordCacheService.instance.initialize();
-  RecordPhotoCleanupCoordinator.instance.initialize();
-  RecordSyncService.instance.initialize();
-  runApp(const FishingBuildApp());
-  unawaited(RecordSyncService.instance.syncNow());
+  runApp(const StartupGate(child: FishingBuildApp()));
 }
