@@ -683,7 +683,7 @@ void main() {
     expect(conflictRepository.getAllItems(), isEmpty);
   });
 
-  testWidgets('member can change from free to paid on the plan page', (
+  testWidgets('development opt-in allows local free to paid plan changes', (
     tester,
   ) async {
     await authSession.setSessionForTesting(
@@ -691,7 +691,9 @@ void main() {
       email: 'upgrade@example.com',
     );
 
-    await tester.pumpWidget(const MaterialApp(home: PlanPage()));
+    await tester.pumpWidget(
+      const MaterialApp(home: PlanPage(enableDevelopmentPlanControls: true)),
+    );
     await tester.tap(find.text('유료 플랜으로 변경'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '변경'));
@@ -740,7 +742,7 @@ void main() {
     expect(conflictRepository.getAllItems(), isEmpty);
   });
 
-  testWidgets('upgrading from the outbox gate opens an empty real queue', (
+  testWidgets('outbox plan entry keeps local development changes hidden', (
     tester,
   ) async {
     await authSession.setSessionForTesting(
@@ -751,15 +753,13 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: OutboxPage()));
     await tester.tap(find.text('플랜 보기'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('유료 플랜으로 변경'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '변경'));
-    await tester.pumpAndSettle();
+    expect(find.text('유료 플랜으로 변경'), findsNothing);
+    expect(find.text('무료 플랜으로 변경'), findsNothing);
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
 
-    expect(authSession.isPaid, isTrue);
-    expect(find.text('업로드 대기열이 비어 있습니다.'), findsOneWidget);
+    expect(authSession.isFree, isTrue);
+    expect(find.text('유료 플랜이 필요합니다'), findsOneWidget);
     expect(outboxRepository.getAllItems(), isEmpty);
   });
 

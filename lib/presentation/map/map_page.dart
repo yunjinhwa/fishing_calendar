@@ -70,11 +70,13 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
   static const _refreshInterval = Duration(minutes: 10);
   static const _retryDelay = Duration(minutes: 5);
   final _searchController = TextEditingController();
+  final _resultsScrollController = ScrollController(keepScrollOffset: false);
   final _network = NetworkStatusService.instance;
   late final MapSelectionController _controller;
   late final ExternalDataService _externalService;
   late final WaterAreaService _waterAreaService;
   MapLocation? _observedSelection;
+  List<MapLocation>? _observedResults;
   MapLocation? _externalRequestedFor;
   ExternalData? _externalData;
   TideRecordReference? _tideReference;
@@ -147,6 +149,7 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
     _externalService = widget.externalDataService ?? KmaWeatherService.instance;
     _waterAreaService = widget.waterAreaService ?? OpenMapWaterService.instance;
     _observedSelection = _controller.selection;
+    _observedResults = _controller.results;
     _tideName = _defaultTideName(_controller.selection);
     _wasDisconnected = _network.isDisconnected;
     _controller.addListener(_onSelectionChanged);
@@ -269,6 +272,22 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
 
   void _onSelectionChanged() {
     if (!mounted) return;
+    final results = _controller.results;
+    if (!identical(results, _observedResults)) {
+      _observedResults = results;
+      if (results.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted ||
+              !identical(results, _controller.results) ||
+              !_resultsScrollController.hasClients) {
+            return;
+          }
+          if (_resultsScrollController.offset != 0) {
+            _resultsScrollController.jumpTo(0);
+          }
+        });
+      }
+    }
     final selection = _controller.selection;
     if (!identical(selection, _observedSelection)) {
       _observedSelection = selection;
@@ -608,6 +627,7 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
     _controller.setGateway(null);
     if (widget.controller == null) _controller.dispose();
     _searchController.dispose();
+    _resultsScrollController.dispose();
     super.dispose();
   }
 
@@ -737,33 +757,44 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
                     if (selected.address != null &&
                         selected.address != selected.name)
                       Text(selected.address!),
-                    Text(
-                      choosing
-                          ? '위치를 확인하고 있습니다.'
-                          : selected.hasCoordinates
-                          ? '선택한 위치를 기록에 저장합니다.'
-                          : '장소 이름을 기록에 저장합니다.',
-                    ),
+                    if (choosing) const Text('위치를 확인하고 있습니다.'),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            ..._controller.results.map(
-              (result) => Card(
-                child: ListTile(
-                  leading: const Icon(Icons.place_outlined),
-                  title: Text(result.name),
-                  subtitle: result.address == null
-                      ? null
-                      : Text(result.address!),
-                  onTap: () {
-                    _controller.selectLocation(result);
-                    FocusScope.of(context).unfocus();
-                  },
+            if (_controller.results.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: Scrollbar(
+                  controller: _resultsScrollController,
+                  child: ListView.builder(
+                    key: const ValueKey('map-search-results'),
+                    controller: _resultsScrollController,
+                    primary: false,
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    itemCount: _controller.results.length,
+                    itemBuilder: (context, index) {
+                      final result = _controller.results[index];
+                      return Card(
+                        child: ListTile(
+                          minTileHeight: 72,
+                          leading: const Icon(Icons.place_outlined),
+                          title: Text(result.name),
+                          subtitle: result.address == null
+                              ? null
+                              : Text(result.address!),
+                          onTap: () {
+                            _controller.selectLocation(result);
+                            FocusScope.of(context).unfocus();
+                          },
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
-            ),
             TidePanel(
               clock: widget.clock,
               key: const ValueKey('map-tide-panel'),
@@ -945,16 +976,13 @@ class _WaterAreaSelector extends StatelessWidget {
         selected: {areaOverride},
         onSelectionChanged: (selected) => onChanged(selected.single),
       ),
-      const SizedBox(height: 8),
-      if (isLoading)
-        const LinearProgressIndicator(key: ValueKey('water-area-loading'))
-      else if (areaOverride == null)
-        Row(
-          children: [
-            Expanded(child: Text('자동 판별 · ${detected.label}')),
-            if (detected == WaterArea.unknown)
-              TextButton(onPressed: onRetry, child: const Text('다시 판별')),
-          ],
+      if (isLoading) ...[
+        const SizedBox(height: 8),
+        const LinearProgressIndicator(key: ValueKey('water-area-loading')),
+      ] else if (areaOverride == null && detected == WaterArea.unknown)
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(onPressed: onRetry, child: const Text('다시 판별')),
         ),
     ],
   );

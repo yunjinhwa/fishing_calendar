@@ -40,7 +40,18 @@ void main() {
     expect(_text(tester, '날씨 *'), isEmpty);
     expect(_text(tester, '기온 *'), isEmpty);
     expect(_text(tester, '물때 (선택)'), isNotEmpty);
-    expect(find.textContaining('테스트 관측소 · 관측'), findsOneWidget);
+    expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
+    expect(
+      tester.widget<TextField>(_field('수온 (선택)')).decoration!.helperText,
+      isNull,
+    );
+    await tester.enterText(_field('날씨 *'), '흐림');
+    await tester.enterText(_field('기온 *'), '20');
+    await _selectGenreAndSave(tester);
+    expect(
+      FishingRecordRepository.instance.getAllRecords().single.waterTemperature,
+      16.2,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -57,17 +68,11 @@ void main() {
     testWidgets('observation with age $age is never prefilled', (tester) async {
       await _open(tester, observation: _observation(age: age));
       expect(_text(tester, '수온 (선택)'), isEmpty);
-      expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
     });
   }
 
-  testWidgets('mismatched names and coordinates are never prefilled', (
-    tester,
-  ) async {
+  testWidgets('mismatched names are never prefilled', (tester) async {
     await _open(tester, name: '다른 항구');
-    expect(_text(tester, '수온 (선택)'), isEmpty);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await _open(tester, longitude: 128);
     expect(_text(tester, '수온 (선택)'), isEmpty);
   });
 
@@ -91,22 +96,21 @@ void main() {
     },
   );
 
-  for (final coordinate in ['record-latitude', 'record-longitude']) {
-    testWidgets(
-      'changing $coordinate clears only automatic water temperature',
-      (tester) async {
-        await _open(tester);
-        final field = find.byKey(ValueKey(coordinate));
-        final original = tester.widget<TextField>(field).controller!.text;
-        await tester.enterText(field, '34');
-        await tester.pump();
-        expect(_text(tester, '수온 (선택)'), isEmpty);
-        await tester.enterText(field, original);
-        await tester.pump();
-        expect(_text(tester, '수온 (선택)'), '16.2');
-        expect(tester.takeException(), isNull);
-      },
-    );
+  for (final coordinate in ['latitude', 'longitude']) {
+    testWidgets('observation requires matching source $coordinate', (
+      tester,
+    ) async {
+      await _open(
+        tester,
+        key: ValueKey('mismatched-$coordinate'),
+        latitude: coordinate == 'latitude' ? 34 : 35,
+        longitude: coordinate == 'longitude' ? 128 : 129,
+      );
+      expect(_text(tester, '수온 (선택)'), isEmpty);
+      await _open(tester, key: ValueKey('matching-$coordinate'));
+      expect(_text(tester, '수온 (선택)'), '16.2');
+      expect(tester.takeException(), isNull);
+    });
   }
 
   for (final offset in [
@@ -121,7 +125,6 @@ void main() {
       await _open(tester);
       await _chooseStart(tester, DateTime.now().add(offset));
       expect(_text(tester, '수온 (선택)'), isEmpty);
-      expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
       await _chooseStart(tester, DateTime.now());
       expect(_text(tester, '수온 (선택)'), '16.2');
       expect(tester.takeException(), isNull);
@@ -139,7 +142,16 @@ void main() {
       await _chooseStart(tester, DateTime.now().add(const Duration(days: 2)));
       await _chooseStart(tester, DateTime.now());
       expect(_text(tester, '수온 (선택)'), manual);
-      expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
+      await tester.enterText(_field('날씨 *'), '흐림');
+      await tester.enterText(_field('기온 *'), '20');
+      await _selectGenreAndSave(tester);
+      expect(
+        FishingRecordRepository.instance
+            .getAllRecords()
+            .single
+            .waterTemperature,
+        manual.isEmpty ? isNull : double.parse(manual),
+      );
       expect(tester.takeException(), isNull);
     });
   }
@@ -155,7 +167,6 @@ void main() {
       DateTime.now().subtract(const Duration(days: 2)),
     );
     expect(_text(tester, '수온 (선택)'), '12.4');
-    expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
   });
 
   for (final temperature in [13.4, null]) {
@@ -183,7 +194,14 @@ void main() {
       await tester.enterText(_field('위치 *'), _location.name);
       await _chooseStart(tester, DateTime.now());
       expect(_text(tester, '수온 (선택)'), temperature?.toString() ?? '');
-      expect(find.textContaining('테스트 관측소 · 관측'), findsNothing);
+      await _save(tester);
+      expect(
+        FishingRecordRepository.instance
+            .getAllRecords()
+            .single
+            .waterTemperature,
+        temperature,
+      );
       expect(tester.takeException(), isNull);
     });
   }
@@ -209,13 +227,7 @@ void main() {
   ) async {
     await _open(tester, weather: _forecast());
     await tester.enterText(_field('수온 (선택)'), '');
-    final genre = find.widgetWithText(ChoiceChip, '루어');
-    await tester.ensureVisible(genre);
-    await tester.tap(genre);
-    final save = find.widgetWithText(FilledButton, '저장');
-    await tester.ensureVisible(save);
-    await tester.tap(save);
-    await tester.pumpAndSettle();
+    await _selectGenreAndSave(tester);
     expect(
       FishingRecordRepository.instance.getAllRecords().single.waterTemperature,
       isNull,
@@ -261,9 +273,11 @@ ExternalData _forecast({int hoursAgo = 0}) {
 
 Future<void> _open(
   WidgetTester tester, {
+  Key? key,
   WaterTemperatureObservation? observation,
   ExternalData? weather,
   String name = '수온 테스트 항구',
+  double latitude = 35,
   double longitude = 129,
   double? initialWaterTemperature,
   bool allowAutomaticWaterTemperature = true,
@@ -276,9 +290,10 @@ Future<void> _open(
   await tester.pumpWidget(
     MaterialApp(
       home: RecordFormPage(
+        key: key,
         editingRecord: editingRecord,
         initialLocation: name,
-        initialLatitude: _location.latitude,
+        initialLatitude: latitude,
         initialLongitude: longitude,
         initialExternalData: weather,
         initialWaterTemperature: initialWaterTemperature,
@@ -287,6 +302,20 @@ Future<void> _open(
       ),
     ),
   );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _selectGenreAndSave(WidgetTester tester) async {
+  final genre = find.widgetWithText(ChoiceChip, '루어');
+  await tester.ensureVisible(genre);
+  await tester.tap(genre);
+  await _save(tester);
+}
+
+Future<void> _save(WidgetTester tester) async {
+  final save = find.widgetWithText(FilledButton, '저장');
+  await tester.ensureVisible(save);
+  await tester.tap(save);
   await tester.pumpAndSettle();
 }
 

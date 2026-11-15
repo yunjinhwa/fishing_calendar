@@ -163,6 +163,7 @@ void main() {
     await tester.pump();
     expect(gps.requests, 1);
     expect(controller.isLocating, isTrue);
+    expect(find.text('위치를 확인하고 있습니다.'), findsOneWidget);
     expect(service.calls, isEmpty);
 
     await tester.pumpWidget(page(false));
@@ -466,6 +467,18 @@ void main() {
         results.map((place) => place.name),
       );
       expect(find.widgetWithText(ListTile, '검색 항구 0'), findsOneWidget);
+      final resultList = find.byKey(const ValueKey('map-search-results'));
+      expect(tester.getSize(resultList).height, lessThanOrEqualTo(320));
+      for (var index = 0; index < 4; index++) {
+        expect(
+          find.widgetWithText(ListTile, '검색 항구 $index').hitTestable(),
+          findsOneWidget,
+        );
+      }
+      expect(
+        find.widgetWithText(ListTile, '검색 항구 4').hitTestable(),
+        findsNothing,
+      );
       expect(lifecycle.created, 1);
       expect(lifecycle.disposed, 0);
       expect(tester.takeException(), isNull);
@@ -511,15 +524,49 @@ void main() {
       );
       expect(lifecycle.disposed, 0);
 
-      await tester.drag(find.byType(ListView).first, const Offset(0, -2000));
+      final resultList = find.byKey(const ValueKey('map-search-results'));
+      await tester.ensureVisible(resultList);
+      await tester.pumpAndSettle();
+      final outerScroll = tester.state<ScrollableState>(
+        find.byType(Scrollable).first,
+      );
+      final outerOffset = outerScroll.position.pixels;
+      final firstSelection = controller.selection;
+      await tester.drag(resultList, const Offset(0, -200));
+      await tester.pumpAndSettle();
+      expect(outerScroll.position.pixels, outerOffset);
+      expect(controller.selection, same(firstSelection));
+      expect(controller.results, hasLength(30));
+
+      final outerDragStart =
+          tester.getTopLeft(find.byType(ListView).first) + const Offset(8, 24);
+      await tester.dragFrom(outerDragStart, const Offset(0, -2000));
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('lifecycle-map')).hitTestable(),
         findsNothing,
       );
-      await tester.drag(find.byType(ListView).first, const Offset(0, 2000));
+      await tester.dragFrom(outerDragStart, const Offset(0, 2000));
       await tester.pumpAndSettle();
       expect(controller.results, hasLength(30));
+      expect(lifecycle.created, 1);
+      expect(lifecycle.disposed, 0);
+
+      await tester.ensureVisible(resultList);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.widgetWithText(ListTile, '검색 항구 29'),
+        240,
+        scrollable: find.descendant(
+          of: resultList,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.tap(find.widgetWithText(ListTile, '검색 항구 29'));
+      await tester.pumpAndSettle();
+      expect(controller.selection.name, '검색 항구 29');
+      expect(controller.selection.latitude, closeTo(35.029, 0.0000001));
+      expect(controller.selection.longitude, 129);
       expect(lifecycle.created, 1);
       expect(lifecycle.disposed, 0);
 
@@ -534,10 +581,144 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'a new search starts at the first result without recreating the map',
+    (tester) async {
+      final first = _searchResults(30);
+      final second = _searchResults(8);
+      final third = _searchResults(20);
+      final lifecycle = _MapLifecycle(
+        searchResults: {'first': first, 'second': second, 'third': third},
+      );
+      final controller = MapSelectionController(
+        locationGateway: _LocationGateway(),
+      );
+      await _openMap(
+        tester,
+        controller: controller,
+        mapBuilder: (_, onGatewayChanged, _) => _LifecycleMapCanvas(
+          lifecycle: lifecycle,
+          onGatewayChanged: onGatewayChanged,
+        ),
+      );
+      await controller.search('first');
+      await tester.pumpAndSettle();
+      final resultList = find.byKey(const ValueKey('map-search-results'));
+      final resultScroll = find.descendant(
+        of: resultList,
+        matching: find.byType(Scrollable),
+      );
+      await tester.scrollUntilVisible(
+        find.widgetWithText(ListTile, '검색 항구 29'),
+        240,
+        scrollable: resultScroll,
+      );
+      await tester.pumpAndSettle();
+      final scrolledOffset = tester
+          .state<ScrollableState>(resultScroll)
+          .position
+          .pixels;
+      expect(scrolledOffset, greaterThan(0));
+
+      await tester.tap(find.text('민물'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.state<ScrollableState>(resultScroll).position.pixels,
+        scrolledOffset,
+        reason:
+            'Changing map controls must preserve the current results offset.',
+      );
+
+      await controller.search('second');
+      await tester.pumpAndSettle();
+      expect(controller.results, hasLength(8));
+      expect(controller.selection, same(second.first));
+      expect(tester.state<ScrollableState>(resultScroll).position.pixels, 0);
+      expect(
+        find.widgetWithText(ListTile, '검색 항구 0').hitTestable(),
+        findsOneWidget,
+      );
+
+      await tester.scrollUntilVisible(
+        find.widgetWithText(ListTile, '검색 항구 7'),
+        240,
+        scrollable: resultScroll,
+      );
+      expect(
+        tester.state<ScrollableState>(resultScroll).position.pixels,
+        greaterThan(0),
+      );
+      await controller.search('third');
+      await tester.pumpAndSettle();
+      expect(controller.results, hasLength(20));
+      expect(controller.selection, same(third.first));
+      expect(tester.state<ScrollableState>(resultScroll).position.pixels, 0);
+      expect(
+        find.widgetWithText(ListTile, '검색 항구 0').hitTestable(),
+        findsOneWidget,
+      );
+      expect(lifecycle.queries, ['first', 'second', 'third']);
+      expect(lifecycle.created, 1);
+      expect(lifecycle.disposed, 0);
+      expect(controller.isMapReady, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'long search results wrap and remain selectable with large text',
+    (tester) async {
+      final results = List.generate(
+        6,
+        (index) => MapLocation(
+          name: '해안 산책로 끝에서 만나는 아주 긴 이름의 낚시 장소 $index',
+          address: '부산광역시 영도구 해안산책로 전망대와 등대 사이의 긴 주소 $index',
+          latitude: 35 + index * 0.001,
+          longitude: 129,
+        ),
+      );
+      final controller = MapSelectionController(
+        locationGateway: _LocationGateway(),
+      )..setGateway(_SearchGateway(results));
+      await _openMap(
+        tester,
+        controller: controller,
+        viewSize: const Size(320, 1100),
+        textScale: 2,
+      );
+      await controller.search('해안');
+      await tester.pumpAndSettle();
+      final resultList = find.byKey(const ValueKey('map-search-results'));
+      await tester.ensureVisible(resultList);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(resultList).height, lessThanOrEqualTo(320));
+      expect(controller.results, hasLength(6));
+      expect(tester.takeException(), isNull);
+
+      final lastResult = find.widgetWithText(ListTile, results.last.name);
+      await tester.scrollUntilVisible(
+        lastResult,
+        240,
+        maxScrolls: 40,
+        scrollable: find.descendant(
+          of: resultList,
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.tap(find.text(results.last.name));
+      await tester.pumpAndSettle();
+      expect(controller.selection, same(results.last));
+      expect(controller.selection.address, results.last.address);
+      expect(find.text('선택한 위치를 기록에 저장합니다.'), findsNothing);
+      expect(find.text('장소 이름을 기록에 저장합니다.'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
-void _prepareView(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1000, 2200);
+void _prepareView(WidgetTester tester, {Size size = const Size(1000, 2200)}) {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
 }
@@ -548,12 +729,20 @@ Future<void> _openMap(
   MapCanvasBuilder? mapBuilder,
   ExternalDataService? externalDataService,
   DateTime Function()? clock,
+  Size viewSize = const Size(1000, 2200),
+  double textScale = 1,
 }) async {
-  _prepareView(tester);
+  _prepareView(tester, size: viewSize);
   addTearDown(controller.dispose);
   addTearDown(() async => tester.pumpWidget(const SizedBox.shrink()));
   await tester.pumpWidget(
     MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(textScale)),
+        child: child!,
+      ),
       home: MapPage(
         waterAreaService: const FixedWaterAreaService(),
         controller: controller,
@@ -685,6 +874,9 @@ List<MapLocation> _searchResults(int count) => List.generate(
 );
 
 class _MapLifecycle {
+  _MapLifecycle({this.searchResults});
+
+  final Map<String, List<MapLocation>>? searchResults;
   int created = 0;
   int disposed = 0;
   final queries = <String>[];
@@ -740,7 +932,8 @@ class _LifecycleSearchGateway implements MapSearchGateway {
   @override
   Future<List<MapLocation>> search(String keyword) async {
     lifecycle.queries.add(keyword);
-    final response = await lifecycle.response.future;
+    final response =
+        lifecycle.searchResults?[keyword] ?? await lifecycle.response.future;
     if (disposed) throw StateError('Map disposed while searching.');
     return response;
   }

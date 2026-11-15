@@ -66,9 +66,9 @@ void main() {
       expect(conditions.tideForecast, isNull);
       expect(conditions.tideName, isNull);
       expect(conditions.waterTemperatureObservation, isNull);
-      if (area == WaterArea.inland) {
-        expect(find.text('자동 판별 · 내륙'), findsOneWidget);
-      }
+      expect(find.textContaining('자동 판별 · '), findsNothing);
+      expect(find.text('선택한 위치를 기록에 저장합니다.'), findsNothing);
+      expect(find.text('장소 이름을 기록에 저장합니다.'), findsNothing);
       expect(tester.takeException(), isNull);
     });
   }
@@ -185,6 +185,53 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'automatic classification keeps progress and retry after cleanup',
+    (tester) async {
+      final areas = _Areas(deferred: true);
+      final tides = _Tides();
+      await _open(tester, areas, tides, settle: false);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('water-area-loading')), findsOneWidget);
+      expect(find.textContaining('자동 판별 · '), findsNothing);
+
+      areas.pending.single.completeError(StateError('Classification failed'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('water-area-loading')), findsNothing);
+      expect(find.text('다시 판별'), findsOneWidget);
+      await tester.tap(find.text('다시 판별'));
+      await tester.pump();
+      expect(areas.forceRefreshes, [false, true]);
+      expect(find.byKey(const ValueKey('water-area-loading')), findsOneWidget);
+      areas.pending.last.complete(WaterArea.freshwater);
+      await tester.pumpAndSettle();
+      expect(find.text('다시 판별'), findsNothing);
+      expect(tides.calls, 0);
+
+      await tester.tap(find.text('바다'));
+      await tester.pumpAndSettle();
+      expect(tides.calls, 1);
+      expect(find.text('수온'), findsOneWidget);
+      await tester.tap(find.text('자동'));
+      await tester.pump();
+      expect(areas.forceRefreshes, [false, true, false]);
+      areas.pending.last.complete(WaterArea.freshwater);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<SegmentedButton<WaterArea?>>(
+              find.byKey(const ValueKey('water-area-selector')),
+            )
+            .selected,
+        {null},
+      );
+      expect(find.text('물때'), findsNothing);
+      expect(find.text('수온'), findsNothing);
+      expect(find.textContaining('자동 판별 · '), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('the real map controls fit a narrow screen with large text', (
     tester,
   ) async {
@@ -249,12 +296,14 @@ class _Areas implements WaterAreaService {
   final WaterArea result;
   final bool deferred;
   final pending = <Completer<WaterArea>>[];
+  final forceRefreshes = <bool>[];
 
   @override
   Future<WaterArea> classify(
     MapLocation location, {
     bool forceRefresh = false,
   }) {
+    forceRefreshes.add(forceRefresh);
     if (!deferred) return Future.value(result);
     final request = Completer<WaterArea>();
     pending.add(request);

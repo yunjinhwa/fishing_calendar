@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../data/models/plan_entitlement.dart';
@@ -9,7 +10,15 @@ import '../../data/services/plan_policy_service.dart';
 import '../../data/services/record_sync_service.dart';
 
 class PlanPage extends StatefulWidget {
-  const PlanPage({super.key});
+  /// Local plan changes are development tools, never available in release.
+  final bool enableDevelopmentPlanControls;
+
+  const PlanPage({
+    super.key,
+    this.enableDevelopmentPlanControls = const bool.fromEnvironment(
+      'ENABLE_DEVELOPMENT_PLAN_CONTROLS',
+    ),
+  });
 
   @override
   State<PlanPage> createState() => _PlanPageState();
@@ -61,6 +70,11 @@ class _PlanPageState extends State<PlanPage> {
 
   Future<void> changePlan(UserPlan nextPlan) async {
     final authSession = AuthSessionRepository.instance;
+    if (!kDebugMode ||
+        !widget.enableDevelopmentPlanControls ||
+        authSession.usesServerPlan) {
+      return;
+    }
     final upgrading = nextPlan == UserPlan.paid;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -275,32 +289,35 @@ class _PlanPageState extends State<PlanPage> {
                     description: '업로드 대기열과 충돌 관리는 유료 플랜에서 제공됩니다.',
                   ),
                 ],
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: authSession.usesServerPlan
-                      ? FilledButton.icon(
-                          onPressed:
-                              isChanging || !authSession.canRefreshServerPlan
-                              ? null
-                              : refreshServerPlan,
-                          icon: const Icon(Icons.refresh),
-                          label: Text(isChanging ? '확인 중...' : '서버 플랜 새로고침'),
-                        )
-                      : isPaid
-                      ? OutlinedButton(
-                          onPressed: isChanging
-                              ? null
-                              : () => changePlan(UserPlan.free),
-                          child: Text(isChanging ? '변경 중...' : '무료 플랜으로 변경'),
-                        )
-                      : FilledButton(
-                          onPressed: isChanging
-                              ? null
-                              : () => changePlan(UserPlan.paid),
-                          child: Text(isChanging ? '변경 중...' : '유료 플랜으로 변경'),
-                        ),
-                ),
+                if (authSession.usesServerPlan ||
+                    (kDebugMode && widget.enableDevelopmentPlanControls)) ...[
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: authSession.usesServerPlan
+                        ? FilledButton.icon(
+                            onPressed:
+                                isChanging || !authSession.canRefreshServerPlan
+                                ? null
+                                : refreshServerPlan,
+                            icon: const Icon(Icons.refresh),
+                            label: Text(isChanging ? '확인 중...' : '서버 플랜 새로고침'),
+                          )
+                        : isPaid
+                        ? OutlinedButton(
+                            onPressed: isChanging
+                                ? null
+                                : () => changePlan(UserPlan.free),
+                            child: Text(isChanging ? '변경 중...' : '무료 플랜으로 변경'),
+                          )
+                        : FilledButton(
+                            onPressed: isChanging
+                                ? null
+                                : () => changePlan(UserPlan.paid),
+                            child: Text(isChanging ? '변경 중...' : '유료 플랜으로 변경'),
+                          ),
+                  ),
+                ],
               ],
             ),
           ),
