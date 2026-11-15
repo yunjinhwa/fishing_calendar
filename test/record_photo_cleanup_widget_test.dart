@@ -34,6 +34,8 @@ void main() {
   late _TrackingPhotoFileStore backend;
   late RecordPhotoFileStore photoStore;
   Future<String?> Function()? pickerResult;
+  List<String>? multiPickerResults;
+  MethodCall? lastPickerCall;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -54,7 +56,7 @@ void main() {
     galleryOriginal = File('${temporaryDirectory.path}/gallery-original.png');
     await galleryOriginal.writeAsBytes(
       base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jI9sAAAAASUVORK5CYII=',
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGMQrs38D8IMMAYAQZIH4XTlNsEAAAAASUVORK5CYII=',
       ),
       flush: true,
     );
@@ -67,14 +69,23 @@ void main() {
     await cleanup.configureForTesting(fileStore: photoStore);
     cleanup.enableAutomaticCleanup();
     pickerResult = null;
+    multiPickerResults = null;
+    lastPickerCall = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_pickerChannel, (call) async {
-          if (call.method != 'pickImage') {
+          if (call.method != 'pickImage' && call.method != 'pickMultiImage') {
             throw PlatformException(code: 'unexpected-test-picker-method');
           }
-          return pickerResult == null
+          lastPickerCall = call;
+          if (call.method == 'pickMultiImage' && multiPickerResults != null) {
+            return multiPickerResults!;
+          }
+          final result = pickerResult == null
               ? galleryOriginal.path
               : await pickerResult!();
+          return call.method == 'pickMultiImage'
+              ? (result == null ? <String>[] : [result])
+              : result;
         });
   });
 
@@ -102,6 +113,137 @@ void main() {
     expect(File(stored.path).existsSync(), isFalse);
     expect(galleryOriginal.existsSync(), isTrue);
     expect(await recordsForCurrentOwner(), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'a gallery batch is saved in selection order with unique copies',
+    (tester) async {
+      final original = await _seedPhotoRecord(tester, photoStore, 'batch-save');
+      multiPickerResults = List.filled(3, galleryOriginal.path);
+      await _openForm(tester, RecordFormPage(editingRecord: original));
+      await _startPickingPhoto(tester);
+      await _waitForSelection(tester);
+
+      expect(lastPickerCall!.method, 'pickMultiImage');
+      expect(lastPickerCall!.arguments['limit'], 9);
+      expect(find.text('사진 추가 (4/10)'), findsOneWidget);
+      final added = backend.stored.skip(1).toList();
+      expect(added, hasLength(3));
+      expect(added.map((photo) => photo.path).toSet(), hasLength(3));
+      await _save(tester);
+      await _flush(tester, cleanup);
+
+      final saved = (await recordsForCurrentOwner()).single;
+      expect(saved.photos.map((photo) => photo.localPath), [
+        original.photos.single.localPath,
+        ...added.map((photo) => photo.path),
+      ]);
+      expect(saved.photos.map((photo) => photo.id).toSet(), hasLength(4));
+      expect(
+        saved.photos.every((photo) => File(photo.localPath!).existsSync()),
+        isTrue,
+      );
+      expect(galleryOriginal.existsSync(), isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'a batch keeps valid files when another cannot be copied or read',
+    (tester) async {
+      final unsupported = File('${temporaryDirectory.path}/not-a-photo.txt');
+      await tester.runAsync(() => unsupported.writeAsString('not an image'));
+      multiPickerResults = [
+        galleryOriginal.path,
+        unsupported.path,
+        '${temporaryDirectory.path}/missing.png',
+        galleryOriginal.path,
+      ];
+      await _openForm(tester, const RecordFormPage());
+      await _startPickingPhoto(tester);
+      await _waitForSelection(tester);
+
+      expect(find.text('사진 추가 (2/10)'), findsOneWidget);
+      expect(find.textContaining('형식·크기 제한으로 제외 1장'), findsOneWidget);
+      expect(find.textContaining('불러오기·저장 실패 1장'), findsOneWidget);
+      expect(backend.stored, hasLength(2));
+      await _discardAndLeave(tester);
+      await _flush(tester, cleanup);
+      expect(
+        backend.stored.every((photo) => !File(photo.path).existsSync()),
+        isTrue,
+      );
+      expect(galleryOriginal.existsSync(), isTrue);
+      expect(unsupported.existsSync(), isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'a platform ignoring the selection limit cannot attach over ten',
+    (tester) async {
+      multiPickerResults = List.filled(12, galleryOriginal.path);
+      await _openForm(tester, const RecordFormPage());
+      await _startPickingPhoto(tester);
+      await _waitForSelection(tester);
+
+      expect(find.text('사진 추가 (10/10)'), findsOneWidget);
+      expect(find.textContaining('10장 제한으로 제외 2장'), findsOneWidget);
+      expect(backend.stored, hasLength(10));
+      await _discardAndLeave(tester);
+      await _flush(tester, cleanup);
+      expect(
+        backend.stored.every((photo) => !File(photo.path).existsSync()),
+        isTrue,
+      );
+      expect(galleryOriginal.existsSync(), isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('one remaining slot uses the single-photo picker', (
+    tester,
+  ) async {
+    final original = await _seedPhotoRecord(tester, photoStore, 'one-slot');
+    final record = FishingRecord.fromJson({
+      ...original.toJson(),
+      'photos': [
+        for (var i = 0; i < 9; i++)
+          {...original.photos.single.toJson(), 'id': 'existing-$i'},
+      ],
+    });
+    await records.updateRecord(record);
+    await _openForm(tester, RecordFormPage(editingRecord: record));
+    await _startPickingPhoto(tester);
+    await _waitForSelection(tester);
+
+    expect(lastPickerCall!.method, 'pickImage');
+    expect(find.text('사진 추가 (10/10)'), findsOneWidget);
+    await _disposeForm(tester, cleanup);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('cancelling a gallery batch permits a later camera selection', (
+    tester,
+  ) async {
+    multiPickerResults = [];
+    await _openForm(tester, const RecordFormPage());
+    await _startPickingPhoto(tester);
+    await _waitForSelection(tester);
+    expect(find.text('사진 추가 (0/10)'), findsOneWidget);
+    expect(backend.stored, isEmpty);
+
+    await tester.tap(find.text('사진 추가 (0/10)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('카메라로 촬영'));
+    await tester.pump();
+    await _waitForSelection(tester);
+    expect(lastPickerCall!.method, 'pickImage');
+    expect(lastPickerCall!.arguments['source'], 0);
+    expect(find.text('사진 추가 (1/10)'), findsOneWidget);
+    await _discardAndLeave(tester);
+    await _flush(tester, cleanup);
     expect(tester.takeException(), isNull);
   });
 
@@ -349,7 +491,7 @@ Future<FishingRecord> _seedPhotoRecord(
       recordId: id,
       photoId: 'photo-$id',
       bytes: base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jI9sAAAAASUVORK5CYII=',
+        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGMQrs38D8IMMAYAQZIH4XTlNsEAAAAASUVORK5CYII=',
       ),
       contentType: 'image/png',
     ),
@@ -412,6 +554,11 @@ Future<void> _startPickingPhoto(WidgetTester tester) async {
   await tester.pump();
 }
 
+Future<void> _waitForSelection(WidgetTester tester) async {
+  await _pumpIoUntil(tester, () => find.text('사진 저장 중').evaluate().isEmpty);
+  await tester.pumpAndSettle();
+}
+
 Future<StoredRecordPhotoFile> _pickPhoto(
   WidgetTester tester,
   _TrackingPhotoFileStore store, {
@@ -471,7 +618,7 @@ Future<void> _pumpIoUntil(
 ) async {
   // File I/O uses the real event loop; widget and SQLite continuations also
   // need the fake clock's microtasks pumped between those I/O completions.
-  for (var iteration = 0; iteration < 500 && !isComplete(); iteration++) {
+  for (var iteration = 0; iteration < 1500 && !isComplete(); iteration++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 5)),
     );
