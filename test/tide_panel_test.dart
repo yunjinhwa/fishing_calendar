@@ -196,6 +196,8 @@ void main() {
   testWidgets(
     'offline and inactive panels do not fetch; late results are ignored',
     (tester) async {
+      await tester.runAsync(() => NetworkStatusService.instance.close());
+      await NetworkStatusService.instance.initialize();
       final service = _Tides(deferred: true);
       final references = <TideRecordReference?>[];
       connectivity.setConnected(false);
@@ -237,8 +239,9 @@ void main() {
       expect(references.last, isNull);
       await tester.pumpWidget(_panel(service));
       await tester.pump();
+      expect(service.requests, hasLength(2));
+      _expectForecastRows();
       await tester.pumpWidget(const SizedBox.shrink());
-      service.complete(2);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     },
@@ -397,6 +400,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: WeatherDataCard(
+              clock: () => DateTime.utc(2026, 11, 3),
               waterArea: WaterArea.marine,
               data: ExternalData(
                 locationName: _location.name,

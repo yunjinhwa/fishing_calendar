@@ -28,6 +28,7 @@ class LocationConditionsCard extends StatelessWidget {
     this.waterTemperatureLoading = false,
     this.waterTemperatureError,
     this.onRetryWaterTemperature,
+    this.clock,
   });
 
   final WaterArea waterArea;
@@ -47,6 +48,7 @@ class LocationConditionsCard extends StatelessWidget {
   final bool waterTemperatureLoading;
   final String? waterTemperatureError;
   final VoidCallback? onRetryWaterTemperature;
+  final DateTime Function()? clock;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -68,6 +70,7 @@ class LocationConditionsCard extends StatelessWidget {
             const SizedBox(height: 12),
           ],
           WeatherDataCard(
+            clock: clock,
             embedded: true,
             data: weatherData,
             waterArea: waterArea,

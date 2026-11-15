@@ -267,19 +267,22 @@ class _Weather implements ExternalDataService {
   Future<ExternalData> fetchCurrentData({
     required MapLocation location,
     bool forceRefresh = false,
-  }) async => ExternalData(
-    locationName: location.name,
-    latitude: location.latitude!,
-    longitude: location.longitude!,
-    weather: '맑음',
-    airTemperature: 20,
-    waterTemperature: 23,
-    gridX: 1,
-    gridY: 1,
-    issuedAt: DateTime.utc(2026, 11, 3),
-    validAt: DateTime.utc(2026, 11, 3),
-    fetchedAt: DateTime.utc(2026, 11, 3),
-  );
+  }) async {
+    final now = DateTime.now().toUtc();
+    return ExternalData(
+      locationName: location.name,
+      latitude: location.latitude!,
+      longitude: location.longitude!,
+      weather: '맑음',
+      airTemperature: 20,
+      waterTemperature: 23,
+      gridX: 1,
+      gridY: 1,
+      issuedAt: now,
+      validAt: DateTime.utc(now.year, now.month, now.day, now.hour),
+      fetchedAt: now,
+    );
+  }
 }
 
 class _Tides implements TideService {

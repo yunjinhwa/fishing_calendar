@@ -280,6 +280,7 @@ Future<void> _pump(
   Widget card, {
   double textScale = 1,
 }) async {
+  addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
   await tester.pumpWidget(
     MaterialApp(
       builder: (context, child) => MediaQuery(
@@ -298,19 +299,22 @@ Future<void> _pump(
   );
 }
 
-ExternalData _weather({String weather = '맑음'}) => ExternalData(
-  locationName: '군산항',
-  latitude: _station.latitude,
-  longitude: _station.longitude,
-  weather: weather,
-  airTemperature: 20,
-  waterTemperature: 17.5,
-  gridX: 55,
-  gridY: 91,
-  issuedAt: DateTime.utc(2026, 11, 3),
-  validAt: DateTime.utc(2026, 11, 3, 1),
-  fetchedAt: DateTime.utc(2026, 11, 3),
-);
+ExternalData _weather({String weather = '맑음'}) {
+  final now = DateTime.now().toUtc();
+  return ExternalData(
+    locationName: '군산항',
+    latitude: _station.latitude,
+    longitude: _station.longitude,
+    weather: weather,
+    airTemperature: 20,
+    waterTemperature: 17.5,
+    gridX: 55,
+    gridY: 91,
+    issuedAt: now,
+    validAt: DateTime.utc(now.year, now.month, now.day, now.hour),
+    fetchedAt: now,
+  );
+}
 
 TideForecast _forecast({TideDay? day}) => TideForecast(
   station: _station,
