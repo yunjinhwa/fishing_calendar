@@ -55,7 +55,7 @@ void main() {
       'weather',
       'airTemperature',
       'waterTemperature',
-      'catches',
+      'catchesJson',
       'memo',
       'photoUploadPending',
       'versionNo',
@@ -64,6 +64,9 @@ void main() {
       'serverUpdatedAt',
       'lastOutboxId',
     });
+    expect(encoded['schemaVersion'], 3);
+    expect(encoded['catchesJson'], isA<String>());
+    expect(encoded, isNot(contains('catches')));
     expect(encoded, isNot(contains('photoPaths')));
     expect(encoded['photoUploadPending'], isFalse);
     expect(encoded['createdAt'], createdAt);

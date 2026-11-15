@@ -75,6 +75,18 @@ function nullValue() {
   return {nullValue: null};
 }
 
+function encodedCatches(catches) {
+  return `[${catches.map(({speciesName, lengthCm = null, weightG = null}) => {
+    let name = '';
+    for (let index = 0; index < speciesName.length; index += 1) {
+      name += `\\u${speciesName.charCodeAt(index).toString(16).padStart(4, '0')}`;
+    }
+    const length = lengthCm === null ? 'null' :
+      (Object.is(lengthCm, -0) ? '-0.0000000000000000e+0' : lengthCm.toExponential(16));
+    return `{"speciesName":"${name}","lengthCm":${length},"weightG":${weightG}}`;
+  }).join(',')}]`;
+}
+
 function entitlementFields({planType, status, expiresAt}) {
   return {
     planType: stringValue(planType),
@@ -109,9 +121,8 @@ function activeRecordFields({
   latitude,
   longitude,
 }) {
-  const hasCoordinates = latitude !== undefined || longitude !== undefined;
   return {
-    schemaVersion: integerValue(hasCoordinates ? 2 : 1),
+    schemaVersion: integerValue(3),
     ownerUid: stringValue(uid),
     recordId: stringValue(recordId),
     recordStatus: stringValue('ACTIVE'),
@@ -125,21 +136,9 @@ function activeRecordFields({
     weather: stringValue('맑음'),
     airTemperature: {doubleValue: 24.5},
     waterTemperature: {doubleValue: 20.5},
-    catches: {
-      arrayValue: {
-        values: [
-          {
-            mapValue: {
-              fields: {
-                speciesName: stringValue('우럭'),
-                lengthCm: {doubleValue: 31.2},
-                weightG: integerValue(820),
-              },
-            },
-          },
-        ],
-      },
-    },
+    catchesJson: stringValue(encodedCatches([
+      {speciesName: '우럭', lengthCm: 31.2, weightG: 820},
+    ])),
     memo: stringValue('Firestore 규칙 smoke test'),
     photoUploadPending: {booleanValue: false},
     versionNo: integerValue(versionNo),
@@ -1245,13 +1244,13 @@ for (const [baseVersionNo, coordinates] of [
   await expectStatus('coordinate transition readback', result, 200);
   const data = (await result.json()).fields;
   if (Object.hasOwn(coordinates, 'latitude')) {
-    if (data.schemaVersion.integerValue !== '2' ||
+    if (data.schemaVersion.integerValue !== '3' ||
         Number(data.latitude.doubleValue ?? data.latitude.integerValue) !== coordinates.latitude ||
         Number(data.longitude.doubleValue ?? data.longitude.integerValue) !== coordinates.longitude) {
       throw new Error('coordinate schema transition lost its coordinate pair');
     }
-  } else if (data.schemaVersion.integerValue !== '1' || data.latitude || data.longitude) {
-    throw new Error('removing coordinates did not restore the legacy shape');
+  } else if (data.schemaVersion.integerValue !== '3' || data.latitude || data.longitude) {
+    throw new Error('removing coordinates did not preserve the validated shape');
   }
 }
 await expectStatus(
@@ -1287,8 +1286,7 @@ for (const [label, latitude, longitude] of [
 }
 for (const [label, mutate] of [
   ['legacy-with-coordinates', (fields) => { fields.schemaVersion = integerValue(1); }],
-  ['unsupported-schema', (fields) => { fields.schemaVersion = integerValue(3); }],
-  ['missing-pair', (fields) => { delete fields.latitude; delete fields.longitude; }],
+  ['unsupported-schema', (fields) => { fields.schemaVersion = integerValue(4); }],
   ['latitude-only', (fields) => { delete fields.longitude; }],
   ['longitude-only', (fields) => { delete fields.latitude; }],
   ['latitude-out-of-range', (fields) => { fields.latitude = {doubleValue: 90.01}; }],
@@ -1306,4 +1304,92 @@ for (const [label, mutate] of [
   await commit(`coordinate ${label} denied`, coordinatesMember.token, body, 403);
 }
 
-console.log('Firestore rules smoke test passed.');
+const schemaMember = await createUser('validated-schema');
+await seedEntitlement(schemaMember.uid);
+const oneCatch = encodedCatches([{speciesName: '우럭'}]);
+const validCatchBodies = [
+  ['empty', '[]'],
+  ['maximum-count-and-name', encodedCatches(Array.from({length: 100}, () => ({
+    speciesName: '🐟'.repeat(50), lengthCm: Number.MAX_VALUE,
+    weightG: 9223372036854775807n,
+  })))],
+  ['escaped-name', encodedCatches([{speciesName: '우럭 " \\ \n\t'}])],
+  ['smallest-double', encodedCatches([{speciesName: '우럭', lengthCm: Number.MIN_VALUE}])],
+  ['negative-zero', encodedCatches([{speciesName: '우럭', lengthCm: -0, weightG: 0}])],
+  ['safe-rounding', oneCatch.replace('"lengthCm":null', '"lengthCm":1.0000000000000001e+0')],
+];
+for (const [label, value] of validCatchBodies) {
+  const body = mutationCommit({
+    uid: schemaMember.uid, recordId: `schema-valid-${label}`,
+    outboxId: `schema-valid-${label}`, operationType: 'create',
+    baseVersionNo: 0, resultingVersionNo: 1,
+  });
+  body.writes[0].update.fields.catchesJson = stringValue(value);
+  await commit(`validated catches ${label} allowed`, schemaMember.token, body, 200);
+}
+const invalidCatchBodies = [
+  ['number-item', '[42]'],
+  ['string-item', '["fish"]'],
+  ['null-item', '[null]'],
+  ['missing-fields', '[{}]'],
+  ['blank-name', encodedCatches([{speciesName: ' \t\n\u0085\ufeff'}])],
+  ['empty-name', encodedCatches([{speciesName: ''}])],
+  ['long-name', encodedCatches([{speciesName: '어'.repeat(101)}])],
+  ['over-count', encodedCatches(Array.from({length: 101}, () => ({speciesName: '우럭'})))],
+  ['numeric-name', oneCatch.replace(/"speciesName":"[^"]*"/, '"speciesName":42')],
+  ['missing-name', oneCatch.replace(/"speciesName":"[^"]*",/, '')],
+  ['missing-length', oneCatch.replace('"lengthCm":null,', '')],
+  ['missing-weight', oneCatch.replace(',"weightG":null', '')],
+  ['string-length', oneCatch.replace('"lengthCm":null', '"lengthCm":"31"')],
+  ['negative-length', oneCatch.replace('"lengthCm":null', '"lengthCm":-1.0000000000000000e+0')],
+  ['overflow-length', oneCatch.replace('"lengthCm":null', '"lengthCm":1.8000000000000000e+308')],
+  ['overflow-exponent', oneCatch.replace('"lengthCm":null', '"lengthCm":1.0000000000000000e+309')],
+  ['negative-weight', oneCatch.replace('"weightG":null', '"weightG":-1')],
+  ['decimal-weight', oneCatch.replace('"weightG":null', '"weightG":1.5')],
+  ['string-weight', oneCatch.replace('"weightG":null', '"weightG":"10"')],
+  ['overflow-weight', oneCatch.replace('"weightG":null', '"weightG":9223372036854775808')],
+  ['extra-field', oneCatch.replace('"weightG":null', '"weightG":null,"quantity":1')],
+  ['late-invalid-item', encodedCatches(Array.from({length: 99}, () => ({speciesName: '우럭'}))).replace(/\]$/, ',42]')],
+  ['trailing-input', `${oneCatch}\n`],
+];
+for (const [label, value] of invalidCatchBodies) {
+  const body = mutationCommit({
+    uid: schemaMember.uid, recordId: `schema-invalid-${label}`,
+    outboxId: `schema-invalid-${label}`, operationType: 'create',
+    baseVersionNo: 0, resultingVersionNo: 1,
+  });
+  body.writes[0].update.fields.catchesJson = stringValue(value);
+  await commit(`validated catches ${label} denied`, schemaMember.token, body, 403);
+}
+for (const legacyVersion of [1, 2]) {
+  const recordId = `schema-legacy-${legacyVersion}`;
+  const body = mutationCommit({
+    uid: schemaMember.uid, recordId, outboxId: recordId,
+    operationType: 'create', baseVersionNo: 0, resultingVersionNo: 1,
+    ...(legacyVersion === 2 ? {latitude: 35, longitude: 129} : {}),
+  });
+  const fields = body.writes[0].update.fields;
+  fields.schemaVersion = integerValue(legacyVersion);
+  delete fields.catchesJson;
+  fields.catches = {arrayValue: {values: [{integerValue: '42'}]}};
+  await commit(`legacy schema ${legacyVersion} cannot bypass validation`, schemaMember.token, body, 403);
+}
+for (const [label, mutate] of [
+  ['array-in-v3', (fields) => { delete fields.catchesJson; fields.catches = {arrayValue: {values: []}}; }],
+  ['array-and-json', (fields) => { fields.catches = {arrayValue: {values: []}}; }],
+  ['null-json', (fields) => { fields.catchesJson = nullValue(); }],
+  ['blank-location', (fields) => { fields.location = stringValue('   '); }],
+  ['blank-genre', (fields) => { fields.genreName = stringValue('   '); }],
+  ['infinite-air', (fields) => { fields.airTemperature = {doubleValue: 'Infinity'}; }],
+  ['nan-water', (fields) => { fields.waterTemperature = {doubleValue: 'NaN'}; }],
+]) {
+  const body = mutationCommit({
+    uid: schemaMember.uid, recordId: `schema-shape-${label}`,
+    outboxId: `schema-shape-${label}`, operationType: 'create',
+    baseVersionNo: 0, resultingVersionNo: 1,
+  });
+  mutate(body.writes[0].update.fields);
+  await commit(`validated shape ${label} denied`, schemaMember.token, body, 403);
+}
+
+console.log('Firestore rules smoke test passed, including validated catch schema.');
