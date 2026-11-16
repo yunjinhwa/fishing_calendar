@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'daily_record_list_page.dart';
 import 'calendar_record_layout.dart';
 import 'calendar_month_picker.dart';
+import 'calendar_today_summary.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
@@ -14,17 +15,26 @@ import '../../data/services/network_status_service.dart';
 import '../../data/services/record_sync_service.dart';
 
 class CalendarPage extends StatefulWidget {
-  const CalendarPage({super.key, this.isActive = true, this.initialMonth});
+  const CalendarPage({
+    super.key,
+    this.isActive = true,
+    this.initialMonth,
+    this.now,
+  });
 
   final bool isActive;
   final DateTime? initialMonth;
+  final DateTime Function()? now;
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
-class _CalendarPageState extends State<CalendarPage> {
+class _CalendarPageState extends State<CalendarPage>
+    with WidgetsBindingObserver {
   late DateTime focusedMonth;
+  late DateTime _today;
+  Timer? _dayChangeTimer;
   final _recordRepository = FishingRecordRepository.instance;
   final _auth = AuthSessionRepository.instance;
   final _cache = PaidRecordCacheService.instance;
@@ -32,28 +42,40 @@ class _CalendarPageState extends State<CalendarPage> {
   int? _heldGeneration;
   bool _loadScheduled = false;
   bool _isChoosingMonth = false;
+  bool _isOpeningToday = false;
   double _horizontalDragDistance = 0;
 
   bool get _canNavigate => widget.isActive && _auth.canManageRecords;
   bool get _canGoBack => focusedMonth.year > 1 || focusedMonth.month > 1;
   bool get _canGoForward => focusedMonth.year < 9999 || focusedMonth.month < 12;
+  DateTime get _now => (widget.now ?? DateTime.now)().toLocal();
+
+  static DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
 
   @override
   void initState() {
     super.initState();
-    final initial = widget.initialMonth ?? DateTime.now();
+    final now = _now;
+    _today = _dateOnly(now);
+    final initial = widget.initialMonth ?? now;
     RangeError.checkValueInInterval(initial.year, 1, 9999, 'initialMonth.year');
     focusedMonth = DateTime(initial.year, initial.month);
     _recordRepository.addListener(_refreshRecords);
     _auth.addListener(_onSessionChanged);
     _cache.addListener(_onCacheChanged);
+    WidgetsBinding.instance.addObserver(this);
     _updateMonthLease();
+    _scheduleDayChange(now);
   }
 
   @override
   void didUpdateWidget(CalendarPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isActive != widget.isActive) _updateMonthLease();
+    if (oldWidget.isActive != widget.isActive || oldWidget.now != widget.now) {
+      _refreshToday(rebuild: false);
+    }
   }
 
   @override
@@ -61,14 +83,84 @@ class _CalendarPageState extends State<CalendarPage> {
     _recordRepository.removeListener(_refreshRecords);
     _auth.removeListener(_onSessionChanged);
     _cache.removeListener(_onCacheChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    _dayChangeTimer?.cancel();
     _releaseMonth?.call();
     super.dispose();
   }
 
   void _onSessionChanged() {
+    _refreshToday(rebuild: false);
     if (_heldGeneration != _auth.sessionGeneration) _updateMonthLease();
     _scheduleMonthLoad();
     _refreshRecords();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshToday();
+    } else {
+      _dayChangeTimer?.cancel();
+    }
+  }
+
+  void _refreshToday({bool rebuild = true}) {
+    final now = _now;
+    final date = _dateOnly(now);
+    if (date != _today) {
+      _today = date;
+      if (rebuild) _refreshRecords();
+    }
+    _scheduleDayChange(now);
+  }
+
+  void _scheduleDayChange(DateTime now) {
+    _dayChangeTimer?.cancel();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (!_canNavigate ||
+        (lifecycle != null && lifecycle != AppLifecycleState.resumed)) {
+      return;
+    }
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    _dayChangeTimer = Timer(tomorrow.difference(now), _refreshToday);
+  }
+
+  Future<void> _openToday() async {
+    if (!_canNavigate ||
+        _isOpeningToday ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    final now = _now;
+    final owner = _auth.dataOwnerKey;
+    final generation = _auth.sessionGeneration;
+    _isOpeningToday = true;
+    try {
+      final changed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => DailyRecordListPage(
+            selectedDate: _dateOnly(now),
+            isTodaySummary: true,
+            now: widget.now,
+          ),
+        ),
+      );
+      if (!mounted ||
+          !_canNavigate ||
+          owner != _auth.dataOwnerKey ||
+          generation != _auth.sessionGeneration) {
+        return;
+      }
+      _refreshToday();
+      if (changed == true) {
+        unawaited(
+          RecordSyncService.instance.syncNow(scheduleFollowUpIfBusy: true),
+        );
+      }
+    } finally {
+      _isOpeningToday = false;
+    }
   }
 
   void _onCacheChanged() {
@@ -115,7 +207,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void goToCurrentMonth() {
-    final today = DateTime.now();
+    final today = _now;
 
     _goToMonth(DateTime(today.year, today.month));
   }
@@ -209,6 +301,7 @@ class _CalendarPageState extends State<CalendarPage> {
               onHorizontalDragCancel: () => _horizontalDragDistance = 0,
               child: _CalendarGrid(
                 focusedMonth: focusedMonth,
+                today: _today,
                 records: records,
                 onChanged: () {
                   setState(() {});
@@ -216,25 +309,10 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
             ),
           ),
-          _TodaySummaryCard(
-            onTap: () async {
-              final today = DateTime.now();
-
-              await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => DailyRecordListPage(
-                    selectedDate: DateTime(today.year, today.month, today.day),
-                  ),
-                ),
-              );
-              if (!context.mounted) return;
-              unawaited(
-                RecordSyncService.instance.syncNow(
-                  scheduleFollowUpIfBusy: true,
-                ),
-              );
-            },
-          ),
+          if (_auth.canManageRecords)
+            CalendarTodaySummary(
+              onPressed: _canNavigate ? () => unawaited(_openToday()) : null,
+            ),
         ],
       ),
     );
@@ -370,11 +448,13 @@ class _WeekHeader extends StatelessWidget {
 
 class _CalendarGrid extends StatelessWidget {
   final DateTime focusedMonth;
+  final DateTime today;
   final List<FishingRecord> records;
   final VoidCallback onChanged;
 
   const _CalendarGrid({
     required this.focusedMonth,
+    required this.today,
     required this.records,
     required this.onChanged,
   });
@@ -385,7 +465,6 @@ class _CalendarGrid extends StatelessWidget {
       month: focusedMonth,
       records: records,
     );
-    final today = DateTime.now();
     final textScaler = MediaQuery.textScalerOf(context);
     final dateExtent = math.max(20.0, textScaler.scale(11) + 6);
     final barHeight = math.max(16.0, textScaler.scale(10) + 6);
@@ -617,58 +696,6 @@ class _RecordRangeBar extends StatelessWidget {
           height: 1,
           color: Colors.blue.shade900,
           fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _TodaySummaryCard extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _TodaySummaryCard({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-        child: Card(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.waves_outlined,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '오늘의 요약',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '지도에서 위치와 날짜를 선택해 날씨·물때 정보를 확인할 수 있습니다.',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right),
-                ],
-              ),
-            ),
-          ),
         ),
       ),
     );

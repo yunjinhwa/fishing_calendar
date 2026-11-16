@@ -22,7 +22,7 @@
 
 | 기능 | 구현 내용 |
 | --- | --- |
-| 출조 캘린더 | 날짜별 기록·연속 막대 표시, 연·월 직접 선택과 좌우 스와이프 이동 |
+| 출조 캘린더 | 날짜별 기록·연속 막대 표시, 연·월 선택·스와이프, 오늘의 요약 버튼과 당일 기록 목록 |
 | 출조 기록 | 장소·기간·낚시 장르·날씨·조과·사진·메모 작성 및 수정·삭제, 검색·필터 |
 | 지도·외부 정보 | 카카오 장소·주소 검색, 현재 위치, 수역 판별, 날씨·조석·수온과 과거 관측 정보 조회 |
 | 어류도감 | 기본 800종 목록, 어종 검색·상세 조회, 공개 자료 기반 사진·설명 보완 |
@@ -288,13 +288,13 @@ firebase emulators:exec --only auth,firestore --project demo-fishing-readme "nod
 | 기존 Auth·Firestore 규칙 검사 | 로컬 에뮬레이터 통과 |
 | 추가 진단 | 인증 경합, 이전 충돌 후 재동기화 실패, 서버 스키마 불일치, 초기 DB 오류 처리 경로 확인 |
 
-감사 당시 실패한 테스트 3개는 앱 정보 화면 문구·출처 목록과 기대값이 어긋난 항목이었으며 현재 정책에 맞춰 수정했습니다. 2026-11-16 공통 상단 카드 알림까지 포함한 최신 검증에서 **전체 Flutter 테스트 1,532개와 정적 분석이 통과**했습니다. [검증 기록과 기기 확인 절차](docs/top_card_notifications.md)를 참고합니다. 위 표는 최초 감사 결과이며, 기존 규칙 검사 통과만으로 모든 서버 데이터 검증이 완료됐다고 판단하지 않습니다.
+감사 당시 실패한 테스트 3개는 앱 정보 화면 문구·출처 목록과 기대값이 어긋난 항목이었으며 현재 정책에 맞춰 수정했습니다. 2026-11-16 캘린더 오늘의 요약 버튼·상세 화면까지 포함한 최신 검증에서 **전체 Flutter 테스트 1,546개와 정적 분석이 통과**했습니다. [검증 기록과 기기 확인 절차](docs/calendar_today_summary.md)를 참고합니다. 위 표는 최초 감사 결과이며, 기존 규칙 검사 통과만으로 모든 서버 데이터 검증이 완료됐다고 판단하지 않습니다.
 
 ### 현재 보완 사항
 
 | 구분 | 남은 작업 |
 | --- | --- |
-| 사용성 | 오늘의 요약·프로필 설정, 상단 카드 알림 실제 기기 확인 |
+| 사용성 | 프로필 설정, 상단 카드 알림·오늘의 요약 실제 기기 확인 |
 | 출시 준비 | 운영 약관·서명·스토어 설정, 결제 범위, 비밀번호 재설정 실계정 통합 검증 |
 
 발생 조건과 수정 우선순위는 [코드 감사 보고서](docs/pre-release-audit.md)에 정리했습니다.
@@ -319,7 +319,7 @@ firebase emulators:exec --only auth,firestore --project demo-fishing-readme "nod
 | 주제 | 문서 |
 | --- | --- |
 | 요구사항·통합 검증 | [MVP 통합 점검](docs/mvp_integration_check.md), [실제 기기 체크리스트](docs/mvp_test_checklist.md) |
-| 화면 개선 | [지도·기록 화면](docs/map_record_ui.md), [캘린더 월 이동](docs/calendar_month_navigation.md), [상단 카드 알림](docs/top_card_notifications.md) |
+| 화면 개선 | [지도·기록 화면](docs/map_record_ui.md), [캘린더 월 이동](docs/calendar_month_navigation.md), [상단 카드 알림](docs/top_card_notifications.md), [오늘의 요약](docs/calendar_today_summary.md) |
 | 인증 | [Firebase 설정](docs/firebase_auth_setup.md), [비밀번호 재설정](docs/password_reset.md), [인증 작업 경합 방지](docs/auth_operation_race.md) |
 | 저장·복구 | [저장 실패·작성 취소](docs/record_save_recovery.md), [계정 탈퇴](docs/account_deletion.md), [좌표 저장](docs/location_coordinates.md) |
 | 데이터 정책 | [선택 입력](docs/optional_record_conditions.md), [캐시](docs/paid_cache_policy.md), [요금제 이전](docs/plan_migration_integrity.md) |

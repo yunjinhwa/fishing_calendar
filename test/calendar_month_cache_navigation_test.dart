@@ -14,6 +14,8 @@ import 'package:fishing_build/data/services/network_status_service.dart';
 import 'package:fishing_build/data/services/paid_record_cache_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/presentation/calendar/calendar_page.dart';
+import 'package:fishing_build/presentation/calendar/calendar_today_summary.dart';
+import 'package:fishing_build/presentation/calendar/daily_record_list_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -126,6 +128,91 @@ void main() {
       expect(gateway.requests, hasLength(1));
       expect(cache.stateFor(targetMonth), CachedMonthState.ready);
       expect(find.text(record.summaryTitle), findsOneWidget);
+      await _dispose(tester, cache);
+    },
+  );
+
+  testWidgets(
+    'today summary keeps recent records while an older month uses its own cache',
+    (tester) async {
+      final today = DateTime(2026, 11, 16, 13);
+      final todayRecord = FishingRecord(
+        id: 'today-summary-recent',
+        location: 'Today harbor',
+        startAt: DateTime(2026, 11, 16, 8),
+        endAt: DateTime(2026, 11, 16, 11),
+        genreName: '루어',
+      );
+      final pastRecord = _record('today-summary-past', targetMonth);
+      await tester.runAsync(() => seedLocal(todayRecord));
+      gateway.onRange = (_) async => _page([_active(pastRecord)]);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CalendarPage(initialMonth: targetMonth, now: () => today),
+        ),
+      );
+      await _flush(tester, cache);
+
+      final summary = find.byType(CalendarTodaySummary);
+      expect(summary, findsOneWidget);
+      expect(find.textContaining(todayRecord.location), findsNothing);
+      expect(find.text('2021년 4월'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: _grid,
+          matching: find.text(pastRecord.summaryTitle),
+        ),
+        findsOneWidget,
+      );
+      expect(gateway.requests, hasLength(1));
+      expect(gateway.requests.single.from, targetMonth);
+      expect(gateway.requests.single.to, DateTime(2021, 5));
+      expect(gateway.fetchCount, 0);
+      expect(policy.holdsMonth(owner, targetMonth), isTrue);
+      expect(policy.holdsMonth(owner, currentMonth), isFalse);
+      expect(policy.holdsHistory(owner), isFalse);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-today-open')));
+      await tester.pumpAndSettle();
+      final details = tester.widget<DailyRecordListPage>(
+        find.byType(DailyRecordListPage),
+      );
+      expect(details.selectedDate, DateTime(2026, 11, 16));
+      expect(details.isTodaySummary, isTrue);
+      expect(find.text('오늘의 요약'), findsOneWidget);
+      expect(find.text('11월 16일 · 출조 1건'), findsOneWidget);
+      expect(find.textContaining(todayRecord.location), findsOneWidget);
+      expect(find.textContaining('08:00'), findsOneWidget);
+
+      expect(await tester.runAsync(cache.trimNow), 0);
+      await _flush(tester, cache);
+      expect(records.getRecordById(todayRecord.id), isNotNull);
+      expect(
+        await tester.runAsync(
+          () =>
+              LocalDataStore.instance.readRecordForOwner(owner, todayRecord.id),
+        ),
+        isNotNull,
+      );
+      expect(find.textContaining(todayRecord.location), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await _flush(tester, cache);
+      expect(find.byType(DailyRecordListPage), findsNothing);
+      expect(summary, findsOneWidget);
+      expect(find.text('2021년 4월'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: _grid,
+          matching: find.text(pastRecord.summaryTitle),
+        ),
+        findsOneWidget,
+      );
+      expect(gateway.requests, hasLength(1));
+      expect(gateway.fetchCount, 0);
+      expect(policy.holdsMonth(owner, currentMonth), isFalse);
+      expect(policy.holdsHistory(owner), isFalse);
       await _dispose(tester, cache);
     },
   );
