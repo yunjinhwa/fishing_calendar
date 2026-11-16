@@ -4,6 +4,7 @@ import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
+import '../common/top_card_notification.dart';
 import '../record/record_form_page.dart';
 import 'network_status_widgets.dart';
 
@@ -45,10 +46,10 @@ class OfflineFreePage extends StatelessWidget {
             FilledButton.icon(
               onPressed: () async {
                 if (AuthSessionRepository.instance.isPaid) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('유료 회원의 오프라인 변경은 업로드 대기열에 저장해야 합니다.'),
-                    ),
+                  TopCardNotification.show(
+                    context,
+                    '유료 회원의 오프라인 변경은 업로드 대기열에 저장해야 합니다.',
+                    type: TopCardNotificationType.warning,
                   );
                   return;
                 }

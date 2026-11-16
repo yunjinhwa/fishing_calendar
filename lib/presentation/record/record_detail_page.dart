@@ -10,6 +10,7 @@ import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/top_card_notification.dart';
 import 'record_form_page.dart';
 import 'record_photo_thumbnail.dart';
 import 'record_photo_viewer.dart';
@@ -87,14 +88,12 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
   void _showMutationError(Object error) {
     if (!mounted) return;
     _handleRecordChange();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          error is RecordEditConflictException
-              ? error.message
-              : '기록을 처리하지 못했습니다. 다시 시도해 주세요.',
-        ),
-      ),
+    TopCardNotification.show(
+      context,
+      error is RecordEditConflictException
+          ? error.message
+          : '기록을 처리하지 못했습니다. 다시 시도해 주세요.',
+      type: TopCardNotificationType.error,
     );
   }
 
@@ -170,9 +169,12 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
         expectedSnapshot: snapshot,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('출조 기록이 삭제되었습니다.')));
+        '출조 기록이 삭제되었습니다.',
+        type: TopCardNotificationType.success,
+        persistAfterPop: true,
+      );
       Navigator.of(context).pop(true);
     } on Object catch (error) {
       _showMutationError(error);
@@ -188,14 +190,11 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
 
   void _requestExit() {
     if (_isPreparingDelete || _isDeleting) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _isDeleting
-                ? '기록을 삭제하는 중입니다. 잠시만 기다려 주세요.'
-                : '기록을 확인하는 중입니다. 잠시만 기다려 주세요.',
-          ),
-        ),
+      TopCardNotification.show(
+        context,
+        _isDeleting
+            ? '기록을 삭제하는 중입니다. 잠시만 기다려 주세요.'
+            : '기록을 확인하는 중입니다. 잠시만 기다려 주세요.',
       );
       return;
     }

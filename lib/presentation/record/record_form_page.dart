@@ -24,6 +24,7 @@ import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_photo_cleanup_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/top_card_notification.dart';
 import 'record_photo_thumbnail.dart';
 import 'record_photo_viewer.dart';
 
@@ -467,11 +468,17 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   Future<void> _requestExit() async {
     if (_isSaving) {
-      showMessage('기록을 저장하는 중입니다. 잠시만 기다려 주세요.');
+      showMessage(
+        '기록을 저장하는 중입니다. 잠시만 기다려 주세요.',
+        type: TopCardNotificationType.info,
+      );
       return;
     }
     if (_isPreparingEdit || isPickingPhoto) {
-      showMessage('기록 정보를 처리하는 중입니다. 잠시만 기다려 주세요.');
+      showMessage(
+        '기록 정보를 처리하는 중입니다. 잠시만 기다려 주세요.',
+        type: TopCardNotificationType.info,
+      );
       return;
     }
     if (_isConfirmingDiscard || _isConfirmingReload) return;
@@ -624,7 +631,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
       showMessage(error.message);
     } on Object {
       if (!mounted) return;
-      showMessage('기록을 불러오지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.');
+      showMessage(
+        '기록을 불러오지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.',
+        type: TopCardNotificationType.error,
+      );
     } finally {
       if (mounted) setState(() => _isPreparingEdit = false);
     }
@@ -732,7 +742,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
       showMessage(error.message);
     } on Object {
       if (!mounted) return;
-      showMessage('기록을 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.');
+      showMessage(
+        '기록을 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.',
+        type: TopCardNotificationType.error,
+      );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -918,27 +931,27 @@ class _RecordFormPageState extends State<RecordFormPage> {
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          AuthSessionRepository.instance.isPaid
-              ? isEditMode
-                    ? '기록을 기기에 수정했습니다. 사진은 이 기기에만 보관되며 기록 동기화 상태는 업로드 대기열에서 확인할 수 있습니다.'
-                    : '기록을 기기에 저장했습니다. 사진은 이 기기에만 보관되며 기록 동기화 상태는 업로드 대기열에서 확인할 수 있습니다.'
-              : isEditMode
-              ? '출조 기록이 수정되었습니다.'
-              : '출조 기록이 저장되었습니다.',
-        ),
-      ),
+    TopCardNotification.show(
+      context,
+      AuthSessionRepository.instance.isPaid
+          ? isEditMode
+                ? '기록을 기기에 수정했습니다. 사진은 이 기기에만 보관되며 기록 동기화 상태는 업로드 대기열에서 확인할 수 있습니다.'
+                : '기록을 기기에 저장했습니다. 사진은 이 기기에만 보관되며 기록 동기화 상태는 업로드 대기열에서 확인할 수 있습니다.'
+          : isEditMode
+          ? '출조 기록이 수정되었습니다.'
+          : '출조 기록이 저장되었습니다.',
+      type: TopCardNotificationType.success,
+      persistAfterPop: true,
     );
 
     Navigator.of(context).pop(true);
   }
 
-  void showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  void showMessage(
+    String message, {
+    TopCardNotificationType type = TopCardNotificationType.warning,
+  }) {
+    TopCardNotification.show(context, message, type: type);
   }
 
   Future<void> pickPhoto() async {
@@ -1098,7 +1111,10 @@ class _RecordFormPageState extends State<RecordFormPage> {
       }
     } on Object {
       if (mounted) {
-        showMessage('사진을 불러오지 못했습니다. 다시 선택해 주세요.');
+        showMessage(
+          '사진을 불러오지 못했습니다. 다시 선택해 주세요.',
+          type: TopCardNotificationType.error,
+        );
       }
     } finally {
       _isChoosingPhotoSource = false;

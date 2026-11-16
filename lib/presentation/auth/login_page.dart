@@ -12,6 +12,7 @@ import '../../data/services/plan_policy_service.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../common/hold_to_reveal_password_field.dart';
+import '../common/top_card_notification.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
 import 'password_reset_page.dart';
@@ -47,16 +48,20 @@ class _LoginPageState extends State<LoginPage> {
     final password = passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('이메일과 비밀번호를 입력하세요.')));
+        '이메일과 비밀번호를 입력하세요.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
 
     if (!AuthInputValidator.isValidEmail(email)) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('이메일 형식이 올바르지 않습니다.')));
+        '이메일 형식이 올바르지 않습니다.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
 
@@ -102,9 +107,11 @@ class _LoginPageState extends State<LoginPage> {
             '이전 버전 계정입니다. 기존 비밀번호로 계정을 이전할 수 없습니다. 관리자에게 문의해 주세요.',
           AuthSignInResult.success => '',
         };
-        ScaffoldMessenger.of(
+        TopCardNotification.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+          message,
+          type: TopCardNotificationType.error,
+        );
         return;
       }
 
@@ -128,14 +135,18 @@ class _LoginPageState extends State<LoginPage> {
       );
     } on AuthFailure catch (failure) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        TopCardNotification.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(authFailureMessage(failure))));
+          authFailureMessage(failure),
+          type: TopCardNotificationType.error,
+        );
       }
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('로그인 중 오류가 발생했습니다. 다시 시도해 주세요.')),
+        TopCardNotification.show(
+          context,
+          '로그인 중 오류가 발생했습니다. 다시 시도해 주세요.',
+          type: TopCardNotificationType.error,
         );
       }
     } finally {

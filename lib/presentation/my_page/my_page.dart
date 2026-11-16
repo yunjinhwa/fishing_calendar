@@ -11,6 +11,7 @@ import '../auth/auth_access_guard.dart';
 import '../auth/auth_error_message.dart';
 import '../auth/login_choice_page.dart';
 import '../common/hold_to_reveal_password_field.dart';
+import '../common/top_card_notification.dart';
 import '../legal/policy_document_page.dart';
 import '../offline/offline_mode_page.dart';
 import '../plan/plan_page.dart';
@@ -34,8 +35,10 @@ class MyPage extends StatelessWidget {
   Future<void> _showLegacyRecordImportDialog(BuildContext context) async {
     final repository = FishingRecordRepository.instance;
     if (!repository.canImportQuarantinedLegacyRecords) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('이전 기록 원본은 보존되어 있지만 안전하게 읽을 수 없습니다.')),
+      TopCardNotification.show(
+        context,
+        '이전 기록 원본은 보존되어 있지만 안전하게 읽을 수 없습니다.',
+        type: TopCardNotificationType.warning,
       );
       return;
     }
@@ -71,14 +74,18 @@ class MyPage extends StatelessWidget {
     try {
       final importedCount = await repository.importQuarantinedLegacyRecords();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('이전 기록 $importedCount건을 가져왔습니다.')),
+        TopCardNotification.show(
+          context,
+          '이전 기록 $importedCount건을 가져왔습니다.',
+          type: TopCardNotificationType.success,
         );
       }
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('이전 기록을 가져오지 못했습니다. 원본은 그대로 보존됩니다.')),
+        TopCardNotification.show(
+          context,
+          '이전 기록을 가져오지 못했습니다. 원본은 그대로 보존됩니다.',
+          type: TopCardNotificationType.error,
         );
       }
     }
@@ -150,9 +157,11 @@ class MyPage extends StatelessWidget {
       await authSession.logout();
     } on AuthFailure catch (failure) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
+        TopCardNotification.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(authFailureMessage(failure))));
+          authFailureMessage(failure),
+          type: TopCardNotificationType.error,
+        );
       }
     }
 

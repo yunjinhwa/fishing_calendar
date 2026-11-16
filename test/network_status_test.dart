@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:fishing_build/app.dart';
 import 'package:fishing_build/data/services/network_status_service.dart';
+import 'package:fishing_build/presentation/common/top_card_notification.dart';
 import 'package:fishing_build/presentation/offline/network_status_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -226,7 +227,8 @@ void main() {
 
     expect(gateway.checkCount, 2);
     expect(service.status, NetworkStatus.connected);
-    expect(find.byType(SnackBar), findsOneWidget);
+    expect(find.byType(TopCardNotification), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing);
     expect(find.text('네트워크 연결이 확인되었습니다.'), findsOneWidget);
   });
 

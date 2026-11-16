@@ -8,6 +8,7 @@ import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../common/hold_to_reveal_password_field.dart';
+import '../common/top_card_notification.dart';
 import '../legal/policy_document_page.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
@@ -61,46 +62,56 @@ class _SignupPageState extends State<SignupPage> {
         password.isEmpty ||
         passwordConfirm.isEmpty ||
         nickname.isEmpty) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('필수 정보를 모두 입력하세요.')));
+        '필수 정보를 모두 입력하세요.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
 
     if (!AuthInputValidator.isValidEmail(email)) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('이메일 형식이 올바르지 않습니다.')));
+        '이메일 형식이 올바르지 않습니다.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
 
     if (!AuthInputValidator.isValidPassword(password)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('비밀번호는 8자 이상이며 영문과 숫자를 포함해야 합니다.')),
+      TopCardNotification.show(
+        context,
+        '비밀번호는 8자 이상이며 영문과 숫자를 포함해야 합니다.',
+        type: TopCardNotificationType.warning,
       );
       return;
     }
 
     if (password != passwordConfirm) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('비밀번호가 일치하지 않습니다.')));
+        '비밀번호가 일치하지 않습니다.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
 
     if (!AuthInputValidator.isValidNickname(nickname)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('닉네임은 2~20자의 한글, 영문, 숫자, 공백, 밑줄, 하이픈만 사용할 수 있습니다.'),
-        ),
+      TopCardNotification.show(
+        context,
+        '닉네임은 2~20자의 한글, 영문, 숫자, 공백, 밑줄, 하이픈만 사용할 수 있습니다.',
+        type: TopCardNotificationType.warning,
       );
       return;
     }
 
     if (!agreeTerms || !agreePrivacy) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('필수 약관에 동의해야 합니다.')));
+        '필수 약관에 동의해야 합니다.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
 
@@ -117,8 +128,10 @@ class _SignupPageState extends State<SignupPage> {
 
       if (!mounted) return;
       if (!registered) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('이미 가입된 이메일입니다. 로그인해 주세요.')),
+        TopCardNotification.show(
+          context,
+          '이미 가입된 이메일입니다. 로그인해 주세요.',
+          type: TopCardNotificationType.error,
         );
         return;
       }
@@ -139,14 +152,18 @@ class _SignupPageState extends State<SignupPage> {
       );
     } on AuthFailure catch (failure) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        TopCardNotification.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(authFailureMessage(failure))));
+          authFailureMessage(failure),
+          type: TopCardNotificationType.error,
+        );
       }
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('회원가입 중 오류가 발생했습니다. 다시 시도해 주세요.')),
+        TopCardNotification.show(
+          context,
+          '회원가입 중 오류가 발생했습니다. 다시 시도해 주세요.',
+          type: TopCardNotificationType.error,
         );
       }
     } finally {

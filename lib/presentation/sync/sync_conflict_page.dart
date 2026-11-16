@@ -7,6 +7,7 @@ import '../../data/repositories/conflict_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/top_card_notification.dart';
 import 'conflict_detail_page.dart';
 import 'outbox_page.dart';
 
@@ -80,9 +81,15 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
       RecordSyncSkipReason.none when result.isSuccess => '동기화를 완료했습니다.',
       RecordSyncSkipReason.none => result.errorMessage ?? '기록을 동기화하지 못했습니다.',
     };
-    ScaffoldMessenger.of(
+    TopCardNotification.show(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+      message,
+      type: result.skipReason != RecordSyncSkipReason.none
+          ? TopCardNotificationType.warning
+          : result.isSuccess
+          ? TopCardNotificationType.success
+          : TopCardNotificationType.error,
+    );
 
     setState(() {
       _isManualSyncPending = false;

@@ -6,6 +6,7 @@ import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/network_status_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/top_card_notification.dart';
 import '../calendar/calendar_page.dart';
 import '../fish_dictionary/fish_dictionary_page.dart';
 import '../map/map_page.dart';
@@ -27,6 +28,7 @@ class _AppShellState extends State<AppShell> {
   late int selectedIndex;
   int calendarRefreshKey = 0;
   final calendarNavigatorKey = GlobalKey<NavigatorState>();
+  final _calendarNoticeObserver = TopCardNotificationObserver();
 
   @override
   void initState() {
@@ -47,6 +49,7 @@ class _AppShellState extends State<AppShell> {
     }
 
     if (authSession.hasPendingAccountDeletion && selectedIndex != 4) {
+      TopCardNotification.dismissAll();
       setState(() {
         selectedIndex = 4;
       });
@@ -57,6 +60,7 @@ class _AppShellState extends State<AppShell> {
       return;
     }
 
+    TopCardNotification.dismissAll();
     setState(() {
       selectedIndex = 1;
     });
@@ -66,6 +70,7 @@ class _AppShellState extends State<AppShell> {
     return [
       _TabNavigator(
         navigatorKey: calendarNavigatorKey,
+        noticeObserver: _calendarNoticeObserver,
         child: CalendarPage(
           key: ValueKey('calendar-$calendarRefreshKey'),
           isActive: selectedIndex == 0,
@@ -82,6 +87,7 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final isKeyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
     final tabPages = pages;
+    final noticeGeneration = authSession.sessionGeneration;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -92,7 +98,15 @@ class _AppShellState extends State<AppShell> {
             MediaQuery.removeViewInsets(
               context: context,
               removeBottom: index != selectedIndex,
-              child: tabPages[index],
+              child: TopCardNotificationScope(
+                enabled: index == selectedIndex,
+                route: ModalRoute.of(context),
+                isActive: () =>
+                    mounted &&
+                    index == selectedIndex &&
+                    authSession.sessionGeneration == noticeGeneration,
+                child: tabPages[index],
+              ),
             ),
         ],
       ),
@@ -104,14 +118,12 @@ class _AppShellState extends State<AppShell> {
               onDestinationSelected: (index) async {
                 if (authSession.hasPendingAccountDeletion && index != 4) {
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          authSession.isAccountDeletedRemotely
-                              ? '탈퇴된 계정입니다. 로그아웃해 주세요.'
-                              : '회원 탈퇴 처리를 먼저 완료해 주세요.',
-                        ),
-                      ),
+                    TopCardNotification.show(
+                      context,
+                      authSession.isAccountDeletedRemotely
+                          ? '탈퇴된 계정입니다. 로그아웃해 주세요.'
+                          : '회원 탈퇴 처리를 먼저 완료해 주세요.',
+                      type: TopCardNotificationType.warning,
                     );
                   }
                   return;
@@ -128,6 +140,7 @@ class _AppShellState extends State<AppShell> {
                 }
 
                 final isTabChange = index != selectedIndex;
+                if (isTabChange || index == 0) TopCardNotification.dismissAll();
                 if (index == 0) {
                   calendarNavigatorKey.currentState?.popUntil(
                     (route) => route.isFirst,
@@ -206,9 +219,14 @@ class _AppShellState extends State<AppShell> {
 
 class _TabNavigator extends StatelessWidget {
   final GlobalKey<NavigatorState> navigatorKey;
+  final NavigatorObserver noticeObserver;
   final Widget child;
 
-  const _TabNavigator({required this.navigatorKey, required this.child});
+  const _TabNavigator({
+    required this.navigatorKey,
+    required this.child,
+    required this.noticeObserver,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -216,6 +234,7 @@ class _TabNavigator extends StatelessWidget {
       page: child,
       child: Navigator(
         key: navigatorKey,
+        observers: [noticeObserver],
         onGenerateRoute: (settings) {
           return MaterialPageRoute(
             builder: (context) =>
