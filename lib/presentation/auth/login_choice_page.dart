@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
+import '../common/top_card_notification.dart';
 import '../shell/app_shell.dart';
 import 'auth_error_message.dart';
 import 'login_page.dart';
@@ -36,9 +37,11 @@ class _LoginChoicePageState extends State<LoginChoicePage> {
       );
     } on AuthFailure catch (failure) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        TopCardNotification.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(authFailureMessage(failure))));
+          authFailureMessage(failure),
+          type: TopCardNotificationType.error,
+        );
       }
     } finally {
       if (mounted) {

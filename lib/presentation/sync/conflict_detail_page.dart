@@ -5,6 +5,7 @@ import '../../data/models/conflict_item.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/conflict_repository.dart';
 import '../../data/services/conflict_resolution_service.dart';
+import '../common/top_card_notification.dart';
 
 class ConflictDetailPage extends StatefulWidget {
   final ConflictItem conflict;
@@ -67,15 +68,20 @@ class _ConflictDetailPageState extends State<ConflictDetailPage> {
           );
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_resolutionMessage(resolutionType))),
+      TopCardNotification.show(
+        context,
+        _resolutionMessage(resolutionType),
+        type: TopCardNotificationType.success,
+        persistAfterPop: true,
       );
       Navigator.of(context).pop(true);
     } on Object catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(SnackBar(content: Text(_errorMessage(error))));
+        _errorMessage(error),
+        type: TopCardNotificationType.error,
+      );
       setState(() {
         _isResolving = false;
       });
@@ -200,9 +206,11 @@ class _ManualMergePageState extends State<_ManualMergePage> {
     final merged = widget.conflict.buildMergedRecord(_remoteFieldKeys);
     final validationMessage = FishingRecordValidator.validate(merged);
     if (validationMessage != null) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(SnackBar(content: Text(validationMessage)));
+        validationMessage,
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
     Navigator.of(context).pop(merged);

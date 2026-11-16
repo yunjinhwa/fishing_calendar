@@ -12,6 +12,7 @@ import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/repositories/personal_best_repository.dart';
 import '../../data/sharing/share_image_exporter.dart';
+import '../common/top_card_notification.dart';
 import '../record/record_history_scope.dart';
 import 'share_image_capture.dart';
 import 'share_record_card.dart';
@@ -256,13 +257,21 @@ class _ShareRecordPageState extends State<ShareRecordPage> {
             )
           : await _exporter.save(_png!, fileName: fileName, isCurrent: current);
       if (!mounted || !current()) return;
-      _message(switch (result) {
-        ShareImageExportResult.saved => '이미지를 저장했습니다.',
-        ShareImageExportResult.shared => '공유 앱을 선택했습니다.',
-        ShareImageExportResult.shareSheetOpened => '공유 화면을 열었습니다.',
-        ShareImageExportResult.cancelled =>
-          share ? '공유를 취소했습니다.' : '저장을 취소했습니다.',
-      });
+      _message(
+        switch (result) {
+          ShareImageExportResult.saved => '이미지를 저장했습니다.',
+          ShareImageExportResult.shared => '공유 앱을 선택했습니다.',
+          ShareImageExportResult.shareSheetOpened => '공유 화면을 열었습니다.',
+          ShareImageExportResult.cancelled =>
+            share ? '공유를 취소했습니다.' : '저장을 취소했습니다.',
+        },
+        type: switch (result) {
+          ShareImageExportResult.saved ||
+          ShareImageExportResult.shared => TopCardNotificationType.success,
+          ShareImageExportResult.shareSheetOpened ||
+          ShareImageExportResult.cancelled => TopCardNotificationType.info,
+        },
+      );
     } catch (error) {
       if (!mounted || !current()) return;
       final reason = error is ShareImageExportException ? error.reason : null;
@@ -273,16 +282,17 @@ class _ShareRecordPageState extends State<ShareRecordPage> {
         ShareImageExportFailure.unavailable =>
           share ? '이 기기에서는 이미지 공유를 지원하지 않습니다.' : '이 기기에서는 이미지 저장을 지원하지 않습니다.',
         _ => '이미지를 ${share ? '공유' : '저장'}하지 못했습니다. 다시 시도해 주세요.',
-      });
+      }, type: TopCardNotificationType.error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  void _message(String text) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(text)));
+  void _message(
+    String text, {
+    TopCardNotificationType type = TopCardNotificationType.info,
+  }) {
+    TopCardNotification.show(context, text, type: type);
   }
 
   @override

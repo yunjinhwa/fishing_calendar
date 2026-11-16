@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../data/app_info/app_info_gateway.dart';
 import '../../data/app_info/app_licenses.dart';
 import '../../data/app_info/app_source_catalog.dart';
+import '../common/top_card_notification.dart';
 
 class AppInfoPage extends StatefulWidget {
   const AppInfoPage({
@@ -230,10 +231,10 @@ class _CreditText extends StatelessWidget {
               onPressed: () async {
                 final opened = await launchAppInfoLink(uri, launcher: launcher);
                 if (!opened && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('링크를 열지 못했어요. 인터넷 연결과 브라우저를 확인해 주세요.'),
-                    ),
+                  TopCardNotification.show(
+                    context,
+                    '링크를 열지 못했어요. 인터넷 연결과 브라우저를 확인해 주세요.',
+                    type: TopCardNotificationType.error,
                   );
                 }
               },

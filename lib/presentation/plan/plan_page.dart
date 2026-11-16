@@ -8,6 +8,7 @@ import '../../data/models/user_plan.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/plan_policy_service.dart';
 import '../../data/services/record_sync_service.dart';
+import '../common/top_card_notification.dart';
 
 class PlanPage extends StatefulWidget {
   /// Local plan changes are development tools, never available in release.
@@ -52,9 +53,18 @@ class _PlanPageState extends State<PlanPage> {
         PlanEntitlementSource.defaultFree => '서버 플랜을 확인하지 못해 무료 회원 권한을 적용했습니다.',
         PlanEntitlementSource.localDevelopment => '현재 기기의 개발용 플랜을 확인했습니다.',
       };
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+        message,
+        type: switch (result.source) {
+          PlanEntitlementSource.server ||
+          PlanEntitlementSource.localDevelopment =>
+            TopCardNotificationType.success,
+          PlanEntitlementSource.firestoreCache ||
+          PlanEntitlementSource.deviceCache ||
+          PlanEntitlementSource.defaultFree => TopCardNotificationType.warning,
+        },
+      );
     } catch (_) {
       if (!mounted) {
         return;
@@ -62,8 +72,10 @@ class _PlanPageState extends State<PlanPage> {
       setState(() {
         isChanging = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('계정 플랜을 확인하지 못했습니다. 다시 시도하세요.')),
+      TopCardNotification.show(
+        context,
+        '계정 플랜을 확인하지 못했습니다. 다시 시도하세요.',
+        type: TopCardNotificationType.error,
       );
     }
   }
@@ -127,10 +139,10 @@ class _PlanPageState extends State<PlanPage> {
       });
 
       if (result == PlanChangeResult.blockedByPendingUploads) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('업로드 대기 또는 실패 항목을 처리한 뒤 무료 플랜으로 변경하세요.'),
-          ),
+        TopCardNotification.show(
+          context,
+          '업로드 대기 또는 실패 항목을 처리한 뒤 무료 플랜으로 변경하세요.',
+          type: TopCardNotificationType.warning,
         );
         return;
       }
@@ -138,9 +150,11 @@ class _PlanPageState extends State<PlanPage> {
       final message = authSession.isPlanMigrationPending
           ? '유료 플랜으로 변경했습니다. 기존 기록은 업로드 대기열에서 이전됩니다.'
           : '${nextPlan.label}으로 변경했습니다.';
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+        message,
+        type: TopCardNotificationType.success,
+      );
     } catch (_) {
       if (!mounted) {
         return;
@@ -149,8 +163,10 @@ class _PlanPageState extends State<PlanPage> {
       setState(() {
         isChanging = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('플랜을 변경하지 못했습니다. 다시 시도하세요.')),
+      TopCardNotification.show(
+        context,
+        '플랜을 변경하지 못했습니다. 다시 시도하세요.',
+        type: TopCardNotificationType.error,
       );
     }
   }

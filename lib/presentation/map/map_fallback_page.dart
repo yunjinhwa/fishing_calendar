@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/validation/fishing_record_validator.dart';
+import '../common/top_card_notification.dart';
 
 class MapFallbackPage extends StatefulWidget {
   const MapFallbackPage({super.key});
@@ -16,15 +17,19 @@ class _MapFallbackPageState extends State<MapFallbackPage> {
   void _submit() {
     final location = _locationController.text.trim();
     if (location.isEmpty) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('직접 입력할 위치를 작성하세요.')));
+        '직접 입력할 위치를 작성하세요.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
     if (location.length > FishingRecordValidator.maxLocationLength) {
-      ScaffoldMessenger.of(
+      TopCardNotification.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('위치는 200자 이하로 입력하세요.')));
+        '위치는 200자 이하로 입력하세요.',
+        type: TopCardNotificationType.warning,
+      );
       return;
     }
     Navigator.of(context).pop(location);

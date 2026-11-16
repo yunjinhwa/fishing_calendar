@@ -6,6 +6,7 @@ import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
+import '../common/top_card_notification.dart';
 import '../record/record_form_page.dart';
 import '../sync/outbox_page.dart';
 import 'network_status_widgets.dart';
@@ -107,10 +108,10 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
                   setState(() {});
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('오프라인 저장 요청이 업로드 대기열에 추가되었습니다.'),
-                    ),
+                  TopCardNotification.show(
+                    context,
+                    '오프라인 저장 요청이 업로드 대기열에 추가되었습니다.',
+                    type: TopCardNotificationType.success,
                   );
                 },
                 icon: const Icon(Icons.edit_note),

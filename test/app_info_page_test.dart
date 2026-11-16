@@ -122,6 +122,9 @@ void main() {
     await tester.tap(link);
     await tester.pumpAndSettle();
     expect(find.textContaining('링크를 열지 못했어요'), findsOneWidget);
+    // The floating error card can cover the original link until dismissed.
+    await tester.tap(find.byTooltip('알림 닫기'));
+    await tester.pumpAndSettle();
     await tester.tap(link);
     await tester.pumpAndSettle();
     expect(calls, 2);

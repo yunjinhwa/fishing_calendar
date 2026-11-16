@@ -6,6 +6,7 @@ import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/outbox_repository.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/top_card_notification.dart';
 
 class OutboxPage extends StatefulWidget {
   const OutboxPage({super.key});
@@ -64,9 +65,15 @@ class _OutboxPageState extends State<OutboxPage> {
         '서버 동기화를 완료했습니다. 업로드 ${result.pushedCount}건',
       RecordSyncSkipReason.none => result.errorMessage ?? '기록을 동기화하지 못했습니다.',
     };
-    ScaffoldMessenger.of(
+    TopCardNotification.show(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+      message,
+      type: result.skipReason != RecordSyncSkipReason.none
+          ? TopCardNotificationType.warning
+          : result.isSuccess
+          ? TopCardNotificationType.success
+          : TopCardNotificationType.error,
+    );
   }
 
   Future<void> _retryItem(String itemId) async {
@@ -83,9 +90,11 @@ class _OutboxPageState extends State<OutboxPage> {
       await _syncAllPendingItems();
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(
+        TopCardNotification.show(
           context,
-        ).showSnackBar(const SnackBar(content: Text('재시도 요청을 처리하지 못했습니다.')));
+          '재시도 요청을 처리하지 못했습니다.',
+          type: TopCardNotificationType.error,
+        );
       }
     } finally {
       if (mounted) {
@@ -112,9 +121,11 @@ class _OutboxPageState extends State<OutboxPage> {
       );
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(
+        TopCardNotification.show(
           context,
-        ).showSnackBar(const SnackBar(content: Text('완료 항목을 정리하지 못했습니다.')));
+          '완료 항목을 정리하지 못했습니다.',
+          type: TopCardNotificationType.error,
+        );
       }
     } finally {
       if (mounted) {

@@ -8,6 +8,7 @@ import 'data/services/network_status_service.dart';
 import 'data/services/plan_policy_service.dart';
 import 'data/services/record_sync_service.dart';
 import 'presentation/auth/login_choice_page.dart';
+import 'presentation/common/top_card_notification.dart';
 import 'presentation/shell/app_shell.dart';
 
 class FishingBuildApp extends StatefulWidget {
@@ -22,10 +23,14 @@ class FishingBuildApp extends StatefulWidget {
 class _FishingBuildAppState extends State<FishingBuildApp>
     with WidgetsBindingObserver {
   late NetworkStatusService _networkStatusService;
+  final _noticeObserver = TopCardNotificationObserver();
+  late int _noticeGeneration;
 
   @override
   void initState() {
     super.initState();
+    _noticeGeneration = AuthSessionRepository.instance.sessionGeneration;
+    AuthSessionRepository.instance.addListener(_onNoticeSessionChanged);
     _networkStatusService =
         widget.networkStatusService ?? NetworkStatusService.instance;
     WidgetsBinding.instance.addObserver(this);
@@ -47,8 +52,17 @@ class _FishingBuildAppState extends State<FishingBuildApp>
 
   @override
   void dispose() {
+    AuthSessionRepository.instance.removeListener(_onNoticeSessionChanged);
+    TopCardNotification.dismissAll();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _onNoticeSessionChanged() {
+    final generation = AuthSessionRepository.instance.sessionGeneration;
+    if (generation == _noticeGeneration) return;
+    _noticeGeneration = generation;
+    TopCardNotification.dismissAll();
   }
 
   @override
@@ -82,8 +96,10 @@ class _FishingBuildAppState extends State<FishingBuildApp>
           title: 'Fishing Build',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
+          navigatorObservers: [_noticeObserver],
           home: authSession.hasActiveSession
               ? AppShell(
+                  key: ValueKey(authSession.sessionGeneration),
                   initialIndex: authSession.hasPendingAccountDeletion
                       ? 4
                       : authSession.isGuest

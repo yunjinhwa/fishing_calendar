@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/services/network_status_service.dart';
+import '../common/top_card_notification.dart';
 
 class NetworkStatusSummary extends StatelessWidget {
   final NetworkStatusService service;
@@ -124,9 +125,13 @@ class NetworkStatusRetryButton extends StatelessWidget {
       NetworkStatus.disconnected => '네트워크 연결을 찾지 못했습니다.',
       NetworkStatus.unknown => '네트워크 상태를 확인하지 못했습니다.',
     };
-    ScaffoldMessenger.of(
+    TopCardNotification.show(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+      message,
+      type: service.status == NetworkStatus.connected
+          ? TopCardNotificationType.success
+          : TopCardNotificationType.warning,
+    );
   }
 }
 

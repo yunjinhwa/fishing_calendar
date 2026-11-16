@@ -4,6 +4,7 @@ import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/presentation/calendar/calendar_page.dart';
+import 'package:fishing_build/presentation/common/top_card_notification.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
 import 'package:fishing_build/presentation/shell/app_shell.dart';
@@ -27,6 +28,76 @@ void main() {
     await tester.pumpWidget(const FishingBuildApp());
 
     expect(find.byIcon(Icons.phishing), findsOneWidget);
+  });
+
+  testWidgets('tab changes reject old tab notices before the next frame', (
+    tester,
+  ) async {
+    await AuthSessionRepository.instance.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'notice-tabs@example.com',
+    );
+    await tester.pumpWidget(const FishingBuildApp());
+    await tester.pumpAndSettle();
+    final oldTab = tester.element(find.byType(CalendarPage));
+    TopCardNotification.show(oldTab, 'Current tab');
+    await tester.pump();
+    expect(find.text('Current tab'), findsOneWidget);
+
+    // Complete a delayed callback after tab selection, before scope rebuilding.
+    tester
+        .widget<NavigationBar>(find.byType(NavigationBar))
+        .onDestinationSelected!(2);
+    await tester.idle();
+    TopCardNotification.show(oldTab, 'Late previous tab result');
+    await tester.pumpAndSettle();
+    expect(find.byType(TopCardNotification), findsNothing);
+    TopCardNotification.show(oldTab, 'Still inactive');
+    await tester.pump();
+    expect(find.byType(TopCardNotification), findsNothing);
+  });
+
+  testWidgets('account changes clear notices and invalidate old tab contexts', (
+    tester,
+  ) async {
+    final session = AuthSessionRepository.instance;
+    await session.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'notice-first@example.com',
+    );
+    await tester.pumpWidget(const FishingBuildApp());
+    await tester.pumpAndSettle();
+    final oldTab = tester.element(find.byType(CalendarPage));
+    TopCardNotification.show(oldTab, 'First account notice');
+    await tester.pump();
+
+    // Updating the same account's profile must not recreate its tab or card.
+    await session.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'notice-first@example.com',
+      nickname: 'Updated',
+    );
+    await tester.pump();
+    expect(oldTab.mounted, isTrue);
+    expect(find.text('First account notice'), findsOneWidget);
+
+    await session.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'notice-second@example.com',
+    );
+    TopCardNotification.show(oldTab, 'Late first account result');
+    await tester.pumpAndSettle();
+    expect(oldTab.mounted, isFalse);
+    expect(find.byType(TopCardNotification), findsNothing);
+    TopCardNotification.show(
+      tester.element(find.byType(CalendarPage)),
+      'Second account notice',
+    );
+    await tester.pump();
+    expect(find.text('Second account notice'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('calendar refreshes when records change', (

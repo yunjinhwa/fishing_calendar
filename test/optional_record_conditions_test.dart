@@ -9,6 +9,7 @@ import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/data/water_temperature/water_temperature_models.dart';
+import 'package:fishing_build/presentation/common/top_card_notification.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -360,8 +361,6 @@ Future<void> _save(WidgetTester tester) async {
 }
 
 Future<void> _clearNotices(WidgetTester tester) async {
-  ScaffoldMessenger.of(
-    tester.element(find.byType(RecordFormPage)),
-  ).clearSnackBars();
+  TopCardNotification.dismiss(tester.element(find.byType(RecordFormPage)));
   await tester.pumpAndSettle();
 }
