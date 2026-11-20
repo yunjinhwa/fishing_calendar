@@ -138,6 +138,19 @@ abstract interface class AuthGateway {
   Future<String> getIdToken({bool forceRefresh = false});
 }
 
+/// A server-backed profile change commits the new claim, profile and old claim
+/// release together. The expected name protects edits started on another device.
+abstract interface class NicknameProfileGateway {
+  Future<String> changeNickname({
+    required String uid,
+    required String nickname,
+    required String expectedNickname,
+  });
+
+  /// Confirmed server values only; offline caches must not undo a newer name.
+  Stream<String> watchNickname(String uid);
+}
+
 /// Used when Firebase was explicitly enabled but could not be initialized.
 /// This prevents a silent fallback to the legacy local password store.
 class UnavailableAuthGateway implements AuthGateway {

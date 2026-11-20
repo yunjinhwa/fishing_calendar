@@ -7,7 +7,7 @@ import '../models/user_plan.dart';
 import 'auth_gateway.dart';
 import 'nickname_policy.dart';
 
-class FirebaseAuthGateway implements AuthGateway {
+class FirebaseAuthGateway implements AuthGateway, NicknameProfileGateway {
   static const String _nicknameClaimsCollection = 'nickname_claims';
   static const String _accountDeletionRequestsCollection =
       'account_deletion_requests';
@@ -179,20 +179,149 @@ class FirebaseAuthGateway implements AuthGateway {
       if (!snapshot.exists) {
         return null;
       }
-      final data = snapshot.data();
-      final nickname = data?['nickname'];
-      final nicknameKey = data?['nicknameKey'];
-      if (data?['uid'] != uid ||
-          nickname is! String ||
-          nicknameKey is! String ||
-          !NicknamePolicy.isValid(nickname) ||
-          NicknamePolicy.canonicalKey(nickname) != nicknameKey) {
-        throw const AuthFailure(
-          code: AuthFailureCode.invalidProfile,
-          message: '저장된 닉네임 정보를 확인할 수 없습니다.',
+      return _profileNickname(snapshot.data(), uid);
+    } on AuthFailure {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirestoreError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  String _profileNickname(Map<String, dynamic>? data, String uid) {
+    final nickname = data?['nickname'];
+    final key = data?['nicknameKey'];
+    if (data?['uid'] != uid ||
+        nickname is! String ||
+        key is! String ||
+        !NicknamePolicy.isValid(nickname) ||
+        NicknamePolicy.canonicalKey(nickname) != key) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidProfile,
+        message: '저장된 닉네임 정보를 확인할 수 없습니다.',
+      );
+    }
+    return NicknamePolicy.displayValue(nickname);
+  }
+
+  void _requireProfileUser(String uid) {
+    if (uid.trim().isEmpty || _auth.currentUser?.uid != uid) {
+      throw const AuthFailure(
+        code: AuthFailureCode.sessionExpired,
+        message: '닉네임을 변경할 로그인 계정을 확인할 수 없습니다.',
+      );
+    }
+  }
+
+  @override
+  Stream<String> watchNickname(String uid) {
+    _requireProfileUser(uid);
+    try {
+      return _firestore
+          .collection(_userProfilesCollection)
+          .doc(uid)
+          .snapshots(includeMetadataChanges: true)
+          .where(
+            (snapshot) =>
+                snapshot.exists &&
+                !snapshot.metadata.isFromCache &&
+                !snapshot.metadata.hasPendingWrites,
+          )
+          .map((snapshot) => _profileNickname(snapshot.data(), uid))
+          .handleError((Object error, StackTrace stackTrace) {
+            if (error is AuthFailure) throw error;
+            if (error is FirebaseException) {
+              throw _mapFirestoreError(error, stackTrace);
+            }
+            throw _unknownFailure(error, stackTrace);
+          });
+    } on AuthFailure {
+      rethrow;
+    } on FirebaseException catch (error, stackTrace) {
+      throw _mapFirestoreError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  @override
+  Future<String> changeNickname({
+    required String uid,
+    required String nickname,
+    required String expectedNickname,
+  }) async {
+    _requireProfileUser(uid);
+    final display = NicknamePolicy.displayValue(nickname);
+    if (!NicknamePolicy.isValid(display) ||
+        !NicknamePolicy.isValid(expectedNickname)) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidProfile,
+        message: '사용할 수 없는 닉네임입니다.',
+      );
+    }
+    final profile = _firestore.collection(_userProfilesCollection).doc(uid);
+    final deletion = _firestore
+        .collection(_accountDeletionRequestsCollection)
+        .doc(uid);
+    try {
+      return await _firestore.runTransaction<String>((transaction) async {
+        _requireProfileUser(uid);
+        final current = await transaction.get(profile);
+        final oldName = _profileNickname(current.data(), uid);
+        if (oldName != NicknamePolicy.displayValue(expectedNickname)) {
+          throw const AuthFailure(
+            code: AuthFailureCode.accountConflict,
+            message: '다른 기기에서 닉네임이 변경되었습니다. 최신 정보를 확인해 주세요.',
+          );
+        }
+        final pendingDeletion = await transaction.get(deletion);
+        if (pendingDeletion.exists) {
+          throw const AuthFailure(
+            code: AuthFailureCode.userDisabled,
+            message: '회원 탈퇴가 진행 중인 계정입니다.',
+          );
+        }
+        final oldKey = NicknamePolicy.canonicalKey(oldName);
+        final nextKey = NicknamePolicy.canonicalKey(display);
+        final oldClaim = _firestore
+            .collection(_nicknameClaimsCollection)
+            .doc(oldKey);
+        final nextClaim = _firestore
+            .collection(_nicknameClaimsCollection)
+            .doc(nextKey);
+        final previous = await transaction.get(oldClaim);
+        if (!previous.exists ||
+            previous.data()?['uid'] != uid ||
+            _profileNickname(previous.data(), uid) != oldName) {
+          throw const AuthFailure(
+            code: AuthFailureCode.accountConflict,
+            message: '닉네임 소유권 정보를 확인할 수 없습니다. 다시 로그인해 주세요.',
+          );
+        }
+        final next = nextKey == oldKey
+            ? previous
+            : await transaction.get(nextClaim);
+        if (next.exists && next.data()?['uid'] != uid) {
+          throw const AuthFailure(
+            code: AuthFailureCode.nicknameAlreadyInUse,
+            message: '이미 사용 중인 닉네임입니다.',
+          );
+        }
+        _requireProfileUser(uid);
+        if (oldName == display) return oldName;
+        final data = _nicknameData(
+          uid: uid,
+          nickname: display,
+          nicknameKey: nextKey,
         );
-      }
-      return NicknamePolicy.displayValue(nickname);
+        transaction.set(nextClaim, data);
+        transaction.set(profile, data);
+        if (nextKey != oldKey) transaction.delete(oldClaim);
+        // Firebase Auth's displayName is a cache repaired from this authoritative
+        // profile on sign-in. No second service can roll back a committed rename.
+        return display;
+      });
     } on AuthFailure {
       rethrow;
     } on FirebaseException catch (error, stackTrace) {

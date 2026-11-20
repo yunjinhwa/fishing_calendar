@@ -80,6 +80,14 @@ class AuthSessionRepository extends ChangeNotifier {
   Timer? _planEntitlementExpiryTimer;
   StreamSubscription<bool>? _accountDeletionSubscription;
   int _accountDeletionWatchGeneration = 0;
+  StreamSubscription<String>? _nicknameSubscription;
+  String? _nicknameWatchUid;
+  int _nicknameWatchGeneration = 0;
+  int _nicknameRevision = 0;
+  Future<void> _nicknamePersistence = Future<void>.value();
+  int _pendingNicknamePersists = 0;
+  bool _nicknameCacheDirty = false;
+  Future<void>? _firebaseNicknameWrites;
   int _sessionGeneration = 0;
   Object? _activeAuthOperation;
   RemoteAccountDeletionCleanup? _remoteAccountDeletionCleanup;
@@ -171,6 +179,7 @@ class AuthSessionRepository extends ChangeNotifier {
 
   bool get canManageRecords =>
       !_isAccountDeletionLocked && policy.canManageRecords;
+  bool get canEditProfile => isMember && !_isAccountDeletionLocked;
   bool get canUseOfflineRecords =>
       !_isAccountDeletionLocked && policy.canUseOfflineRecords;
   bool get canUseCloudSync =>
@@ -226,6 +235,7 @@ class AuthSessionRepository extends ChangeNotifier {
       _sessionGeneration += 1;
     }
     _stopAccountDeletionWatch();
+    _stopNicknameWatch();
     _authGateway = gateway;
     _lastAuthFailure = gateway?.availabilityFailure;
     if (gateway == null) {
@@ -1004,6 +1014,7 @@ class AuthSessionRepository extends ChangeNotifier {
     );
     _applyResolvedPlanEntitlement(resolution);
     _startAccountDeletionWatch(gateway, user.uid);
+    _startNicknameWatch(gateway, user.uid);
     if (notify) {
       notifyListeners();
     }
@@ -1019,6 +1030,321 @@ class AuthSessionRepository extends ChangeNotifier {
       _requirePreferenceSuccess(
         await prefs.setBool(_signOutOnRestartKey, true),
         'schedule restart sign-out',
+      );
+    }
+  }
+
+  /// Renames only the captured member. Firestore remains the verified source
+  /// when optional local cache persistence or the Auth display-name mirror fails.
+  Future<bool> updateNickname(
+    String nickname, {
+    required String expectedNickname,
+  }) => _runAuthOperation(() async {
+    _requireProfileAccess();
+    final displayNickname = NicknamePolicy.displayValue(nickname);
+    if (!NicknamePolicy.isValid(displayNickname)) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidProfile,
+        message: '닉네임은 2~20자의 한글, 영문, 숫자, 공백, 밑줄, 하이픈만 사용할 수 있습니다.',
+      );
+    }
+    final previousNickname = _nickname ?? '';
+    if (NicknamePolicy.displayValue(expectedNickname) != previousNickname) {
+      throw const AuthFailure(
+        code: AuthFailureCode.accountConflict,
+        message: '다른 기기에서 닉네임이 변경되었습니다. 최신 정보를 확인해 주세요.',
+      );
+    }
+    if (displayNickname == previousNickname) return false;
+
+    final gateway = _authGateway;
+    final owner = dataOwnerKey;
+    final generation = _sessionGeneration;
+    final currentEmail = _email!;
+    bool current() =>
+        canEditProfile &&
+        generation == _sessionGeneration &&
+        owner == dataOwnerKey &&
+        identical(gateway, _authGateway);
+    if (gateway == null) {
+      final prefs = await SharedPreferences.getInstance();
+      if (!current()) throw _profileSessionChanged();
+      final nicknames = _decodeStringMap(prefs.getString(_accountNicknamesKey));
+      final emailKey = DataOwnerKey.normalizeEmail(currentEmail);
+      final canonical = NicknamePolicy.canonicalKey(displayNickname);
+      if (nicknames.entries.any(
+        (entry) =>
+            entry.key != emailKey &&
+            NicknamePolicy.canonicalKey(entry.value) == canonical,
+      )) {
+        throw const AuthFailure(
+          code: AuthFailureCode.nicknameAlreadyInUse,
+          message: '이미 사용 중인 닉네임입니다.',
+        );
+      }
+      final oldAccountNickname = nicknames[emailKey];
+      nicknames[emailKey] = displayNickname;
+      try {
+        _requirePreferenceSuccess(
+          await prefs.setString(_accountNicknamesKey, jsonEncode(nicknames)),
+          'save account nickname',
+        );
+        if (!current()) throw _profileSessionChanged();
+        if (_persistsAcrossRestarts) {
+          _requirePreferenceSuccess(
+            await prefs.setString(_nicknameKey, displayNickname),
+            'save session nickname',
+          );
+        }
+        if (!current()) throw _profileSessionChanged();
+      } on Object {
+        // Preserve other accounts added during an external identity change.
+        final latest = _decodeStringMap(prefs.getString(_accountNicknamesKey));
+        if (oldAccountNickname == null) {
+          latest.remove(emailKey);
+        } else {
+          latest[emailKey] = oldAccountNickname;
+        }
+        try {
+          await prefs.setString(_accountNicknamesKey, jsonEncode(latest));
+          if (current() && _persistsAcrossRestarts) {
+            await _writeOptionalString(
+              prefs,
+              _nicknameKey,
+              previousNickname,
+              'restore session nickname',
+            );
+          }
+        } on Object {
+          // Keep the original storage/session error visible to the caller.
+        }
+        rethrow;
+      }
+      _nicknameRevision++;
+      _nickname = displayNickname;
+      notifyListeners();
+      return true;
+    }
+
+    _requireAvailableGateway(gateway);
+    final uid = _memberId;
+    if (uid == null || gateway.currentUser?.uid != uid) {
+      throw _profileSessionChanged();
+    }
+    if (gateway is! NicknameProfileGateway) {
+      throw const AuthFailure(
+        code: AuthFailureCode.serviceUnavailable,
+        message: '닉네임 변경 서비스를 사용할 수 없습니다.',
+      );
+    }
+    final revision = _nicknameRevision;
+    final resolved = await (gateway as NicknameProfileGateway).changeNickname(
+      uid: uid,
+      nickname: displayNickname,
+      expectedNickname: previousNickname,
+    );
+    if (!current() || gateway.currentUser?.uid != uid) {
+      throw _profileSessionChanged();
+    }
+    if (!NicknamePolicy.isValid(resolved)) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidProfile,
+        message: '서버의 닉네임 응답을 확인할 수 없습니다.',
+      );
+    }
+    // A newer server snapshot can arrive before this transaction's response.
+    // Do not replace it with the older committed name.
+    if (_nicknameRevision == revision ||
+        _nickname == previousNickname ||
+        _nickname == resolved) {
+      _publishVerifiedNickname(gateway, uid, generation, resolved);
+      await _nicknamePersistence;
+    }
+    return true;
+  });
+
+  Future<void> refreshNickname() => _runAuthOperation(() async {
+    _requireProfileAccess();
+    final gateway = _authGateway;
+    if (gateway == null) return;
+    _requireAvailableGateway(gateway);
+    final uid = _memberId;
+    final generation = _sessionGeneration;
+    final revision = _nicknameRevision;
+    if (uid == null || gateway.currentUser?.uid != uid) {
+      throw _profileSessionChanged();
+    }
+    final nickname = await gateway.getRegisteredNickname(uid);
+    if (!canEditProfile ||
+        generation != _sessionGeneration ||
+        !identical(gateway, _authGateway) ||
+        gateway.currentUser?.uid != uid) {
+      throw _profileSessionChanged();
+    }
+    if (nickname == null || !NicknamePolicy.isValid(nickname)) {
+      throw const AuthFailure(
+        code: AuthFailureCode.invalidProfile,
+        message: '저장된 닉네임 정보를 확인할 수 없습니다.',
+      );
+    }
+    if (_nicknameRevision == revision) {
+      _publishVerifiedNickname(gateway, uid, generation, nickname);
+      await _nicknamePersistence;
+    }
+    _startNicknameWatch(gateway, uid);
+  });
+
+  void _requireProfileAccess() {
+    if (!canEditProfile || _email == null) {
+      throw const AuthFailure(
+        code: AuthFailureCode.noCurrentUser,
+        message: '프로필을 변경할 로그인 계정을 확인해 주세요.',
+      );
+    }
+  }
+
+  AuthFailure _profileSessionChanged() => const AuthFailure(
+    code: AuthFailureCode.sessionExpired,
+    message: '로그인 계정이 변경되어 프로필 처리를 중단했습니다.',
+  );
+
+  void _publishVerifiedNickname(
+    AuthGateway gateway,
+    String uid,
+    int generation,
+    String nickname,
+  ) {
+    final value = NicknamePolicy.displayValue(nickname);
+    final changed = _nickname != value;
+    if (changed) {
+      _nickname = value;
+      _nicknameRevision++;
+      _nicknameCacheDirty = true;
+    }
+    if (!changed && (!_nicknameCacheDirty || _pendingNicknamePersists != 0)) {
+      return;
+    }
+    final revision = _nicknameRevision;
+    _pendingNicknamePersists++;
+    _nicknamePersistence = _nicknamePersistence
+        .then((_) async {
+          if (!canEditProfile ||
+              !identical(gateway, _authGateway) ||
+              generation != _sessionGeneration ||
+              _memberId != uid ||
+              revision != _nicknameRevision ||
+              _nickname != value) {
+            return;
+          }
+          try {
+            // The UID cache is used by Firebase restoration. Do not rewrite the
+            // global legacy identity/preferences from an asynchronous watch event.
+            await _writeFirebaseNickname(uid, value);
+            if (generation == _sessionGeneration &&
+                revision == _nicknameRevision &&
+                _nickname == value) {
+              _nicknameCacheDirty = false;
+            }
+          } on Object catch (error, stackTrace) {
+            developer.log(
+              'Deferred verified nickname cache persistence.',
+              name: 'AuthSessionRepository',
+              error: error,
+              stackTrace: stackTrace,
+            );
+          }
+        })
+        .whenComplete(() {
+          _pendingNicknamePersists--;
+        });
+    if (changed) notifyListeners();
+  }
+
+  void _startNicknameWatch(AuthGateway gateway, String uid) {
+    if (gateway is! NicknameProfileGateway ||
+        !canEditProfile ||
+        gateway.currentUser?.uid != uid) {
+      return;
+    }
+    if (_nicknameWatchUid == uid && _nicknameSubscription != null) return;
+    _stopNicknameWatch();
+    _nicknameWatchUid = uid;
+    final watchGeneration = _nicknameWatchGeneration;
+    final generation = _sessionGeneration;
+    bool current() =>
+        watchGeneration == _nicknameWatchGeneration &&
+        generation == _sessionGeneration &&
+        identical(_authGateway, gateway) &&
+        _memberId == uid &&
+        gateway.currentUser?.uid == uid &&
+        canEditProfile;
+    try {
+      final subscription = (gateway as NicknameProfileGateway)
+          .watchNickname(uid)
+          .listen(
+            (nickname) {
+              if (!current() || !NicknamePolicy.isValid(nickname)) return;
+              _publishVerifiedNickname(gateway, uid, generation, nickname);
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              if (!current()) return;
+              _stopNicknameWatch();
+              // Offline and unavailable watches preserve the last verified nickname.
+              developer.log(
+                'Nickname watch could not refresh the profile.',
+                name: 'AuthSessionRepository',
+                error: error,
+                stackTrace: stackTrace,
+              );
+            },
+            onDone: () {
+              if (watchGeneration == _nicknameWatchGeneration) {
+                _stopNicknameWatch();
+              }
+            },
+          );
+      if (watchGeneration != _nicknameWatchGeneration) {
+        _cancelNicknameSubscription(subscription);
+      } else {
+        _nicknameSubscription = subscription;
+      }
+    } on Object catch (error, stackTrace) {
+      _stopNicknameWatch();
+      developer.log(
+        'Nickname watch could not start.',
+        name: 'AuthSessionRepository',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  void _stopNicknameWatch() {
+    _nicknameWatchGeneration++;
+    _nicknameWatchUid = null;
+    final subscription = _nicknameSubscription;
+    _nicknameSubscription = null;
+    if (subscription != null) _cancelNicknameSubscription(subscription);
+  }
+
+  void _cancelNicknameSubscription(StreamSubscription<String> subscription) {
+    try {
+      unawaited(
+        subscription.cancel().catchError((Object error, StackTrace stackTrace) {
+          developer.log(
+            'Nickname watch cancellation failed.',
+            name: 'AuthSessionRepository',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }),
+      );
+    } on Object catch (error, stackTrace) {
+      developer.log(
+        'Nickname watch cancellation failed.',
+        name: 'AuthSessionRepository',
+        error: error,
+        stackTrace: stackTrace,
       );
     }
   }
@@ -1263,6 +1589,7 @@ class AuthSessionRepository extends ChangeNotifier {
     var accountIdentityRemoved = false;
 
     _isDeletingAccount = true;
+    _stopNicknameWatch();
     notifyListeners();
     try {
       if (!hasFirebaseIdentity) {
@@ -1357,6 +1684,9 @@ class AuthSessionRepository extends ChangeNotifier {
       }
       if (!accountIdentityRemoved) {
         _isDeletingAccount = false;
+        if (gateway != null && currentUid != null && canEditProfile) {
+          _startNicknameWatch(gateway, currentUid);
+        }
         notifyListeners();
       }
       rethrow;
@@ -1911,7 +2241,25 @@ class AuthSessionRepository extends ChangeNotifier {
     return _decodeStringMap(prefs.getString(_firebaseNicknamesKey))[uid];
   }
 
-  Future<void> _writeFirebaseNickname(String uid, String nickname) async {
+  Future<void> _writeFirebaseNickname(String uid, String nickname) {
+    final pending = _firebaseNicknameWrites;
+    final write = pending == null
+        ? _persistFirebaseNickname(uid, nickname)
+        : pending.then(
+            (_) => _persistFirebaseNickname(uid, nickname),
+            onError: (Object _) => _persistFirebaseNickname(uid, nickname),
+          );
+    late final Future<void> current;
+    current = write.whenComplete(() {
+      if (identical(_firebaseNicknameWrites, current)) {
+        _firebaseNicknameWrites = null;
+      }
+    });
+    _firebaseNicknameWrites = current;
+    return current;
+  }
+
+  Future<void> _persistFirebaseNickname(String uid, String nickname) async {
     final normalizedNickname = NicknamePolicy.displayValue(nickname);
     if (normalizedNickname.isEmpty) {
       return;
@@ -2051,6 +2399,8 @@ class AuthSessionRepository extends ChangeNotifier {
     _activeAuthOperation = operation;
     notifyListeners();
     try {
+      // Finish any old watch cache write before changing the active identity.
+      if (_pendingNicknamePersists != 0) await _nicknamePersistence;
       return await action();
     } finally {
       if (identical(_activeAuthOperation, operation)) {
@@ -2187,6 +2537,7 @@ class AuthSessionRepository extends ChangeNotifier {
 
   void _applySignedOut({bool notify = true}) {
     _stopAccountDeletionWatch();
+    _stopNicknameWatch();
     _isDeletingAccount = false;
     _hasPendingAccountDeletion = false;
     _accountDeletionInitiatedLocally = false;
@@ -2223,6 +2574,7 @@ class AuthSessionRepository extends ChangeNotifier {
             final currentEmail = _email;
             final observedRemotely = !_accountDeletionInitiatedLocally;
             _hasPendingAccountDeletion = true;
+            _stopNicknameWatch();
             _resetPlanEntitlementState();
             notifyListeners();
             if (observedRemotely) {
@@ -2315,6 +2667,9 @@ class AuthSessionRepository extends ChangeNotifier {
         _memberId != memberId ||
         _email != email) {
       _sessionGeneration += 1;
+      _nicknameRevision++;
+      _nicknameCacheDirty = false;
+      _stopNicknameWatch();
     }
     final changed =
         _hasActiveSession != hasActiveSession ||
@@ -2386,6 +2741,9 @@ class AuthSessionRepository extends ChangeNotifier {
   }) {
     _hasPendingAccountDeletion = isPending;
     _accountDeletionInitiatedLocally = isPending && initiatedLocally;
+    if (isPending) {
+      _stopNicknameWatch();
+    }
     notifyListeners();
   }
 
