@@ -26,27 +26,38 @@ service cloud.firestore {
         && data.nicknameKey == nicknameKey;
     }
 
-    function profileMatchesClaim(uid, nicknameKey) {
-      return existsAfter(
-          /databases/$(database)/documents/user_profiles/$(uid))
-        && validNicknameData(
-          getAfter(
-            /databases/$(database)/documents/user_profiles/$(uid)
-          ).data,
-          uid,
-          nicknameKey
-        );
+    function profileMatchesClaim(uid, nicknameKey, nickname) {
+      let profilePath =
+        /databases/$(database)/documents/user_profiles/$(uid);
+      let profile = getAfter(profilePath).data;
+      return existsAfter(profilePath)
+        && validNicknameData(profile, uid, nicknameKey)
+        && profile.nickname == nickname;
     }
 
-    function claimMatchesProfile(uid, nicknameKey) {
-      return existsAfter(
-          /databases/$(database)/documents/nickname_claims/$(nicknameKey))
-        && validNicknameData(
-          getAfter(
-            /databases/$(database)/documents/nickname_claims/$(nicknameKey)
-          ).data,
-          uid,
-          nicknameKey
+    function claimMatchesProfile(uid, nicknameKey, nickname) {
+      let claimPath =
+        /databases/$(database)/documents/nickname_claims/$(nicknameKey);
+      let claim = getAfter(claimPath).data;
+      return existsAfter(claimPath)
+        && validNicknameData(claim, uid, nicknameKey)
+        && claim.nickname == nickname;
+    }
+
+    function nicknameReleasedByRename(uid, nicknameKey) {
+      let profilePath =
+        /databases/$(database)/documents/user_profiles/$(uid);
+      let currentProfile = get(profilePath).data;
+      let nextProfile = getAfter(profilePath).data;
+      return !accountDeletionRequested(uid)
+        && exists(profilePath)
+        && currentProfile.uid == uid
+        && currentProfile.nicknameKey == nicknameKey
+        && existsAfter(profilePath)
+        && nextProfile.nicknameKey != nicknameKey
+        && validNicknameData(nextProfile, uid, nextProfile.nicknameKey)
+        && claimMatchesProfile(
+          uid, nextProfile.nicknameKey, nextProfile.nickname
         );
     }
 
@@ -311,7 +322,9 @@ service cloud.firestore {
           request.auth.uid,
           nicknameKey
         )
-        && profileMatchesClaim(request.auth.uid, nicknameKey);
+        && profileMatchesClaim(
+          request.auth.uid, nicknameKey, request.resource.data.nickname
+        );
 
       allow update: if signedIn()
         && !accountDeletionRequested(request.auth.uid)
@@ -323,12 +336,17 @@ service cloud.firestore {
           request.auth.uid,
           nicknameKey
         )
-        && profileMatchesClaim(request.auth.uid, nicknameKey);
+        && profileMatchesClaim(
+          request.auth.uid, nicknameKey, request.resource.data.nickname
+        );
 
       allow delete: if signedIn()
         && resource.data.uid == request.auth.uid
-        && !existsAfter(
-          /databases/$(database)/documents/user_profiles/$(request.auth.uid)
+        && (
+          !existsAfter(
+            /databases/$(database)/documents/user_profiles/$(request.auth.uid)
+          )
+          || nicknameReleasedByRename(request.auth.uid, nicknameKey)
         );
     }
 
@@ -340,15 +358,25 @@ service cloud.firestore {
         && !accountDeletionRequested(uid)
         && request.auth.uid == uid
         && validNicknameData(request.resource.data, uid, request.resource.data.nicknameKey)
-        && claimMatchesProfile(uid, request.resource.data.nicknameKey);
+        && claimMatchesProfile(
+          uid, request.resource.data.nicknameKey, request.resource.data.nickname
+        );
 
       allow update: if signedIn()
         && !accountDeletionRequested(uid)
         && request.auth.uid == uid
         && resource.data.uid == uid
-        && resource.data.nicknameKey == request.resource.data.nicknameKey
+        && validNicknameData(resource.data, uid, resource.data.nicknameKey)
         && validNicknameData(request.resource.data, uid, request.resource.data.nicknameKey)
-        && claimMatchesProfile(uid, request.resource.data.nicknameKey);
+        && claimMatchesProfile(
+          uid, request.resource.data.nicknameKey, request.resource.data.nickname
+        )
+        && (
+          resource.data.nicknameKey == request.resource.data.nicknameKey
+          || !existsAfter(
+            /databases/$(database)/documents/nickname_claims/$(resource.data.nicknameKey)
+          )
+        );
 
       allow delete: if signedIn()
         && request.auth.uid == uid
