@@ -1,8 +1,9 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 
-import '../../data/models/fish_species.dart';
 import '../../data/fish/fish_photo_validation.dart';
+import '../../data/models/fish_species.dart';
 
 typedef FishThumbnailRequest =
     Future<FishSpecies> Function(FishSpecies fish, {bool forceRefresh});
@@ -153,7 +154,7 @@ class FishThumbnailLoader {
       if (job.finished || job.running || !_visible(job)) continue;
       job.running = true;
       _running++;
-      _fetch(job);
+      unawaited(_fetch(job));
     }
   }
 

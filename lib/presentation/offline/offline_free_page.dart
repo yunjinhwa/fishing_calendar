@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/auth_session_repository.dart';
@@ -33,12 +35,12 @@ class OfflineFreePage extends StatelessWidget {
             ),
             const SizedBox(height: 24),
 
-            Card(
+            const Card(
               child: ListTile(
-                leading: const Icon(Icons.save_outlined),
-                title: const Text('이 기기에 저장됨'),
-                subtitle: const Text('로컬 기록은 현재 기기에만 보관됩니다.'),
-                trailing: const Icon(Icons.phone_android),
+                leading: Icon(Icons.save_outlined),
+                title: Text('이 기기에 저장됨'),
+                subtitle: Text('로컬 기록은 현재 기기에만 보관됩니다.'),
+                trailing: Icon(Icons.phone_android),
               ),
             ),
             const SizedBox(height: 16),
@@ -63,8 +65,10 @@ class OfflineFreePage extends StatelessWidget {
                   return;
                 }
 
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const RecordFormPage()),
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const RecordFormPage()),
+                  ),
                 );
               },
               icon: const Icon(Icons.edit_note),
@@ -74,9 +78,11 @@ class OfflineFreePage extends StatelessWidget {
 
             OutlinedButton.icon(
               onPressed: () {
-                Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const CalendarPage()));
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const CalendarPage()),
+                  ),
+                );
               },
               icon: const Icon(Icons.calendar_month_outlined),
               label: const Text('캘린더 보기'),

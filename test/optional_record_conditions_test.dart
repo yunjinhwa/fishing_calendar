@@ -148,7 +148,9 @@ void main() {
         weather: '흐림',
         airTemperature: 20,
         waterTemperature: 16.2,
-        catches: [CatchRecord(speciesName: '우럭', lengthCm: 42, weightG: 800)],
+        catches: [
+          const CatchRecord(speciesName: '우럭', lengthCm: 42, weightG: 800),
+        ],
       );
       await records.addRecord(original);
       await _openPage(

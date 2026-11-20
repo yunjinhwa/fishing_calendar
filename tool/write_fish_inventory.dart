@@ -1,25 +1,26 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:fishing_build/data/fish/bundled_fish_enrichment.dart';
+
 import 'package:fishing_build/data/fish/bundled_fish_descriptions.dart';
+import 'package:fishing_build/data/fish/bundled_fish_enrichment.dart';
 import 'package:fishing_build/data/fish/reviewed_fish_photos.dart';
 import 'package:fishing_build/data/models/fish_species.dart';
 
-Future<Map<String, dynamic>> read(String p) async =>
-    Map<String, dynamic>.from(jsonDecode(await File(p).readAsString()) as Map);
+Future<Map<String, Object?>> read(String p) async => Map<String, Object?>.from(
+  jsonDecode(await File(p).readAsString()) as Map<String, Object?>,
+);
 
 Future<void> main() async {
   final catalog = await read('assets/data/fish_catalog.json');
   final enrichmentJson = await read('assets/data/fish_enrichment.json');
   final enrichment = BundledFishEnrichment.fromJson(enrichmentJson);
-  final sources = <String, Map<String, dynamic>>{};
+  final sources = <String, Map<String, Object?>>{};
   final checked = <String, Set<String>>{};
   final outcomes = <String, Map<String, Object?>>{};
   final identities = <String, FishSpecies>{
-    for (final r in catalog['species'] as List)
-      (r as Map)['id'] as String: FishSpecies.fromJson(
-        Map<String, dynamic>.from(r),
-      ),
+    for (final r
+        in (catalog['species'] as List<Object?>).cast<Map<String, Object?>>())
+      r['id'] as String: FishSpecies.fromJson(r),
   };
   for (final lane in {
     'mbris': 'fish_all_mbris_content',
@@ -30,7 +31,8 @@ Future<void> main() async {
   }.entries) {
     final report = await read('.dart_tool/${lane.value}.json');
     final ids = <String>{};
-    for (final r in report['records'] as List) {
+    for (final r
+        in (report['records'] as List<Object?>).cast<Map<String, Object?>>()) {
       final base = identities[r['id']];
       if (base == null ||
           !ids.add(base.id) ||

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -49,7 +51,7 @@ class _FishDictionaryPageState extends State<FishDictionaryPage> {
     _wasDisconnected = _network.isDisconnected;
     _network.addListener(_networkChanged);
     _thumbnails = _createThumbnailLoader();
-    if (widget.isActive) _load();
+    if (widget.isActive) unawaited(_load());
   }
 
   FishThumbnailLoader _createThumbnailLoader() => FishThumbnailLoader(
@@ -120,7 +122,7 @@ class _FishDictionaryPageState extends State<FishDictionaryPage> {
       _failure = null;
       _isLoading = false;
       _hasRequested = false;
-      if (widget.isActive) _load();
+      if (widget.isActive) unawaited(_load());
     } else if (!oldWidget.isActive && widget.isActive) {
       _loadIfNeeded();
     }
@@ -130,7 +132,7 @@ class _FishDictionaryPageState extends State<FishDictionaryPage> {
   void _loadIfNeeded() {
     if (!_isLoading) {
       // The repository rechecks its TTL; a fresh catalog remains a RAM read.
-      _load(forceRefresh: _failure != null);
+      unawaited(_load(forceRefresh: _failure != null));
     }
   }
 
@@ -153,7 +155,7 @@ class _FishDictionaryPageState extends State<FishDictionaryPage> {
         !disconnected &&
         widget.isActive &&
         (_snapshot == null || _failure != null || _snapshot!.isStale)) {
-      _load(forceRefresh: true);
+      unawaited(_load(forceRefresh: true));
     } else {
       setState(() {});
     }

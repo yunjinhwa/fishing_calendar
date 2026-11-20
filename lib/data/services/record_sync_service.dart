@@ -7,8 +7,8 @@ import '../local/local_data_store.dart';
 import '../models/conflict_item.dart';
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
-import '../models/record_sync_metadata.dart';
 import '../models/record_cache_policy.dart';
+import '../models/record_sync_metadata.dart';
 import '../remote/record_sync_gateway.dart';
 import '../repositories/auth_session_repository.dart';
 import '../repositories/conflict_repository.dart';
@@ -535,7 +535,7 @@ class RecordSyncService extends ChangeNotifier {
     final incremental = gateway is IncrementalRecordSyncGateway
         ? gateway as IncrementalRecordSyncGateway
         : null;
-    var checkpoint = incremental == null
+    final checkpoint = incremental == null
         ? null
         : await _recordRepository.readSyncCheckpoint(ownerKey);
     if (!isCurrent()) return (applied: false, changedCount: 0);

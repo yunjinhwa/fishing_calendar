@@ -1,14 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
-import 'map_history_page.dart';
-import '../auth/auth_access_guard.dart';
-import '../record/record_form_page.dart';
-import '../../data/models/external_data.dart';
 import '../../data/maps/water_area.dart';
+import '../../data/models/external_data.dart';
 import '../../data/tides/tide_models.dart';
 import '../../data/tides/tide_name.dart';
 import '../../data/water_temperature/water_temperature_models.dart';
+import '../auth/auth_access_guard.dart';
+import '../record/record_form_page.dart';
 import 'location_conditions_card.dart';
+import 'map_history_page.dart';
 
 class MapDetailPage extends StatelessWidget {
   final String selectedLocation;
@@ -70,13 +72,15 @@ class MapDetailPage extends StatelessWidget {
 
             OutlinedButton.icon(
               onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => MapHistoryPage(
-                      selectedLocation: selectedLocation,
-                      latitude: latitude,
-                      longitude: longitude,
-                      waterArea: waterArea,
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => MapHistoryPage(
+                        selectedLocation: selectedLocation,
+                        latitude: latitude,
+                        longitude: longitude,
+                        waterArea: waterArea,
+                      ),
                     ),
                   ),
                 );
@@ -97,23 +101,25 @@ class MapDetailPage extends StatelessWidget {
                   return;
                 }
 
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => RecordFormPage(
-                      initialLocation: selectedLocation,
-                      initialLatitude: latitude,
-                      initialLongitude: longitude,
-                      initialExternalData: externalData,
-                      initialTideReference: waterArea.providesMarineData
-                          ? tideReference
-                          : null,
-                      allowAutomaticTide: waterArea.providesMarineData,
-                      initialWaterTemperatureObservation:
-                          waterArea.providesMarineData
-                          ? waterTemperatureObservation
-                          : null,
-                      allowAutomaticWaterTemperature:
-                          waterArea.providesMarineData,
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => RecordFormPage(
+                        initialLocation: selectedLocation,
+                        initialLatitude: latitude,
+                        initialLongitude: longitude,
+                        initialExternalData: externalData,
+                        initialTideReference: waterArea.providesMarineData
+                            ? tideReference
+                            : null,
+                        allowAutomaticTide: waterArea.providesMarineData,
+                        initialWaterTemperatureObservation:
+                            waterArea.providesMarineData
+                            ? waterTemperatureObservation
+                            : null,
+                        allowAutomaticWaterTemperature:
+                            waterArea.providesMarineData,
+                      ),
                     ),
                   ),
                 );

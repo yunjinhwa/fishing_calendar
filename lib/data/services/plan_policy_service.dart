@@ -109,7 +109,7 @@ class PlanPolicyService {
     late final Future<void> future;
     future = _performMigration(session).whenComplete(() {
       if (identical(_migrationFutures[session.generation], future)) {
-        _migrationFutures.remove(session.generation);
+        final _ = _migrationFutures.remove(session.generation);
       }
     });
     _migrationFutures[session.generation] = future;

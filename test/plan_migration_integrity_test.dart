@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:fishing_build/data/local/app_database.dart';
+import 'package:fishing_build/data/local/data_owner_key.dart';
 import 'package:fishing_build/data/local/local_data_store.dart';
 import 'package:fishing_build/data/local/local_identity_migration_service.dart';
-import 'package:fishing_build/data/local/data_owner_key.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/outbox_item.dart';
 import 'package:fishing_build/data/models/record_sync_metadata.dart';
@@ -12,8 +12,8 @@ import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/conflict_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
-import 'package:fishing_build/data/services/plan_policy_service.dart';
 import 'package:fishing_build/data/services/conflict_resolution_service.dart';
+import 'package:fishing_build/data/services/plan_policy_service.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:flutter_test/flutter_test.dart';

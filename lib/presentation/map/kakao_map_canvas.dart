@@ -145,7 +145,7 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
                       // Gestures begun inside the map should reach its WebView
                       // instead of scrolling the surrounding page.
                       gestureRecognizers: {
-                        Factory<OneSequenceGestureRecognizer>(
+                        const Factory<OneSequenceGestureRecognizer>(
                           EagerGestureRecognizer.new,
                         ),
                       },

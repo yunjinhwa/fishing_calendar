@@ -27,7 +27,7 @@ void main() {
         ),
         address: (_) async => AddressSearchResponse(
           list: [
-            SearchAddress(
+            const SearchAddress(
               id: null,
               addressType: null,
               address: null,
@@ -36,7 +36,7 @@ void main() {
               x: '129.075612345',
               y: '35.179612345',
             ),
-            SearchAddress(
+            const SearchAddress(
               id: null,
               addressType: null,
               address: null,
@@ -119,7 +119,7 @@ void main() {
         keyword: (_) => Future.error(StateError('keyword unavailable')),
         address: (_) async => AddressSearchResponse(
           list: [
-            SearchAddress(
+            const SearchAddress(
               id: null,
               addressType: null,
               address: null,

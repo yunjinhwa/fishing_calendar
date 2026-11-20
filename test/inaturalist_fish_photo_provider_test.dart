@@ -470,9 +470,11 @@ class _Adapter implements HttpClientAdapter {
     calls.add(options);
     startedAt.add(DateTime.now());
     if (!started.isCompleted) started.complete();
-    cancelFuture?.then((_) {
-      if (!cancelled.isCompleted) cancelled.complete();
-    });
+    unawaited(
+      cancelFuture?.then<void>((_) {
+        if (!cancelled.isCompleted) cancelled.complete();
+      }),
+    );
     final value = await respond(options);
     return ResponseBody.fromString(
       value is String ? value : jsonEncode(value),

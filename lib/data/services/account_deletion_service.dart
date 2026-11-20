@@ -120,7 +120,7 @@ class AccountDeletionService {
         stackTrace: stackTrace,
       );
     } finally {
-      _remoteCleanupTasks.remove(firebaseUid);
+      final _ = _remoteCleanupTasks.remove(firebaseUid);
     }
   }
 

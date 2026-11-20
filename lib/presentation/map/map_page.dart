@@ -873,18 +873,20 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
                     onPressed: choosing
                         ? null
                         : () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => MapDetailPage(
-                                  selectedLocation: selected.name,
-                                  latitude: selected.latitude,
-                                  longitude: selected.longitude,
-                                  externalData: _currentExternalData,
-                                  tideReference: _tideReference,
-                                  tideName: _tideName,
-                                  waterArea: _waterArea,
-                                  waterTemperatureObservation:
-                                      _currentWaterTemperature,
+                            unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => MapDetailPage(
+                                    selectedLocation: selected.name,
+                                    latitude: selected.latitude,
+                                    longitude: selected.longitude,
+                                    externalData: _currentExternalData,
+                                    tideReference: _tideReference,
+                                    tideName: _tideName,
+                                    waterArea: _waterArea,
+                                    waterTemperatureObservation:
+                                        _currentWaterTemperature,
+                                  ),
                                 ),
                               ),
                             );

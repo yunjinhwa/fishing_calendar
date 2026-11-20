@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/validation/auth_input_validator.dart';
@@ -45,8 +47,12 @@ class _SignupPageState extends State<SignupPage> {
   void _openPolicy(PolicyDocument document) {
     if (isSubmitting) return;
     FocusScope.of(context).unfocus();
-    Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => PolicyDocumentPage(document: document)),
+    unawaited(
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => PolicyDocumentPage(document: document),
+        ),
+      ),
     );
   }
 
@@ -146,9 +152,11 @@ class _SignupPageState extends State<SignupPage> {
         Navigator.of(context).pop(true);
         return;
       }
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const AppShell()),
-        (route) => false,
+      unawaited(
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AppShell()),
+          (route) => false,
+        ),
       );
     } on AuthFailure catch (failure) {
       if (mounted) {
@@ -318,9 +326,11 @@ class _SignupPageState extends State<SignupPage> {
                             if (isSubmitting) return;
 
                             if (!widget.returnToPrevious) {
-                              Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(
-                                  builder: (_) => const LoginPage(),
+                              unawaited(
+                                Navigator.of(context).pushReplacement(
+                                  MaterialPageRoute(
+                                    builder: (_) => const LoginPage(),
+                                  ),
                                 ),
                               );
                               return;

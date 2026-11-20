@@ -225,7 +225,7 @@ class KhoaHistoricalWaterTemperatureService
       _putCache(key, _CacheEntry.failure(reason, _clock().toUtc()));
       throw HistoricalDataException(reason);
     } finally {
-      _inFlight.remove(key);
+      final _ = _inFlight.remove(key);
     }
   }
 

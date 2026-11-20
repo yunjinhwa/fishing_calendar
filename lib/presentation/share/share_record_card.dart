@@ -22,8 +22,8 @@ class ShareRecordCard extends StatelessWidget {
   static const _muted = Color(0xFF607584);
 
   /// Use this same bounded provider when precaching before exporting the card.
-  static final ImageProvider<Object> backgroundProvider = ResizeImage(
-    const AssetImage('assets/images/share_record_background.png'),
+  static final ImageProvider<Object> backgroundProvider = const ResizeImage(
+    AssetImage('assets/images/share_record_background.png'),
     width: 1080,
     height: 1080,
     policy: ResizeImagePolicy.fit,

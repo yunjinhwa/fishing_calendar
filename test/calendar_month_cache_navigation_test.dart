@@ -390,7 +390,11 @@ Future<void> _waitUntil(WidgetTester tester, bool Function() condition) async {
 
 Future<void> _flush(WidgetTester tester, PaidRecordCacheService cache) async {
   var completed = false;
-  cache.flushPending().then((_) => completed = true);
+  unawaited(
+    cache.flushPending().then<void>((_) {
+      completed = true;
+    }),
+  );
   await _waitUntil(tester, () => completed);
   await tester.pump();
 }

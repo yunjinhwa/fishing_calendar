@@ -129,9 +129,11 @@ class _LoginPageState extends State<LoginPage> {
         Navigator.of(context).pop(true);
         return;
       }
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const AppShell()),
-        (route) => false,
+      unawaited(
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const AppShell()),
+          (route) => false,
+        ),
       );
     } on AuthFailure catch (failure) {
       if (mounted) {
@@ -280,9 +282,11 @@ class _LoginPageState extends State<LoginPage> {
                             if (isSubmitting) return;
 
                             if (!widget.returnToPrevious) {
-                              Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(
-                                  builder: (_) => const SignupPage(),
+                              unawaited(
+                                Navigator.of(context).pushReplacement(
+                                  MaterialPageRoute(
+                                    builder: (_) => const SignupPage(),
+                                  ),
                                 ),
                               );
                               return;

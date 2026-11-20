@@ -10,12 +10,8 @@ import '../../data/history/historical_conditions.dart';
 import '../../data/maps/map_location.dart';
 import '../../data/models/external_data.dart';
 import '../../data/models/fishing_record.dart';
-import '../../data/models/record_edit_snapshot.dart';
 import '../../data/models/record_cache_policy.dart';
-import '../../data/tides/tide_models.dart';
-import '../../data/tides/tide_name.dart';
-import '../../data/tides/tide_station_catalog.dart';
-import '../../data/water_temperature/water_temperature_models.dart';
+import '../../data/models/record_edit_snapshot.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/photos/record_photo_file_store_utils.dart';
 import '../../data/repositories/auth_session_repository.dart';
@@ -23,6 +19,10 @@ import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_photo_cleanup_service.dart';
 import '../../data/services/record_sync_service.dart';
+import '../../data/tides/tide_models.dart';
+import '../../data/tides/tide_name.dart';
+import '../../data/tides/tide_station_catalog.dart';
+import '../../data/water_temperature/water_temperature_models.dart';
 import '../auth/auth_access_guard.dart';
 import '../common/top_card_notification.dart';
 import 'record_photo_thumbnail.dart';
@@ -1284,7 +1284,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                       ),
                     ),
                   ),
-                _SectionTitle(title: '필수 정보'),
+                const _SectionTitle(title: '필수 정보'),
                 const SizedBox(height: 12),
 
                 TextField(
@@ -1351,7 +1351,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
                 const SizedBox(height: 24),
 
-                _SectionTitle(title: '날씨·낚시 정보'),
+                const _SectionTitle(title: '날씨·낚시 정보'),
                 const SizedBox(height: 12),
 
                 TextField(
@@ -1436,7 +1436,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 ),
                 const SizedBox(height: 24),
 
-                _SectionTitle(title: '선택 정보'),
+                const _SectionTitle(title: '선택 정보'),
                 const SizedBox(height: 12),
 
                 Text('조과', style: Theme.of(context).textTheme.titleSmall),

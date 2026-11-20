@@ -117,7 +117,7 @@ class KhoaTideService implements TideService {
       }
       return forecast;
     } finally {
-      _inFlight.remove(key);
+      final _ = _inFlight.remove(key);
     }
   }
 
