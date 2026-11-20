@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/models/fishing_record.dart';
-import '../../data/models/record_edit_snapshot.dart';
 import '../../data/models/record_cache_policy.dart';
-import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/models/record_edit_snapshot.dart';
 import '../../data/repositories/auth_session_repository.dart';
+import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
@@ -198,7 +198,7 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
       );
       return;
     }
-    Navigator.of(context).maybePop();
+    unawaited(Navigator.of(context).maybePop());
   }
 
   @override
@@ -299,7 +299,7 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                     ],
                     const SizedBox(height: 24),
 
-                    _SectionTitle(title: '외부 데이터'),
+                    const _SectionTitle(title: '외부 데이터'),
                     const SizedBox(height: 8),
                     _InfoCard(
                       children: [
@@ -321,7 +321,7 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                     ),
                     const SizedBox(height: 24),
 
-                    _SectionTitle(title: '조과'),
+                    const _SectionTitle(title: '조과'),
                     const SizedBox(height: 8),
 
                     if (record.catches.isEmpty)
@@ -353,7 +353,7 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
 
                     const SizedBox(height: 16),
 
-                    _SectionTitle(title: '사진'),
+                    const _SectionTitle(title: '사진'),
                     const SizedBox(height: 8),
 
                     if (record.photos.isEmpty)
@@ -383,7 +383,7 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
 
                     const SizedBox(height: 24),
 
-                    _SectionTitle(title: '메모'),
+                    const _SectionTitle(title: '메모'),
                     const SizedBox(height: 8),
                     _InfoCard(
                       children: [

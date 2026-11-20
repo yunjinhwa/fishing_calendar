@@ -608,9 +608,11 @@ class _Adapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     calls.add(options);
-    cancelFuture?.then((_) {
-      if (!cancelled.isCompleted) cancelled.complete();
-    });
+    unawaited(
+      cancelFuture?.then<void>((_) {
+        if (!cancelled.isCompleted) cancelled.complete();
+      }),
+    );
     final value = await respond(options);
     return ResponseBody.fromString(
       value is String ? value : jsonEncode(value),

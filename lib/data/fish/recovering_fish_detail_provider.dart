@@ -7,8 +7,8 @@ import 'fish_catalog_service.dart';
 import 'fish_photo_validation.dart';
 import 'fish_taxonomy_resolver.dart';
 import 'inaturalist_fish_photo_provider.dart';
-import 'wikimedia_fish_detail_provider.dart';
 import 'reviewed_fish_photos.dart';
+import 'wikimedia_fish_detail_provider.dart';
 
 /// Fill verified gaps without replacing existing fields or the catalog identity.
 class RecoveringFishDetailProvider

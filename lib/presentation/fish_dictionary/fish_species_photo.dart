@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../data/models/fish_species.dart';
 import '../../data/fish/fish_photo_validation.dart';
+import '../../data/models/fish_species.dart';
 
 /// Displays the complete provider photo without cropping or decorative edits.
 class FishSpeciesPhoto extends StatelessWidget {

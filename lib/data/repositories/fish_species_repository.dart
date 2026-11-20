@@ -208,7 +208,9 @@ class FishSpeciesRepository {
     try {
       return await request;
     } finally {
-      if (identical(_detailFlights[key], request)) _detailFlights.remove(key);
+      if (identical(_detailFlights[key], request)) {
+        final _ = _detailFlights.remove(key);
+      }
     }
   }
 
@@ -299,7 +301,7 @@ class FishSpeciesRepository {
       return await request;
     } finally {
       if (identical(_thumbnailFlights[key], request)) {
-        _thumbnailFlights.remove(key);
+        final _ = _thumbnailFlights.remove(key);
       }
     }
   }

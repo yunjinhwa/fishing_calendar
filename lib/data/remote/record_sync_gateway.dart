@@ -1,11 +1,11 @@
 import '../models/fishing_record.dart';
 import '../models/outbox_item.dart';
-import '../models/record_sync_metadata.dart';
-import '../models/record_sync_checkpoint.dart';
 import '../models/record_range_cursor.dart';
+import '../models/record_sync_checkpoint.dart';
+import '../models/record_sync_metadata.dart';
 
-export '../models/record_sync_checkpoint.dart';
 export '../models/record_range_cursor.dart';
+export '../models/record_sync_checkpoint.dart';
 
 class RemoteRecordRevision {
   final String recordId;

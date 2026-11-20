@@ -131,12 +131,10 @@ void main() {
       expect(auth.displayName, 'Initial');
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getString('auth_nickname'), 'Initial');
-      expect(
-        jsonDecode(
-          prefs.getString('auth_account_nicknames')!,
-        )['profile@example.com'],
-        'Initial',
-      );
+      final accountNicknames =
+          jsonDecode(prefs.getString('auth_account_nicknames')!)
+              as Map<String, Object?>;
+      expect(accountNicknames['profile@example.com'], 'Initial');
     },
   );
 
@@ -161,19 +159,15 @@ void main() {
         final prefs = await SharedPreferences.getInstance();
         expect(auth.displayName, 'Initial');
         expect(prefs.getString('auth_nickname'), 'Initial');
-        expect(
-          jsonDecode(
-            prefs.getString('auth_account_nicknames')!,
-          )['profile@example.com'],
-          'Initial',
-        );
+        final accountNicknames =
+            jsonDecode(prefs.getString('auth_account_nicknames')!)
+                as Map<String, Object?>;
+        expect(accountNicknames['profile@example.com'], 'Initial');
         final durable = await preferences.getAll();
-        expect(
-          jsonDecode(
-            durable['flutter.auth_account_nicknames']! as String,
-          )['profile@example.com'],
-          'Initial',
-        );
+        final durableNicknames =
+            jsonDecode(durable['flutter.auth_account_nicknames']! as String)
+                as Map<String, Object?>;
+        expect(durableNicknames['profile@example.com'], 'Initial');
       }
     },
   );
@@ -222,10 +216,10 @@ void main() {
       expect(auth.plan, plan);
       expect(auth.migrationStatus, migration);
       final prefs = await SharedPreferences.getInstance();
-      expect(
-        jsonDecode(prefs.getString('auth_firebase_nicknames_v1')!)[uid],
-        'Renamed',
-      );
+      final firebaseNicknames =
+          jsonDecode(prefs.getString('auth_firebase_nicknames_v1')!)
+              as Map<String, Object?>;
+      expect(firebaseNicknames[uid], 'Renamed');
       // Firestore is authoritative. Optional Auth display-name repair can wait.
       expect(gateway.currentUser!.displayName, 'Initial');
       expect(gateway.activeWatches, 1);
@@ -252,12 +246,10 @@ void main() {
       expect(auth.displayName, 'Initial');
       expect(gateway.profiles[auth.memberId], 'Initial');
       final prefs = await SharedPreferences.getInstance();
-      expect(
-        jsonDecode(
-          prefs.getString('auth_firebase_nicknames_v1')!,
-        )[auth.memberId],
-        'Initial',
-      );
+      final firebaseNicknames =
+          jsonDecode(prefs.getString('auth_firebase_nicknames_v1')!)
+              as Map<String, Object?>;
+      expect(firebaseNicknames[auth.memberId], 'Initial');
     },
   );
 
@@ -298,12 +290,10 @@ void main() {
       expect(auth.sessionGeneration, generation);
       expect(gateway.watchCount, 1);
       final prefs = await SharedPreferences.getInstance();
-      expect(
-        jsonDecode(
-          prefs.getString('auth_firebase_nicknames_v1')!,
-        )[auth.memberId],
-        'Remote',
-      );
+      final firebaseNicknames =
+          jsonDecode(prefs.getString('auth_firebase_nicknames_v1')!)
+              as Map<String, Object?>;
+      expect(firebaseNicknames[auth.memberId], 'Remote');
       gateway.nicknameLookupFailure = const AuthFailure(
         code: AuthFailureCode.networkUnavailable,
         message: 'offline',
@@ -485,12 +475,10 @@ void main() {
       expect(gateway.profiles[auth.memberId], 'Renamed');
       await auth.refreshNickname();
       final durable = await preferences.getAll();
-      expect(
-        jsonDecode(
-          durable['flutter.auth_firebase_nicknames_v1']! as String,
-        )[auth.memberId],
-        'Renamed',
-      );
+      final firebaseNicknames =
+          jsonDecode(durable['flutter.auth_firebase_nicknames_v1']! as String)
+              as Map<String, Object?>;
+      expect(firebaseNicknames[auth.memberId], 'Renamed');
     },
   );
 }

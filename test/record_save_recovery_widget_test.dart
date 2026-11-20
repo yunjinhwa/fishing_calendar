@@ -581,7 +581,7 @@ FishingRecord _record(
   airTemperature: 22,
   waterTemperature: 19,
   catches: <CatchRecord>[
-    CatchRecord(speciesName: '우럭', lengthCm: 31, weightG: 820),
+    const CatchRecord(speciesName: '우럭', lengthCm: 31, weightG: 820),
   ],
   photos: withPhoto
       ? const <RecordPhoto>[

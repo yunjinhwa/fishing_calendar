@@ -126,7 +126,9 @@ void main() {
       await _waitForSelection(tester);
 
       expect(lastPickerCall!.method, 'pickMultiImage');
-      expect(lastPickerCall!.arguments['limit'], 9);
+      final pickerArguments =
+          lastPickerCall!.arguments as Map<Object?, Object?>;
+      expect(pickerArguments['limit'], 9);
       expect(find.text('사진 추가 (4/10)'), findsOneWidget);
       final added = backend.stored.skip(1).toList();
       expect(added, hasLength(3));
@@ -240,7 +242,8 @@ void main() {
     await tester.pump();
     await _waitForSelection(tester);
     expect(lastPickerCall!.method, 'pickImage');
-    expect(lastPickerCall!.arguments['source'], 0);
+    final pickerArguments = lastPickerCall!.arguments as Map<Object?, Object?>;
+    expect(pickerArguments['source'], 0);
     expect(find.text('사진 추가 (1/10)'), findsOneWidget);
     await _discardAndLeave(tester);
     await _flush(tester, cleanup);
@@ -567,7 +570,11 @@ Future<StoredRecordPhotoFile> _pickPhoto(
   store.nextStored = Completer<StoredRecordPhotoFile>();
   await _startPickingPhoto(tester);
   StoredRecordPhotoFile? result;
-  store.nextStored!.future.then((stored) => result = stored);
+  unawaited(
+    store.nextStored!.future.then<void>((stored) {
+      result = stored;
+    }),
+  );
   await _pumpIoUntil(tester, () => result != null);
   await tester.pumpAndSettle();
   expect(find.text('사진 추가 ($expectedPhotoCount/10)'), findsOneWidget);
@@ -607,7 +614,11 @@ Future<void> _flush(
   RecordPhotoCleanupService service,
 ) async {
   var completed = false;
-  service.flushPending().then((_) => completed = true);
+  unawaited(
+    service.flushPending().then<void>((_) {
+      completed = true;
+    }),
+  );
   await _pumpIoUntil(tester, () => completed);
   await tester.pumpAndSettle();
 }

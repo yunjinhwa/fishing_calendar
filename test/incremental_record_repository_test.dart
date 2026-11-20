@@ -114,7 +114,7 @@ void main() {
       void listener() => notifications++;
       records.addListener(listener);
       addTearDown(() => records.removeListener(listener));
-      final revision = RemoteRecordRevision(
+      const revision = RemoteRecordRevision(
         recordId: 'deleted',
         versionNo: 2,
         status: RemoteRecordStatus.deleted,

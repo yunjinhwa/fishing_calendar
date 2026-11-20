@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -197,9 +199,11 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
     try {
       final deleted = await showAccountDeletionConfirmation(context);
       if (deleted && mounted) {
-        Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginChoicePage()),
-          (route) => false,
+        unawaited(
+          Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const LoginChoicePage()),
+            (route) => false,
+          ),
         );
       }
     } finally {

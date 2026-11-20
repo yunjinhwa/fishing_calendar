@@ -321,7 +321,11 @@ void main() {
 
 Future<void> _flush(WidgetTester tester, PaidRecordCacheService cache) async {
   var completed = false;
-  cache.flushPending().then((_) => completed = true);
+  unawaited(
+    cache.flushPending().then<void>((_) {
+      completed = true;
+    }),
+  );
   // SQLite uses the real event loop while widget continuations need the fake
   // clock pumped. Keep both moving without pumpAndSettle on a loading spinner.
   for (var iteration = 0; iteration < 200 && !completed; iteration++) {
@@ -352,8 +356,8 @@ class _HistoryGateway extends FakeRecordSyncGateway
     int limit = 100,
   }) async {
     rangeFetchCount++;
-    return RemoteRecordRangePage(
-      revisions: const [],
+    return const RemoteRecordRangePage(
+      revisions: [],
       hasMore: false,
       nextCursor: null,
     );

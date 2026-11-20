@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/models/user_plan_policy.dart';
@@ -77,12 +79,12 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
               ),
               const SizedBox(height: 12),
 
-              Card(
+              const Card(
                 child: ListTile(
-                  leading: const Icon(Icons.cached_outlined),
-                  title: const Text('캐시 기록'),
-                  subtitle: const Text('최근 캐시된 기록만 조회 가능합니다.'),
-                  trailing: const Icon(Icons.cloud_queue),
+                  leading: Icon(Icons.cached_outlined),
+                  title: Text('캐시 기록'),
+                  subtitle: Text('최근 캐시된 기록만 조회 가능합니다.'),
+                  trailing: Icon(Icons.cloud_queue),
                 ),
               ),
               const SizedBox(height: 16),
@@ -121,8 +123,10 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
 
               OutlinedButton.icon(
                 onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const CalendarPage()),
+                  unawaited(
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const CalendarPage()),
+                    ),
                   );
                 },
                 icon: const Icon(Icons.calendar_month_outlined),

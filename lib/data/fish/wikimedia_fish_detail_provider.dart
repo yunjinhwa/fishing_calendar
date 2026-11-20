@@ -6,8 +6,8 @@ import 'package:dio/dio.dart';
 
 import '../models/fish_species.dart';
 import 'fish_catalog_service.dart';
-import 'fish_size_summary.dart';
 import 'fish_photo_validation.dart';
+import 'fish_size_summary.dart';
 
 /// Keyless, licensed details whose scientific and Korean identities agree.
 /// A short shared cache joins list-photo and detail lookups; the repository
@@ -101,7 +101,9 @@ class WikimediaFishDetailProvider
       }
       return _rebase(result, species);
     } finally {
-      if (identical(_flights[key], request)) _flights.remove(key);
+      if (identical(_flights[key], request)) {
+        final _ = _flights.remove(key);
+      }
     }
   }
 

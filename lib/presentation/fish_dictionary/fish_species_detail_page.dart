@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/fish/fish_catalog_service.dart';
@@ -38,7 +40,7 @@ class _FishSpeciesDetailPageState extends State<FishSpeciesDetailPage> {
     _network = widget.networkStatus ?? NetworkStatusService.instance;
     _wasDisconnected = _network.isDisconnected;
     _network.addListener(_networkChanged);
-    _loadDetail();
+    unawaited(_loadDetail());
   }
 
   @override
@@ -53,7 +55,7 @@ class _FishSpeciesDetailPageState extends State<FishSpeciesDetailPage> {
     if (oldWidget.fish != widget.fish ||
         oldWidget.repository != widget.repository) {
       _fish = widget.fish;
-      _loadDetail();
+      unawaited(_loadDetail());
     }
   }
 
@@ -69,7 +71,7 @@ class _FishSpeciesDetailPageState extends State<FishSpeciesDetailPage> {
         _failure = FishCatalogFailure.network;
       });
     } else if (changed && !disconnected && _failure != null) {
-      _loadDetail(forceRefresh: true);
+      unawaited(_loadDetail(forceRefresh: true));
     } else {
       setState(() {});
     }
@@ -220,9 +222,12 @@ class _FishSpeciesDetailPageState extends State<FishSpeciesDetailPage> {
                   message: '도감의 어종을 출조 기록으로 저장하려면 로그인이 필요합니다.',
                 );
                 if (!allowed || !context.mounted) return;
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => RecordFormPage(initialFishName: fish.name),
+                unawaited(
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          RecordFormPage(initialFishName: fish.name),
+                    ),
                   ),
                 );
               },

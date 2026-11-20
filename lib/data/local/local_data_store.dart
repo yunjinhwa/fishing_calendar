@@ -6,8 +6,8 @@ import '../models/conflict_item.dart';
 import '../models/fishing_record.dart';
 import '../models/local_record_change.dart';
 import '../models/outbox_item.dart';
-import '../models/record_sync_metadata.dart';
 import '../models/record_sync_checkpoint.dart';
+import '../models/record_sync_metadata.dart';
 import 'app_database.dart';
 
 class LocalDataStore {

@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:fishing_build/data/fish/fish_catalog_service.dart';
 import 'package:fishing_build/data/models/fish_species.dart';
 import 'package:fishing_build/data/repositories/fish_species_repository.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const _fish = FishSpecies(
   id: 'nifs:1',

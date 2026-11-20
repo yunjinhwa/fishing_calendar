@@ -137,7 +137,9 @@ class PaidRecordCacheService extends ChangeNotifier {
     }
     late final Future<void> future;
     future = _loadHistory(owner, generation, epoch).whenComplete(() {
-      if (identical(_historyLoads[key], future)) _historyLoads.remove(key);
+      if (identical(_historyLoads[key], future)) {
+        final _ = _historyLoads.remove(key);
+      }
     });
     _historyLoads[key] = future;
     return future;
@@ -218,7 +220,9 @@ class PaidRecordCacheService extends ChangeNotifier {
     }
     late final Future<void> future;
     future = _loadMonth(owner, generation, epoch, normalized).whenComplete(() {
-      if (identical(_loads[key], future)) _loads.remove(key);
+      if (identical(_loads[key], future)) {
+        final _ = _loads.remove(key);
+      }
     });
     _loads[key] = future;
     return future;

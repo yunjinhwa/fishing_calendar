@@ -108,7 +108,7 @@ class KmaWeatherService implements ExternalDataService {
       }
       return forecast;
     } finally {
-      _inFlight.remove(key);
+      final _ = _inFlight.remove(key);
     }
   }
 

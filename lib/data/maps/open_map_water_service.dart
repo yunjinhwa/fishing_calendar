@@ -279,7 +279,9 @@ class OpenMapWaterService implements WaterAreaService {
     try {
       return await operation;
     } finally {
-      if (identical(_inFlight[url], operation)) _inFlight.remove(url);
+      if (identical(_inFlight[url], operation)) {
+        final _ = _inFlight.remove(url);
+      }
     }
   }
 

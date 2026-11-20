@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/auth/auth_gateway.dart';
@@ -5,15 +7,15 @@ import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/network_status_service.dart';
 import '../app_info/app_info_page.dart';
-import '../auth/auth_access_guard.dart';
 import '../auth/account_management_dialogs.dart';
+import '../auth/auth_access_guard.dart';
 import '../auth/auth_error_message.dart';
 import '../auth/login_choice_page.dart';
 import '../common/top_card_notification.dart';
 import '../legal/policy_document_page.dart';
 import '../offline/offline_mode_page.dart';
-import '../plan/plan_page.dart';
 import '../personal_best/personal_best_page.dart';
+import '../plan/plan_page.dart';
 import '../profile/profile_settings_page.dart';
 import '../sync/outbox_page.dart';
 import '../sync/sync_conflict_page.dart';
@@ -137,9 +139,11 @@ class MyPage extends StatelessWidget {
     if (!context.mounted) {
       return;
     }
-    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginChoicePage()),
-      (route) => false,
+    unawaited(
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginChoicePage()),
+        (route) => false,
+      ),
     );
   }
 
@@ -272,8 +276,10 @@ class MyPage extends StatelessWidget {
                     subtitle: Text('현재 ${authSession.planLabel}으로 이용 중입니다.'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const PlanPage()),
+                      unawaited(
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const PlanPage()),
+                        ),
                       );
                     },
                   ),
@@ -327,9 +333,11 @@ class MyPage extends StatelessWidget {
                         return;
                       }
 
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const PersonalBestPage(),
+                      unawaited(
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PersonalBestPage(),
+                          ),
                         ),
                       );
                     },
@@ -364,9 +372,11 @@ class MyPage extends StatelessWidget {
                         return;
                       }
 
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const SyncConflictPage(),
+                      unawaited(
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const SyncConflictPage(),
+                          ),
                         ),
                       );
                     },
@@ -397,10 +407,12 @@ class MyPage extends StatelessWidget {
                     ),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => OfflineModePage(
-                            networkStatusService: networkStatusService,
+                      unawaited(
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => OfflineModePage(
+                              networkStatusService: networkStatusService,
+                            ),
                           ),
                         ),
                       );

@@ -3,14 +3,13 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
-import 'package:path/path.dart' as path;
-
 import 'package:fishing_build/data/fish/composite_fish_detail_provider.dart';
 import 'package:fishing_build/data/fish/fish_catalog_service.dart';
 import 'package:fishing_build/data/fish/mbris_fish_detail_provider.dart';
 import 'package:fishing_build/data/fish/recovering_fish_detail_provider.dart';
 import 'package:fishing_build/data/fish/wikimedia_fish_detail_provider.dart';
 import 'package:fishing_build/data/models/fish_species.dart';
+import 'package:path/path.dart' as path;
 
 const _usage = '''Usage: dart run tool/audit_fish_details.dart [options]
   --limit=N       At most 800 catalog entries (default: 800).

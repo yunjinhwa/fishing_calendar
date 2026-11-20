@@ -3,16 +3,16 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'daily_record_list_page.dart';
-import 'calendar_record_layout.dart';
-import 'calendar_month_picker.dart';
-import 'calendar_today_summary.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
-import '../../data/services/paid_record_cache_service.dart';
 import '../../data/services/network_status_service.dart';
+import '../../data/services/paid_record_cache_service.dart';
 import '../../data/services/record_sync_service.dart';
+import 'calendar_month_picker.dart';
+import 'calendar_record_layout.dart';
+import 'calendar_today_summary.dart';
+import 'daily_record_list_page.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({

@@ -95,10 +95,10 @@ class _StartupGateState extends State<StartupGate> {
                         children: [
                           const Icon(Icons.error_outline, size: 48),
                           const SizedBox(height: 24),
-                          Text(
+                          const Text(
                             '앱을 시작하지 못했습니다.',
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w600,
                             ),

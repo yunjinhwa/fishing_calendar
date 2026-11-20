@@ -745,9 +745,11 @@ class _Adapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     calls.add(options);
-    cancelFuture?.then((_) {
-      if (!cancelled.isCompleted) cancelled.complete();
-    });
+    unawaited(
+      cancelFuture?.then<void>((_) {
+        if (!cancelled.isCompleted) cancelled.complete();
+      }),
+    );
     return ResponseBody.fromString(
       await respond(options),
       status,

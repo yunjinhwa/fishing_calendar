@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fishing_build/presentation/common/top_card_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -141,7 +143,7 @@ void main() {
     TopCardNotification.show(context, 'Home notice');
     await tester.pump();
     final route = _page();
-    navigator.push(route);
+    unawaited(navigator.push(route));
     await tester.pumpAndSettle();
     expect(_card, findsNothing);
 
@@ -152,13 +154,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(_card, findsNothing);
 
-    navigator.push(_page());
+    unawaited(navigator.push(_page()));
     await tester.pumpAndSettle();
     current = tester.element(find.text('Other page'));
     TopCardNotification.show(current, 'Before replacement');
     await tester.pump();
     final replacement = _page();
-    navigator.pushReplacement(replacement);
+    unawaited(navigator.pushReplacement(replacement));
     await tester.pumpAndSettle();
     expect(_card, findsNothing);
     current = tester.element(find.text('Other page'));
@@ -186,7 +188,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      nested.currentState!.push(_page('Editing'));
+      unawaited(nested.currentState!.push(_page('Editing')));
       await tester.pumpAndSettle();
       final context = tester.element(find.text('Editing'));
       TopCardNotification.show(
@@ -199,7 +201,7 @@ void main() {
       nested.currentState!.pop();
       await tester.pumpAndSettle();
       expect(find.text('Saved'), findsOneWidget);
-      nested.currentState!.push(_page('Next page'));
+      unawaited(nested.currentState!.push(_page('Next page')));
       await tester.pumpAndSettle();
       expect(_card, findsNothing);
     },
@@ -209,7 +211,7 @@ void main() {
     tester,
   ) async {
     final context = await _mount(tester, observer: false);
-    Navigator.of(context).push(_page());
+    unawaited(Navigator.of(context).push(_page()));
     await tester.pumpAndSettle();
     final other = tester.element(find.text('Other page'));
     TopCardNotification.show(other, 'Deleted', persistAfterPop: true);
@@ -255,7 +257,7 @@ void main() {
     expect(_card, findsNothing);
     enabled.value = true;
     await tester.pump();
-    Navigator.of(scopeContext).push(_page());
+    unawaited(Navigator.of(scopeContext).push(_page()));
     await tester.pumpAndSettle();
     TopCardNotification.show(scopeContext, 'From a covered tab');
     await tester.pump();

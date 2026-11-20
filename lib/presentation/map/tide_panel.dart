@@ -83,7 +83,7 @@ class _TidePanelState extends State<TidePanel>
   TideService get _service => widget.service ?? KhoaTideService.instance;
   DateTime get _now => (widget.clock ?? DateTime.now)().toUtc();
   Duration get _forecastLifetime => switch (_service) {
-    KhoaTideService service => service.cacheTtl,
+    final KhoaTideService service => service.cacheTtl,
     _ => const Duration(minutes: 10),
   };
   bool get _canRefresh =>
@@ -325,7 +325,7 @@ class _TidePanelState extends State<TidePanel>
             forceRefresh: forceRefresh,
           ),
         ).whenComplete(() {
-          _inFlight.remove(key);
+          final _ = _inFlight.remove(key);
         });
       });
       final forecast = await operation;

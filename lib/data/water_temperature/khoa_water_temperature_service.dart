@@ -236,7 +236,7 @@ class KhoaWaterTemperatureService implements WaterTemperatureService {
       }
       rethrow;
     } finally {
-      _inFlight.remove(key);
+      final _ = _inFlight.remove(key);
     }
   }
 

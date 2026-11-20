@@ -190,7 +190,7 @@ class NifsNarisFishService implements FishCatalogService {
       _details[cacheKey] = _CacheEntry(value, _clock().toUtc());
       return value;
     } finally {
-      _detailInFlight.remove(cacheKey);
+      final _ = _detailInFlight.remove(cacheKey);
     }
   }
 

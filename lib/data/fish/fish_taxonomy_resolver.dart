@@ -141,7 +141,9 @@ class GbifFishTaxonomyResolver implements FishTaxonomyResolver {
       _cache[key] = (result: result, at: _clock().toUtc());
       return result;
     } finally {
-      if (identical(_flights[key], pending)) _flights.remove(key);
+      if (identical(_flights[key], pending)) {
+        final _ = _flights.remove(key);
+      }
     }
   }
 

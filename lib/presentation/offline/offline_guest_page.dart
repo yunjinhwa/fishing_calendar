@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/services/network_status_service.dart';
@@ -42,9 +44,11 @@ class OfflineGuestPage extends StatelessWidget {
                       width: double.infinity,
                       child: FilledButton(
                         onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const LoginPage(),
+                          unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const LoginPage(),
+                              ),
                             ),
                           );
                         },
@@ -57,9 +61,11 @@ class OfflineGuestPage extends StatelessWidget {
                       width: double.infinity,
                       child: OutlinedButton(
                         onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const SignupPage(),
+                          unawaited(
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const SignupPage(),
+                              ),
                             ),
                           );
                         },

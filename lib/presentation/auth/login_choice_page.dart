@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/auth/auth_gateway.dart';
@@ -32,8 +34,10 @@ class _LoginChoicePageState extends State<LoginChoicePage> {
       await AuthSessionRepository.instance.continueAsGuest();
       if (!mounted) return;
 
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AppShell(initialIndex: 1)),
+      unawaited(
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const AppShell(initialIndex: 1)),
+        ),
       );
     } on AuthFailure catch (failure) {
       if (mounted) {
@@ -54,16 +58,20 @@ class _LoginChoicePageState extends State<LoginChoicePage> {
 
   void _openLogin() {
     if (_isBusy) return;
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const LoginPage()));
+    unawaited(
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const LoginPage())),
+    );
   }
 
   void _openSignup() {
     if (_isBusy) return;
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const SignupPage()));
+    unawaited(
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const SignupPage())),
+    );
   }
 
   @override

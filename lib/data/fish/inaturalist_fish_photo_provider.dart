@@ -87,7 +87,9 @@ class InaturalistFishPhotoProvider implements FishDetailProvider {
       _cache[key] = (photo: photo, at: _clock().toUtc());
       return _merge(species, photo);
     } finally {
-      if (identical(_flights[key], request)) _flights.remove(key);
+      if (identical(_flights[key], request)) {
+        final _ = _flights.remove(key);
+      }
     }
   }
 

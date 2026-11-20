@@ -161,7 +161,7 @@ class KmaHistoricalWeatherService implements HistoricalWeatherService {
       }
       rethrow;
     } finally {
-      _inFlight.remove(hour);
+      final _ = _inFlight.remove(hour);
     }
   }
 

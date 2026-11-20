@@ -665,7 +665,9 @@ void main() {
 
   test('deprecated scientific claims cannot establish identity', () async {
     final entity = _entity();
-    ((entity['claims'] as Map)['P225'] as List).first['rank'] = 'deprecated';
+    final claims = entity['claims'] as Map<String, Object?>;
+    final scientificClaims = claims['P225'] as List<Map<String, Object?>>;
+    scientificClaims.first['rank'] = 'deprecated';
     adapter.respond = (call) =>
         call.queryParameters['action'] == 'wbgetentities'
         ? _entities({'Q1322753': entity})
@@ -1571,9 +1573,11 @@ class _Adapter implements HttpClientAdapter {
   ) async {
     calls.add(options);
     if (!started.isCompleted) started.complete();
-    cancelFuture?.then((_) {
-      if (!cancelled.isCompleted) cancelled.complete();
-    });
+    unawaited(
+      cancelFuture?.then<void>((_) {
+        if (!cancelled.isCompleted) cancelled.complete();
+      }),
+    );
     final value = await respond(options);
     return ResponseBody.fromString(
       value is String ? value : jsonEncode(value),

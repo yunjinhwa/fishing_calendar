@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/models/user_plan_policy.dart';
@@ -271,13 +273,15 @@ class PaidFeatureGate extends StatelessWidget {
                                 migrationDestinationBuilder != null
                             ? migrationDestinationBuilder!(context)
                             : null;
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                migrationDestination ??
-                                (authSession.isGuest
-                                    ? const LoginPage(returnToPrevious: true)
-                                    : const PlanPage()),
+                        unawaited(
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  migrationDestination ??
+                                  (authSession.isGuest
+                                      ? const LoginPage(returnToPrevious: true)
+                                      : const PlanPage()),
+                            ),
                           ),
                         );
                       },

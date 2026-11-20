@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:fishing_build/core/validation/auth_input_validator.dart';
 import 'package:fishing_build/data/auth/auth_gateway.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
 import 'package:fishing_build/data/models/outbox_item.dart';
@@ -12,21 +13,20 @@ import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/plan_policy_service.dart';
 import 'package:fishing_build/data/services/record_mutation_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
-import 'package:fishing_build/core/validation/auth_input_validator.dart';
 import 'package:fishing_build/presentation/auth/signup_page.dart';
 import 'package:fishing_build/presentation/common/hold_to_reveal_password_field.dart';
 import 'package:fishing_build/presentation/my_page/my_page.dart';
 import 'package:fishing_build/presentation/offline/offline_mode_page.dart';
 import 'package:fishing_build/presentation/plan/plan_page.dart';
+import 'package:fishing_build/presentation/shell/app_shell.dart';
 import 'package:fishing_build/presentation/sync/outbox_page.dart';
 import 'package:fishing_build/presentation/sync/sync_conflict_page.dart';
-import 'package:fishing_build/presentation/shell/app_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'support/test_database.dart';
 import 'support/fake_record_sync_gateway.dart';
+import 'support/test_database.dart';
 
 void main() {
   final authSession = AuthSessionRepository.instance;
