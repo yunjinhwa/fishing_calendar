@@ -289,6 +289,13 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                         Expanded(child: Text(record.location)),
                       ],
                     ),
+                    if (record.locationAlias case final alias?) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '위치 별칭: $alias',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
                     if (record.latitude != null &&
                         record.longitude != null) ...[
                       const SizedBox(height: 6),

@@ -7,6 +7,7 @@ class FishingRecordValidator {
   // 300 characters by the Firestore rules.
   static const int maxDocumentIdLength = 200;
   static const int maxLocationLength = 200;
+  static const int maxLocationAliasLength = 100;
   static const int maxGenreNameLength = 100;
   static const int maxTideLength = 100;
   static const int maxWeatherLength = 100;
@@ -36,6 +37,15 @@ class FishingRecordValidator {
     }
     if (record.location.length > maxLocationLength) {
       return '위치는 $maxLocationLength자 이하로 입력하세요.';
+    }
+    final locationAlias = record.locationAlias;
+    if (locationAlias != null) {
+      if (locationAlias.trim().isEmpty) {
+        return '위치 별칭은 공백만 입력할 수 없습니다.';
+      }
+      if (locationAlias.length > maxLocationAliasLength) {
+        return '위치 별칭은 $maxLocationAliasLength자 이하로 입력하세요.';
+      }
     }
     final coordinateError = validateCoordinates(
       record.latitude,

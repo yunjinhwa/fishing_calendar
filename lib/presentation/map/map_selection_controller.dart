@@ -99,9 +99,12 @@ class MapSelectionController extends ChangeNotifier {
     }
   }
 
-  void selectLocation(MapLocation location) {
+  void selectLocation(
+    MapLocation location, {
+    bool preserveSearchResults = false,
+  }) {
     if (_disposed) return;
-    _beginPointSelection();
+    _beginPointSelection(preserveSearchResults: preserveSearchResults);
     _selection = location;
     notifyListeners();
   }
@@ -210,10 +213,10 @@ class MapSelectionController extends ChangeNotifier {
     }
   }
 
-  int _beginPointSelection() {
+  int _beginPointSelection({bool preserveSearchResults = false}) {
     _searchRevision++;
     _isSearching = false;
-    _results = const [];
+    if (!preserveSearchResults) _results = const [];
     _resetErrors();
     _cancelPointWork();
     return _selectionRevision;

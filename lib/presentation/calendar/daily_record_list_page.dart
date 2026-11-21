@@ -201,7 +201,7 @@ class _DailyRecordListPageState extends State<DailyRecordListPage>
                                     padding: const EdgeInsets.only(top: 8),
                                     child: Text(
                                       '${_formatTimeRange(record.startAt, record.endAt)}\n'
-                                      '${record.location}\n${_syncStatusFor(record.id)}',
+                                      '${record.locationDisplayName}\n${_syncStatusFor(record.id)}',
                                     ),
                                   ),
                                   isThreeLine: true,

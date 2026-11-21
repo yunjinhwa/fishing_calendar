@@ -10,6 +10,43 @@ import '../../data/maps/kakao_map_search_gateway.dart';
 import '../../data/maps/map_location.dart';
 import '../../data/maps/map_search_gateway.dart';
 
+typedef MapCanvasBuilder =
+    Widget Function(
+      MapLocation selection,
+      ValueChanged<MapSearchGateway?> onGatewayChanged,
+      void Function(double latitude, double longitude) onPointSelected,
+    );
+
+// Keep the WebView and its in-flight requests when a list moves the map
+// outside the viewport. A stable host key also preserves it as siblings change.
+class MapCanvasHost extends StatefulWidget {
+  const MapCanvasHost({super.key, required this.isActive, required this.child});
+
+  final bool isActive;
+  final Widget child;
+
+  @override
+  State<MapCanvasHost> createState() => _MapCanvasHostState();
+}
+
+class _MapCanvasHostState extends State<MapCanvasHost>
+    with AutomaticKeepAliveClientMixin<MapCanvasHost> {
+  @override
+  bool get wantKeepAlive => widget.isActive;
+
+  @override
+  void didUpdateWidget(MapCanvasHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive != widget.isActive) updateKeepAlive();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
 class KakaoMapCanvas extends StatefulWidget {
   const KakaoMapCanvas({
     super.key,
@@ -17,12 +54,14 @@ class KakaoMapCanvas extends StatefulWidget {
     required this.selection,
     required this.onGatewayChanged,
     required this.onPointSelected,
+    this.recenterRequest = 0,
   });
 
   final KakaoMapConfiguration configuration;
   final MapLocation selection;
   final ValueChanged<MapSearchGateway?> onGatewayChanged;
   final void Function(double latitude, double longitude) onPointSelected;
+  final int recenterRequest;
 
   @override
   State<KakaoMapCanvas> createState() => _KakaoMapCanvasState();
@@ -31,6 +70,7 @@ class KakaoMapCanvas extends StatefulWidget {
 class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
   Timer? _readinessTimer;
   KakaoMapSearchGateway? _gateway;
+  KakaoMapController? _mapController;
   int _attempt = 0;
   bool _ready = false;
   bool _failed = false;
@@ -53,6 +93,26 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
         oldWidget.configuration.baseUrl != widget.configuration.baseUrl) {
       _prepareAttempt();
       _notifyGateway(null);
+    } else if (oldWidget.recenterRequest != widget.recenterRequest) {
+      final controller = _mapController;
+      final selection = widget.selection;
+      if (controller != null && selection.hasCoordinates) {
+        unawaited(_recenter(controller, selection));
+      }
+    }
+  }
+
+  Future<void> _recenter(
+    KakaoMapController controller,
+    MapLocation location,
+  ) async {
+    try {
+      // Dragging the map does not change the plugin's last applied center.
+      await controller.setCenter(
+        LatLng(location.latitude!, location.longitude!),
+      );
+    } on Object {
+      // A closed or reloading WebView does not affect the selected coordinates.
     }
   }
 
@@ -70,6 +130,7 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
     _readinessTimer?.cancel();
     _gateway?.dispose();
     _gateway = null;
+    _mapController = null;
     _ready = false;
     _failed = false;
     if (!_canCreateMap) return;
@@ -94,6 +155,7 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
     _gateway?.dispose();
     final gateway = KakaoMapSearchGateway(controller);
     _gateway = gateway;
+    _mapController = controller;
     setState(() => _ready = true);
     _notifyGateway(gateway);
   }

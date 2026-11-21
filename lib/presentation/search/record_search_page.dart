@@ -65,6 +65,7 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
       final matchesKeyword =
           keyword.isEmpty ||
           record.location.contains(keyword) ||
+          (record.locationAlias?.contains(keyword) ?? false) ||
           record.genreName.contains(keyword) ||
           (record.memo?.contains(keyword) ?? false) ||
           record.catches.any(
@@ -340,7 +341,7 @@ class _SearchFilterArea extends StatelessWidget {
               controller: searchController,
               decoration: const InputDecoration(
                 labelText: '검색어',
-                hintText: '장소, 어종, 메모 검색',
+                hintText: '장소, 위치 별칭, 어종, 메모 검색',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.search),
               ),
@@ -474,7 +475,7 @@ class _RecordSearchResultCard extends StatelessWidget {
         ),
         subtitle: Text(
           '${_formatDateTime(record.startAt)}\n'
-          '${record.location} · ${record.genreName}',
+          '${record.locationDisplayName} · ${record.genreName}',
         ),
         isThreeLine: true,
         trailing: const Icon(Icons.chevron_right),

@@ -7,6 +7,7 @@ import 'package:fishing_build/presentation/calendar/calendar_page.dart';
 import 'package:fishing_build/presentation/common/top_card_notification.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
+import 'package:fishing_build/presentation/search/record_search_page.dart';
 import 'package:fishing_build/presentation/shell/app_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -336,11 +337,45 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('records can be found by their place or location alias', (
+    tester,
+  ) async {
+    await AuthSessionRepository.instance.setSessionForTesting(
+      plan: UserPlan.free,
+      email: 'alias-search@example.com',
+    );
+    final start = DateTime(2026, 11, 21, 7);
+    await FishingRecordRepository.instance.addRecord(
+      _createRecord(
+        id: 'aliased-place',
+        location: '동삼동 방파제',
+        locationAlias: '나만의 포인트',
+        startAt: start,
+        endAt: start.add(const Duration(hours: 2)),
+        genreName: '루어',
+      ),
+    );
+
+    await tester.pumpWidget(const MaterialApp(home: RecordSearchPage()));
+    await tester.pumpAndSettle();
+    final search = find.widgetWithText(TextField, '검색어');
+    final result = find.textContaining('나만의 포인트 (동삼동 방파제)');
+    for (final keyword in ['나만의 포인트', '동삼동 방파제']) {
+      await tester.enterText(search, keyword);
+      await tester.pumpAndSettle();
+      expect(result, findsOneWidget);
+    }
+    await tester.enterText(search, '다른 포인트');
+    await tester.pumpAndSettle();
+    expect(result, findsNothing);
+  });
 }
 
 FishingRecord _createRecord({
   required String id,
   required String location,
+  String? locationAlias,
   required DateTime startAt,
   required DateTime endAt,
   required String genreName,
@@ -348,6 +383,7 @@ FishingRecord _createRecord({
   return FishingRecord(
     id: id,
     location: location,
+    locationAlias: locationAlias,
     startAt: startAt,
     endAt: endAt,
     genreName: genreName,

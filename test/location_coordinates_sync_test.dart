@@ -48,10 +48,15 @@ void main() {
   );
 
   test(
-    'paid create, reload and coordinate removal propagate together',
+    'paid create and reload preserve the alias and coordinates until removed',
     () async {
       await signIn(UserPlan.paid);
-      final original = _record('paid', latitude: 35.1796, longitude: 129.0756);
+      final original = _record(
+        'paid',
+        locationAlias: '단골 방파제',
+        latitude: 35.1796,
+        longitude: 129.0756,
+      );
       await mutations.addRecord(original);
       expect(
         outbox.getAllItems().single.payload!['latitude'],
@@ -59,16 +64,28 @@ void main() {
       );
       expect((await sync.syncNow()).isSuccess, isTrue);
       expect(
+        gateway.record(auth.memberId!, original.id)!.locationAlias,
+        '단골 방파제',
+      );
+      expect(
         gateway.record(auth.memberId!, original.id)!.longitude,
         original.longitude,
       );
       records.clearCacheOnlyForTesting();
       await records.loadRecords();
       expect(records.getRecordById(original.id)!.latitude, original.latitude);
+      expect(
+        records.getRecordById(original.id)!.locationAlias,
+        original.locationAlias,
+      );
 
       await mutations.updateRecord(_record(original.id));
       expect((await sync.syncNow()).isSuccess, isTrue);
       expect(gateway.record(auth.memberId!, original.id)!.latitude, isNull);
+      expect(
+        gateway.record(auth.memberId!, original.id)!.locationAlias,
+        isNull,
+      );
       expect(
         (await store.readRecordForOwner(
           auth.dataOwnerKey,
@@ -107,10 +124,15 @@ void main() {
   );
 
   test(
-    'free intent survives restart and migrates with its coordinate pair',
+    'free intent survives restart and migrates with its alias and coordinates',
     () async {
       await signIn(UserPlan.free);
-      final original = _record('free', latitude: 0, longitude: 0);
+      final original = _record(
+        'free',
+        locationAlias: '나만의 자리',
+        latitude: 0,
+        longitude: 0,
+      );
       await mutations.addRecord(original);
       expect(outbox.getAllItems(), isEmpty);
       expect(
@@ -126,6 +148,10 @@ void main() {
       expect((await sync.syncNow()).isSuccess, isTrue);
       expect(gateway.record(auth.memberId!, original.id)!.latitude, 0.0);
       expect(gateway.record(auth.memberId!, original.id)!.longitude, 0.0);
+      expect(
+        gateway.record(auth.memberId!, original.id)!.locationAlias,
+        original.locationAlias,
+      );
       expect(
         await store.readLocalRecordChangesForOwner(auth.dataOwnerKey),
         isEmpty,
@@ -147,13 +173,18 @@ void main() {
   );
 }
 
-FishingRecord _record(String id, {double? latitude, double? longitude}) =>
-    FishingRecord(
-      id: id,
-      location: 'Coordinate harbor',
-      latitude: latitude,
-      longitude: longitude,
-      startAt: DateTime(2026, 8, 15, 8),
-      endAt: DateTime(2026, 8, 15, 12),
-      genreName: '루어',
-    );
+FishingRecord _record(
+  String id, {
+  String? locationAlias,
+  double? latitude,
+  double? longitude,
+}) => FishingRecord(
+  id: id,
+  location: 'Coordinate harbor',
+  locationAlias: locationAlias,
+  latitude: latitude,
+  longitude: longitude,
+  startAt: DateTime(2026, 8, 15, 8),
+  endAt: DateTime(2026, 8, 15, 12),
+  genreName: '루어',
+);

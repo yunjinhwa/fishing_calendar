@@ -724,6 +724,7 @@ class FirestoreRecordSyncGateway
       'recordId': record.id,
       'recordStatus': activeStatus,
       'location': record.location,
+      if (record.locationAlias != null) 'locationAlias': record.locationAlias,
       if (hasCoordinates) ...{
         'latitude': record.latitude,
         'longitude': record.longitude,
@@ -765,6 +766,7 @@ class FirestoreRecordSyncGateway
       final record = FishingRecord(
         id: data['recordId'] as String,
         location: data['location'] as String,
+        locationAlias: _decodeLocationAlias(data),
         latitude: (data['latitude'] as num?)?.toDouble(),
         longitude: (data['longitude'] as num?)?.toDouble(),
         startAt: startAt.toDate(),
@@ -794,6 +796,22 @@ class FirestoreRecordSyncGateway
         causeStackTrace: stackTrace,
       );
     }
+  }
+
+  static String? _decodeLocationAlias(Map<String, dynamic> data) {
+    if (!data.containsKey('locationAlias')) return null;
+    final alias = data['locationAlias'];
+    if (data['schemaVersion'] != validatedCatchesSchemaVersion ||
+        alias is! String ||
+        alias.trim().isEmpty ||
+        alias.length > FishingRecordValidator.maxLocationAliasLength) {
+      throw const RecordSyncGatewayException(
+        code: 'invalid-server-data',
+        message: '서버 기록의 위치 별칭 형식이 올바르지 않습니다.',
+        fieldPath: 'locationAlias',
+      );
+    }
+    return alias;
   }
 
   static List<CatchRecord> _decodeValidatedCatches(Object? value) {
@@ -994,6 +1012,8 @@ class FirestoreRecordSyncGateway
           ? null
           : <String, Object?>{
               'location': record.location,
+              if (record.locationAlias != null)
+                'locationAlias': record.locationAlias,
               'startAt': record.startAt.toUtc().toIso8601String(),
               'endAt': record.endAt.toUtc().toIso8601String(),
               'genreName': record.genreName,
@@ -1131,6 +1151,8 @@ class FirestoreRecordSyncGateway
             ...baseKeys,
             ...activeOnlyKeys,
             hasValidatedCatches ? 'catchesJson' : 'catches',
+            if (hasValidatedCatches && data.containsKey('locationAlias'))
+              'locationAlias',
             if (hasCoordinates) ...{'latitude', 'longitude'},
           }
         : baseKeys;
