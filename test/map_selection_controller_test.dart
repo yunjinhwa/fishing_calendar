@@ -70,6 +70,66 @@ void main() {
     },
   );
 
+  test(
+    'selecting alternatives can preserve the immutable search results',
+    () async {
+      controller.setGateway(search);
+      final first = _point('첫 번째 항구');
+      final second = _point('두 번째 항구', latitude: 34, longitude: 128);
+      search.onSearch = (_) async => [first, second];
+      await controller.search('항구');
+      final results = controller.results;
+
+      controller.selectLocation(second, preserveSearchResults: true);
+      expect(controller.selection, same(second));
+      expect(controller.results, same(results));
+      expect(controller.results, [first, second]);
+      expect(() => controller.results.clear(), throwsUnsupportedError);
+
+      controller.selectLocation(first, preserveSearchResults: true);
+      expect(controller.selection, same(first));
+      expect(controller.results, [first, second]);
+      expect(search.queries, ['항구']);
+      expect(search.points, isEmpty);
+      expect(location.calls, 0);
+    },
+  );
+
+  test(
+    'new searches and explicit point selections still clear preserved results',
+    () async {
+      controller.setGateway(search);
+      final first = _point('첫 번째 항구');
+      final second = _point('두 번째 항구', latitude: 34, longitude: 128);
+      search.onSearch = (_) async => [first, second];
+      await controller.search('항구');
+      controller.selectLocation(second, preserveSearchResults: true);
+
+      final pending = Completer<List<MapLocation>>();
+      search.onSearch = (_) => pending.future;
+      final loading = controller.search('새 검색');
+      expect(controller.results, isEmpty);
+      final newResult = _point('새 검색 결과');
+      pending.complete([newResult]);
+      await loading;
+      expect(controller.results, [newResult]);
+
+      controller.selectLocation(newResult, preserveSearchResults: true);
+      controller.selectLocation(MapLocation(name: '직접 입력'));
+      expect(controller.results, isEmpty);
+
+      search.onSearch = (_) async => [first, second];
+      await controller.search('항구');
+      controller.selectLocation(second, preserveSearchResults: true);
+      await controller.selectCoordinates(33, 127);
+      expect(controller.results, isEmpty);
+      expect(controller.selection.latitude, 33);
+      expect(controller.selection.longitude, 127);
+      expect(search.points, [(33.0, 127.0)]);
+      expect(location.calls, 0);
+    },
+  );
+
   test('empty results and failed searches are retryable', () async {
     controller.setGateway(search);
     final original = _point('기존 선택', latitude: 36, longitude: 127);

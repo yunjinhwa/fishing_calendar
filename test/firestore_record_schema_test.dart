@@ -81,6 +81,65 @@ void main() {
     );
   });
 
+  test(
+    'optional v3 alias round-trips without changing the place or coordinates',
+    () {
+      final record = _newRecord(
+        'with-alias',
+        locationAlias: '나만의 낚시터',
+        latitude: 35.1,
+        longitude: 129.1,
+      );
+      final data = _encodedDocument(record);
+      expect(data['locationAlias'], record.locationAlias);
+
+      final decoded = _decode(data).record!;
+      expect(decoded.location, record.location);
+      expect(decoded.locationAlias, record.locationAlias);
+      expect(decoded.latitude, record.latitude);
+      expect(decoded.longitude, record.longitude);
+
+      final original = _item(record);
+      final fingerprint =
+          FirestoreRecordSyncGateway.mutationFingerprintForTesting(original);
+      expect(
+        FirestoreRecordSyncGateway.mutationFingerprintForTesting(
+          original.copyWith(payload: decoded.toJson()),
+        ),
+        fingerprint,
+      );
+
+      final cleared = FishingRecord.fromJson(
+        record.toJson()..remove('locationAlias'),
+      );
+      final clearedData = _encodedDocument(cleared);
+      expect(clearedData.containsKey('locationAlias'), isFalse);
+      expect(_decode(clearedData).record!.locationAlias, isNull);
+      expect(
+        FirestoreRecordSyncGateway.mutationFingerprintForTesting(
+          original.copyWith(payload: cleared.toJson()),
+        ),
+        isNot(fingerprint),
+      );
+    },
+  );
+
+  test('malformed v3 aliases identify the record and rejected field', () {
+    final valid = _encodedDocument(_newRecord('bad-alias'));
+    for (final alias in <Object?>[
+      null,
+      42,
+      '',
+      ' \t\n',
+      List<String>.filled(101, '별').join(),
+    ]) {
+      expect(
+        () => _decode({...valid, 'locationAlias': alias}),
+        throwsA(_invalid('bad-alias', 'locationAlias')),
+      );
+    }
+  });
+
   test('legacy v1 and v2 array catches remain readable beside v3', () {
     final legacy = _active(
       'v1',
@@ -108,6 +167,10 @@ void main() {
     expect(snapshot.revisionFor('v2')!.record!.catches.single.lengthCm, 41.5);
     expect(snapshot.revisionFor('v2')!.record!.latitude, 35.1);
     expect(snapshot.revisionFor('v3')!.record!.catches, isEmpty);
+    expect(
+      snapshot.activeRecords.map((record) => record.locationAlias),
+      everyElement(isNull),
+    );
   });
 
   test('v3 malformed validated JSON reports its document and field', () {
@@ -364,11 +427,13 @@ Matcher _invalid(String documentId, String? fieldPath) =>
 FishingRecord _newRecord(
   String id, {
   List<CatchRecord> catches = const [],
+  String? locationAlias,
   double? latitude,
   double? longitude,
 }) => FishingRecord(
   id: id,
   location: '테스트 방파제',
+  locationAlias: locationAlias,
   latitude: latitude,
   longitude: longitude,
   startAt: DateTime.utc(2026, 11, 15, 9),

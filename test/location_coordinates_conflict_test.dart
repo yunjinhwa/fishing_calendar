@@ -83,9 +83,10 @@ void main() {
   );
 
   test('merging another field preserves the entire local location', () {
-    final mine = _record(location: '부산', memo: '내 메모');
+    final mine = _record(location: '부산', locationAlias: '내 포인트', memo: '내 메모');
     final theirs = _record(
       location: '인천',
+      locationAlias: '상대 포인트',
       latitude: 37.5,
       longitude: 126.6,
       memo: '상대 메모',
@@ -97,16 +98,22 @@ void main() {
     ).buildMergedRecord({ConflictFieldKey.memo});
 
     expect(merged.location, mine.location);
+    expect(merged.locationAlias, mine.locationAlias);
     expect(merged.latitude, mine.latitude);
     expect(merged.longitude, mine.longitude);
     expect(merged.memo, theirs.memo);
   });
 
   test(
-    'remote location selection takes its name and coordinate pair together',
+    'remote location selection takes its name, alias and coordinate pair together',
     () {
       final mine = _record(location: '부산', photos: [_photo]);
-      final theirs = _record(location: '인천', latitude: 37.5, longitude: 126.6);
+      final theirs = _record(
+        location: '인천',
+        locationAlias: '서쪽 방파제',
+        latitude: 37.5,
+        longitude: 126.6,
+      );
       final merged = _conflict(
         owner,
         mine,
@@ -114,14 +121,25 @@ void main() {
       ).buildMergedRecord({ConflictFieldKey.location});
 
       expect(merged.location, theirs.location);
+      expect(merged.locationAlias, theirs.locationAlias);
       expect(merged.latitude, theirs.latitude);
       expect(merged.longitude, theirs.longitude);
       expect(merged.photos.single.toJson(), _photo.toJson());
     },
   );
 
+  test('changing only the alias appears as a location conflict', () {
+    final mine = _record(locationAlias: '내 포인트');
+    final theirs = _record(locationAlias: '상대 포인트');
+    final conflict = _conflict(owner, mine, theirs);
+
+    expect(conflict.fields.single.key, ConflictFieldKey.location);
+    expect(conflict.fields.single.mineValue, contains('별칭: 내 포인트'));
+    expect(conflict.fields.single.theirsValue, contains('별칭: 상대 포인트'));
+  });
+
   test('selecting a legacy remote location clears both local coordinates', () {
-    final mine = _record();
+    final mine = _record(locationAlias: '예전 포인트');
     final theirs = _record(
       location: '수동 입력 위치',
       latitude: null,
@@ -131,6 +149,7 @@ void main() {
     final merged = conflict.buildMergedRecord({ConflictFieldKey.location});
 
     expect(merged.location, theirs.location);
+    expect(merged.locationAlias, isNull);
     expect(merged.latitude, isNull);
     expect(merged.longitude, isNull);
     expect(conflict.fields.single.theirsValue, theirs.location);
@@ -175,7 +194,11 @@ void main() {
           );
           await records.reloadOwner(owner);
         }
-        final remote = _record(latitude: 37.5, longitude: 126.6);
+        final remote = _record(
+          locationAlias: '서쪽 방파제',
+          latitude: 37.5,
+          longitude: 126.6,
+        );
 
         final result = await records.applyRemoteRange(
           ownerKey: owner,
@@ -192,10 +215,12 @@ void main() {
 
         expect(result.applied, isTrue);
         final restored = records.getRecordById(local.id)!;
+        expect(restored.locationAlias, remote.locationAlias);
         expect(restored.latitude, remote.latitude);
         expect(restored.longitude, remote.longitude);
         expect(restored.photos.single.toJson(), _photo.toJson());
         final durable = (await store.readRecordForOwner(owner, local.id))!;
+        expect(durable.locationAlias, remote.locationAlias);
         expect(durable.latitude, remote.latitude);
         expect(durable.longitude, remote.longitude);
       },
@@ -206,9 +231,10 @@ void main() {
     test(
       'useTheirs preserves local photos and ${hasRemoteCoordinates ? 'adopts' : 'clears'} coordinates',
       () async {
-        final local = _record(photos: [_photo]);
+        final local = _record(locationAlias: '내 포인트', photos: [_photo]);
         final remote = _record(
           location: '상대 위치',
+          locationAlias: hasRemoteCoordinates ? '상대 포인트' : null,
           latitude: hasRemoteCoordinates ? 37.5 : null,
           longitude: hasRemoteCoordinates ? 126.6 : null,
         );
@@ -223,6 +249,7 @@ void main() {
 
         final resolved = records.getRecordById(local.id)!;
         expect(resolved.location, remote.location);
+        expect(resolved.locationAlias, remote.locationAlias);
         expect(resolved.latitude, remote.latitude);
         expect(resolved.longitude, remote.longitude);
         expect(resolved.photos.single.toJson(), _photo.toJson());
@@ -235,10 +262,15 @@ void main() {
   }
 
   test(
-    'manual location merge persists the chosen pair in its new Outbox payload',
+    'manual location merge persists the chosen location in its new Outbox payload',
     () async {
-      final local = _record(photos: [_photo]);
-      final remote = _record(location: '인천', latitude: 37.5, longitude: 126.6);
+      final local = _record(locationAlias: '내 포인트', photos: [_photo]);
+      final remote = _record(
+        location: '인천',
+        locationAlias: '서쪽 방파제',
+        latitude: 37.5,
+        longitude: 126.6,
+      );
       await seed(local);
       final conflict = _conflict(owner, local, remote);
       await conflicts.recordDetectedConflict(conflict);
@@ -249,6 +281,7 @@ void main() {
       final payload = outbox.getAllItems().single.payload!;
       final queued = FishingRecord.fromJson(payload);
       expect(queued.location, remote.location);
+      expect(queued.locationAlias, remote.locationAlias);
       expect(queued.latitude, remote.latitude);
       expect(queued.longitude, remote.longitude);
       expect(queued.photos.single.toJson(), _photo.toJson());
@@ -264,6 +297,7 @@ const _photo = RecordPhoto(
 
 FishingRecord _record({
   String location = '부산',
+  String? locationAlias,
   double? latitude = 35.1,
   double? longitude = 129.1,
   String? memo,
@@ -271,6 +305,7 @@ FishingRecord _record({
 }) => FishingRecord(
   id: 'coordinate-record',
   location: location,
+  locationAlias: locationAlias,
   latitude: latitude,
   longitude: longitude,
   startAt: DateTime(2026, 11, 1, 8),

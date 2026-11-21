@@ -10,7 +10,7 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String databaseName = 'fishing_calendar.db';
-  static const int databaseVersion = 6;
+  static const int databaseVersion = 7;
 
   static const String localMetadataTable = 'local_metadata';
   static const String fishingRecordsTable = 'fishing_records';
@@ -101,6 +101,7 @@ class AppDatabase {
         owner_key TEXT NOT NULL,
         record_id TEXT NOT NULL,
         location TEXT NOT NULL,
+        location_alias TEXT,
         $_latitudeColumnSql,
         $_longitudeColumnSql,
         start_at TEXT NOT NULL,
@@ -313,7 +314,7 @@ class AppDatabase {
         ''');
       }
     }
-    if (oldVersion < 6) {
+    if (oldVersion < 7) {
       final columns = await database.rawQuery(
         'PRAGMA table_info($fishingRecordsTable)',
       );
@@ -322,14 +323,19 @@ class AppDatabase {
       // preserve all existing records and their dependent rows in place.
       if (columns.isNotEmpty) {
         final names = columns.map((column) => column['name']).toSet();
-        if (!names.contains('latitude')) {
+        if (oldVersion < 6 && !names.contains('latitude')) {
           await database.execute(
             'ALTER TABLE $fishingRecordsTable ADD COLUMN $_latitudeColumnSql',
           );
         }
-        if (!names.contains('longitude')) {
+        if (oldVersion < 6 && !names.contains('longitude')) {
           await database.execute(
             'ALTER TABLE $fishingRecordsTable ADD COLUMN $_longitudeColumnSql',
+          );
+        }
+        if (!names.contains('location_alias')) {
+          await database.execute(
+            'ALTER TABLE $fishingRecordsTable ADD COLUMN location_alias TEXT',
           );
         }
       }

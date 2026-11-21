@@ -1,6 +1,7 @@
 class FishingRecord {
   final String id;
   final String location;
+  final String? locationAlias;
 
   /// Optional WGS84 coordinates. Both values are absent for text-only places.
   final double? latitude;
@@ -21,6 +22,7 @@ class FishingRecord {
   FishingRecord({
     required this.id,
     required this.location,
+    this.locationAlias,
     this.latitude,
     this.longitude,
     required this.startAt,
@@ -38,10 +40,17 @@ class FishingRecord {
          photos.isNotEmpty ? photos : _legacyPhotos(photoPaths),
        );
 
+  String get locationDisplayName {
+    final alias = locationAlias;
+    if (alias == null || alias == location) return location;
+    return '$alias ($location)';
+  }
+
   factory FishingRecord.fromJson(Map<String, dynamic> json) {
     return FishingRecord(
       id: json['id'] as String,
       location: json['location'] as String,
+      locationAlias: json['locationAlias'] as String?,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       startAt: DateTime.parse(json['startAt'] as String),
@@ -66,6 +75,7 @@ class FishingRecord {
     return {
       'id': id,
       'location': location,
+      if (locationAlias != null) 'locationAlias': locationAlias,
       // Omit absent coordinates to preserve existing durable payloads.
       if (latitude != null || longitude != null) ...{
         'latitude': latitude,

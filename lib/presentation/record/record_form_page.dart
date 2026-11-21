@@ -16,6 +16,8 @@ import '../../data/photos/record_photo_file_store.dart';
 import '../../data/photos/record_photo_file_store_utils.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
+import '../../data/services/network_status_service.dart';
+import '../../data/services/record_location_conditions_service.dart';
 import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_photo_cleanup_service.dart';
 import '../../data/services/record_sync_service.dart';
@@ -25,6 +27,7 @@ import '../../data/tides/tide_station_catalog.dart';
 import '../../data/water_temperature/water_temperature_models.dart';
 import '../auth/auth_access_guard.dart';
 import '../common/top_card_notification.dart';
+import 'record_location_search_page.dart';
 import 'record_photo_thumbnail.dart';
 import 'record_photo_viewer.dart';
 
@@ -48,6 +51,7 @@ class RecordFormPage extends StatefulWidget {
   final HistoricalWaterTemperatureObservation?
   initialHistoricalWaterTemperature;
   final bool allowAutomaticWaterTemperature;
+  final RecordLocationConditionsService locationConditionsService;
 
   const RecordFormPage({
     super.key,
@@ -68,6 +72,7 @@ class RecordFormPage extends StatefulWidget {
     this.initialHistoricalWeather,
     this.initialHistoricalWaterTemperature,
     this.allowAutomaticWaterTemperature = true,
+    this.locationConditionsService = RecordLocationConditionsService.instance,
   });
 
   @override
@@ -78,9 +83,17 @@ class _RecordFormPageState extends State<RecordFormPage> {
   bool get isEditMode => widget.editingRecord != null;
 
   final locationController = TextEditingController();
+  final locationAliasController = TextEditingController();
   String _coordinateLocation = '';
   double? _sourceLatitude;
   double? _sourceLongitude;
+  bool _isChoosingLocation = false;
+  MapLocation? _searchedLocation;
+  Object? _locationConditionsRequest;
+  bool _loadingLocationConditions = false;
+  bool _locationConditionsUnavailable = false;
+  bool _applyingLocationConditions = false;
+  final _locationAutoFields = <TextEditingController>{};
 
   // Coordinates belong to the place selected on the map or the loaded record.
   // Renaming a place cannot silently attach that place's old coordinates.
@@ -223,6 +236,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   Iterable<TextEditingController> get _textControllers => [
     locationController,
+    locationAliasController,
     tideController,
     weatherController,
     airTemperatureController,
@@ -258,21 +272,30 @@ class _RecordFormPageState extends State<RecordFormPage> {
   void _handleDraftChange() {
     if (!mounted ||
         _draftBaseline == null ||
+        _applyingLocationConditions ||
         _reconcilingWeather ||
         _reconcilingTide ||
         _reconcilingWaterTemperature) {
       return;
     }
-    final clearedForecast = _reconcileWeatherPrefill();
-    final historicalWeatherChanged = _reconcileHistoricalWeatherPrefill();
-    final tideNameChanged = _reconcileTidePrefill();
-    final waterTemperatureChanged = _reconcileWaterTemperaturePrefill();
+    var conditionsChanged = false;
+    if (_searchedLocation == null) {
+      final clearedForecast = _reconcileWeatherPrefill();
+      final historicalWeatherChanged = _reconcileHistoricalWeatherPrefill();
+      final tideNameChanged = _reconcileTidePrefill();
+      final waterTemperatureChanged = _reconcileWaterTemperaturePrefill();
+      conditionsChanged =
+          clearedForecast ||
+          historicalWeatherChanged ||
+          tideNameChanged ||
+          waterTemperatureChanged;
+    } else if (!_matchesCoordinateLocation &&
+        _locationConditionsRequest != null) {
+      _resetLocationConditions();
+      conditionsChanged = true;
+    }
     final changed = _captureDraft() != _draftBaseline;
-    if (changed != _hasUnsavedChanges ||
-        clearedForecast ||
-        historicalWeatherChanged ||
-        tideNameChanged ||
-        waterTemperatureChanged) {
+    if (changed != _hasUnsavedChanges || conditionsChanged) {
       setState(() {
         _hasUnsavedChanges = changed;
       });
@@ -321,22 +344,19 @@ class _RecordFormPageState extends State<RecordFormPage> {
           sameCoordinates &&
           original.location.name != input.location;
       if (!renamedOriginal) {
-        final nearby = original != null && sameCoordinates
-            ? [original.forecast.station]
-            : TideStationCatalog().nearby(
+        _calculatedTideName = original != null && sameCoordinates
+            ? TideName.calculate(
+                day: input.day,
+                station: original.forecast.station,
+              )
+            : _nearbyTideName(
                 MapLocation(
                   name: input.location,
                   latitude: latitude,
                   longitude: longitude,
                 ),
-                limit: 1,
+                input.day,
               );
-        if (nearby.isNotEmpty) {
-          _calculatedTideName = TideName.calculate(
-            day: input.day,
-            station: nearby.first,
-          );
-        }
       }
     }
 
@@ -349,6 +369,13 @@ class _RecordFormPageState extends State<RecordFormPage> {
       }
     }
     return true;
+  }
+
+  TideName? _nearbyTideName(MapLocation location, TideDay day) {
+    final stations = TideStationCatalog().nearby(location, limit: 1);
+    return stations.isEmpty
+        ? null
+        : TideName.calculate(day: day, station: stations.first);
   }
 
   bool _reconcileWeatherPrefill() {
@@ -466,6 +493,232 @@ class _RecordFormPageState extends State<RecordFormPage> {
     return true;
   }
 
+  bool get _canSearchLocation =>
+      !_isChoosingLocation &&
+      !_isSaving &&
+      !_isPreparingEdit &&
+      !isPickingPhoto &&
+      !_isChoosingPhotoSource &&
+      !_isConfirmingDiscard &&
+      !_isConfirmingReload &&
+      _isEditingSessionCurrent &&
+      _editConflictReason == null &&
+      _editLoadError == null;
+
+  Future<void> _searchLocation() async {
+    if (!_canSearchLocation) return;
+    FocusScope.of(context).unfocus();
+    final name = locationController.text.trim();
+    final validCoordinates =
+        FishingRecordValidator.validateCoordinates(_latitude, _longitude) ==
+        null;
+    final initialLocation =
+        name.isNotEmpty &&
+            name.length <= FishingRecordValidator.maxLocationLength
+        ? MapLocation(
+            name: name,
+            latitude: validCoordinates ? _latitude : null,
+            longitude: validCoordinates ? _longitude : null,
+          )
+        : null;
+    setState(() => _isChoosingLocation = true);
+    try {
+      final selected = await Navigator.of(context).push<MapLocation>(
+        MaterialPageRoute(
+          builder: (_) =>
+              RecordLocationSearchPage(initialLocation: initialLocation),
+        ),
+      );
+      if (!mounted || selected == null) return;
+      if (!_isEditingSessionCurrent ||
+          _editConflictReason != null ||
+          _editLoadError != null ||
+          _isSaving ||
+          _isPreparingEdit ||
+          isPickingPhoto) {
+        showMessage('기록 상태가 변경되었습니다. 기록 정보를 확인한 뒤 위치를 다시 선택해 주세요.');
+        return;
+      }
+      if (!selected.hasCoordinates) {
+        showMessage('좌표가 있는 검색 결과를 선택해 주세요.');
+        return;
+      }
+      final sameLocation =
+          selected.name == locationController.text.trim() &&
+          selected.latitude == _latitude &&
+          selected.longitude == _longitude;
+      if (sameLocation &&
+          _locationConditionsRequest != null &&
+          !_locationConditionsUnavailable) {
+        return;
+      }
+      if (_searchedLocation == null && !isEditMode) {
+        _locationAutoFields.addAll([
+          if (_automaticWeather || _automaticHistoricalWeather)
+            weatherController,
+          if (_automaticAirTemperature || _automaticHistoricalAirTemperature)
+            airTemperatureController,
+          if (_automaticWaterTemperature) waterTemperatureController,
+          if (!_tideManuallyEdited && _calculatedTideName != null)
+            tideController,
+        ]);
+      }
+      _resetLocationConditions(clearValues: !sameLocation);
+      _searchedLocation = selected;
+      _coordinateLocation = selected.name;
+      _sourceLatitude = selected.latitude;
+      _sourceLongitude = selected.longitude;
+      locationController.value = TextEditingValue(
+        text: selected.name,
+        selection: TextSelection.collapsed(offset: selected.name.length),
+      );
+      // Coordinates can change even when the visible name stays the same.
+      _handleDraftChange();
+      unawaited(_loadLocationConditions(selected));
+    } on Object {
+      if (mounted) {
+        showMessage(
+          '위치 검색을 열지 못했습니다. 다시 시도하거나 위치를 직접 입력해 주세요.',
+          type: TopCardNotificationType.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isChoosingLocation = false);
+    }
+  }
+
+  void _resetLocationConditions({bool clearValues = true}) {
+    _locationConditionsRequest = null;
+    _loadingLocationConditions = false;
+    _locationConditionsUnavailable = false;
+    if (clearValues) _clearLocationAutoFields(_locationAutoFields.toList());
+  }
+
+  void _clearLocationAutoFields(Iterable<TextEditingController> fields) {
+    _applyingLocationConditions = true;
+    try {
+      for (final field in fields) {
+        if (_locationAutoFields.remove(field)) field.clear();
+      }
+    } finally {
+      _applyingLocationConditions = false;
+    }
+  }
+
+  void _applyLocationConditions(Map<TextEditingController, String?> values) {
+    _applyingLocationConditions = true;
+    try {
+      for (final entry in values.entries) {
+        final value = entry.value;
+        if (value == null) continue;
+        _locationAutoFields.add(entry.key);
+        if (entry.key.text != value) entry.key.text = value;
+      }
+    } finally {
+      _applyingLocationConditions = false;
+    }
+    _handleDraftChange();
+  }
+
+  Future<void> _loadLocationConditions(MapLocation location) async {
+    if (!_isEditingSessionCurrent || _editConflictReason != null) return;
+    final needsWeather =
+        !_weatherManuallyEdited || !_airTemperatureManuallyEdited;
+    final needsMarine =
+        !_tideManuallyEdited || !_waterTemperatureManuallyEdited;
+    if (!needsWeather && !needsMarine) return;
+
+    final request = Object();
+    final requestedAt = startAt;
+    final offline = NetworkStatusService.instance.isDisconnected;
+    setState(() {
+      _locationConditionsRequest = request;
+      _locationConditionsUnavailable = offline;
+      _loadingLocationConditions = !offline;
+    });
+    if (offline) return;
+
+    bool isCurrent() =>
+        mounted &&
+        identical(_locationConditionsRequest, request) &&
+        _matchesCoordinateLocation &&
+        startAt == requestedAt &&
+        _isEditingSessionCurrent &&
+        _editConflictReason == null;
+
+    final results = await Future.wait([
+      if (needsWeather) _loadLocationWeather(location, requestedAt, isCurrent),
+      if (needsMarine)
+        _loadLocationMarineData(location, requestedAt, isCurrent),
+    ]);
+    if (!isCurrent()) return;
+    setState(() {
+      _loadingLocationConditions = false;
+      _locationConditionsUnavailable = results.contains(false);
+    });
+  }
+
+  Future<bool> _loadLocationWeather(
+    MapLocation location,
+    DateTime requestedAt,
+    bool Function() isCurrent,
+  ) async {
+    try {
+      final weather = await widget.locationConditionsService.fetchWeather(
+        location,
+        requestedAt,
+      );
+      if (!isCurrent()) return false;
+      _applyLocationConditions({
+        if (!_weatherManuallyEdited) weatherController: weather?.weather,
+        if (!_airTemperatureManuallyEdited)
+          airTemperatureController: weather?.airTemperature?.toString(),
+      });
+      return weatherController.text.trim().isNotEmpty &&
+          airTemperatureController.text.trim().isNotEmpty;
+    } on Object {
+      return false;
+    }
+  }
+
+  Future<bool> _loadLocationMarineData(
+    MapLocation location,
+    DateTime requestedAt,
+    bool Function() isCurrent,
+  ) async {
+    try {
+      final service = widget.locationConditionsService;
+      final marine = await service.isMarine(location);
+      if (!isCurrent()) return false;
+      if (!marine) {
+        _clearLocationAutoFields([tideController, waterTemperatureController]);
+        _handleDraftChange();
+        return true;
+      }
+      if (!_tideManuallyEdited) {
+        final tide = _nearbyTideName(
+          location,
+          TideDay.fromInstant(requestedAt),
+        );
+        _applyLocationConditions({tideController: tide?.label});
+      }
+      if (_waterTemperatureManuallyEdited) return true;
+      final water = await service.fetchMarineWaterTemperature(
+        location,
+        requestedAt,
+      );
+      if (!isCurrent()) return false;
+      if (!_waterTemperatureManuallyEdited) {
+        _applyLocationConditions({
+          waterTemperatureController: water?.toString(),
+        });
+      }
+      return _waterTemperatureManuallyEdited || water != null;
+    } on Object {
+      return false;
+    }
+  }
+
   Future<void> _requestExit() async {
     if (_isSaving) {
       showMessage(
@@ -474,7 +727,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       );
       return;
     }
-    if (_isPreparingEdit || isPickingPhoto) {
+    if (_isPreparingEdit || isPickingPhoto || _isChoosingLocation) {
       showMessage(
         '기록 정보를 처리하는 중입니다. 잠시만 기다려 주세요.',
         type: TopCardNotificationType.info,
@@ -560,13 +813,17 @@ class _RecordFormPageState extends State<RecordFormPage> {
       }
     }
     if (reason != null && reason != _editConflictReason) {
-      setState(() => _editConflictReason = reason);
+      setState(() {
+        _editConflictReason = reason;
+        _resetLocationConditions(clearValues: false);
+      });
     }
   }
 
   Future<void> _reloadLatestRecord() async {
     if (_isPreparingEdit ||
         _isSaving ||
+        _isChoosingLocation ||
         isPickingPhoto ||
         _isConfirmingDiscard ||
         _isConfirmingReload) {
@@ -641,14 +898,23 @@ class _RecordFormPageState extends State<RecordFormPage> {
   }
 
   void _initializeEditingRecord(FishingRecord record) {
+    _resetLocationConditions(clearValues: false);
+    _locationAutoFields.clear();
+    _searchedLocation = null;
     _coordinateLocation = record.location.trim();
     _sourceLatitude = record.latitude;
     _sourceLongitude = record.longitude;
     locationController.text = record.location;
+    locationAliasController.text = record.locationAlias ?? '';
     tideController.text = record.tide ?? '';
     weatherController.text = record.weather ?? '';
     airTemperatureController.text = record.airTemperature?.toString() ?? '';
     waterTemperatureController.text = record.waterTemperature?.toString() ?? '';
+    _tideManuallyEdited = tideController.text.isNotEmpty;
+    _weatherManuallyEdited = weatherController.text.isNotEmpty;
+    _airTemperatureManuallyEdited = airTemperatureController.text.isNotEmpty;
+    _waterTemperatureManuallyEdited =
+        waterTemperatureController.text.isNotEmpty;
     memoController.text = record.memo ?? '';
 
     startAt = record.startAt;
@@ -701,6 +967,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
       FishingRecordRepository.instance.removeListener(_handleEditSourceChange);
     }
     locationController.dispose();
+    locationAliasController.dispose();
     tideController.dispose();
     weatherController.dispose();
     airTemperatureController.dispose();
@@ -716,6 +983,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
   Future<void> saveRecord() async {
     if (_isSaving ||
         _isPreparingEdit ||
+        _isChoosingLocation ||
         isPickingPhoto ||
         _isConfirmingDiscard ||
         _isConfirmingReload) {
@@ -766,10 +1034,18 @@ class _RecordFormPageState extends State<RecordFormPage> {
       );
     }
 
-    _reconcileWeatherPrefill();
-    _reconcileHistoricalWeatherPrefill();
-    _reconcileWaterTemperaturePrefill();
+    if (_searchedLocation == null) {
+      _reconcileWeatherPrefill();
+      _reconcileHistoricalWeatherPrefill();
+      _reconcileWaterTemperaturePrefill();
+    } else if (_loadingLocationConditions &&
+        (weatherController.text.trim().isEmpty ||
+            airTemperatureController.text.trim().isEmpty)) {
+      showMessage('외부 정보를 불러오는 중입니다. 잠시 기다리거나 날씨와 기온을 직접 입력해 주세요.');
+      return;
+    }
     final location = locationController.text.trim();
+    final locationAlias = locationAliasController.text.trim();
     final tide = tideController.text.trim();
     final weather = weatherController.text.trim();
     final airTemperature = airTemperatureController.text.trim();
@@ -896,6 +1172,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
     final record = FishingRecord(
       id: recordId,
       location: location,
+      locationAlias: locationAlias.isEmpty ? null : locationAlias,
       latitude: latitude,
       longitude: longitude,
       startAt: startAt,
@@ -956,6 +1233,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   Future<void> pickPhoto() async {
     if (isPickingPhoto ||
+        _isChoosingLocation ||
         _isChoosingPhotoSource ||
         _isSaving ||
         _isPreparingEdit) {
@@ -1197,16 +1475,23 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
     if (pickedTime == null || !mounted) return;
 
+    final updatedStart = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime.hour,
+      pickedTime.minute,
+    );
+    if (startAt.isAtSameMomentAs(updatedStart)) return;
     setState(() {
-      startAt = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
-      );
+      startAt = updatedStart;
+      if (_searchedLocation != null) _resetLocationConditions();
     });
     _handleDraftChange();
+    final searched = _searchedLocation;
+    if (searched != null && _matchesCoordinateLocation) {
+      unawaited(_loadLocationConditions(searched));
+    }
   }
 
   Future<void> pickEndDateTime() async {
@@ -1246,6 +1531,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
           !_hasUnsavedChanges &&
           !_isSaving &&
           !_isPreparingEdit &&
+          !_isChoosingLocation &&
           !isPickingPhoto,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) unawaited(_requestExit());
@@ -1257,7 +1543,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
         ),
         body: SafeArea(
           child: AbsorbPointer(
-            absorbing: _isSaving || _isPreparingEdit,
+            absorbing: _isSaving || _isPreparingEdit || _isChoosingLocation,
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -1288,11 +1574,30 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 const SizedBox(height: 12),
 
                 TextField(
+                  key: const ValueKey('record-location'),
                   controller: locationController,
                   maxLength: FishingRecordValidator.maxLocationLength,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: '위치 *',
                     hintText: '예: 부산 영도구 동삼동',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      key: const ValueKey('record-location-search'),
+                      tooltip: '위치 검색',
+                      onPressed: _canSearchLocation ? _searchLocation : null,
+                      icon: const Icon(Icons.search),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const ValueKey('record-location-alias'),
+                  controller: locationAliasController,
+                  maxLength: FishingRecordValidator.maxLocationAliasLength,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    labelText: '위치 별칭 (선택)',
+                    hintText: '예: 자주 가는 방파제',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -1353,6 +1658,18 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
                 const _SectionTitle(title: '날씨·낚시 정보'),
                 const SizedBox(height: 12),
+                if (_loadingLocationConditions ||
+                    _locationConditionsUnavailable) ...[
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      _loadingLocationConditions
+                          ? '선택한 위치의 외부 정보를 불러오는 중입니다.'
+                          : '일부 정보를 자동으로 입력하지 못했습니다. 필요한 값은 직접 입력해 주세요.',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
                 TextField(
                   key: const ValueKey('record-tide'),
@@ -1360,6 +1677,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   onChanged: (_) {
                     setState(() {
                       _tideManuallyEdited = true;
+                      _locationAutoFields.remove(tideController);
                     });
                   },
                   maxLength: FishingRecordValidator.maxTideLength,
@@ -1377,6 +1695,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   onChanged: (_) {
                     setState(() {
                       _weatherManuallyEdited = true;
+                      _locationAutoFields.remove(weatherController);
                       _automaticWeather = false;
                       _automaticHistoricalWeather = false;
                     });
@@ -1396,6 +1715,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   onChanged: (_) {
                     setState(() {
                       _airTemperatureManuallyEdited = true;
+                      _locationAutoFields.remove(airTemperatureController);
                       _automaticAirTemperature = false;
                       _automaticHistoricalAirTemperature = false;
                     });
@@ -1419,6 +1739,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   onChanged: (_) {
                     setState(() {
                       _waterTemperatureManuallyEdited = true;
+                      _locationAutoFields.remove(waterTemperatureController);
                       _automaticWaterTemperature = false;
                       _automaticHistoricalWaterTemperature = false;
                     });

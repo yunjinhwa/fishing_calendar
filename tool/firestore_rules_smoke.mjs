@@ -1327,6 +1327,52 @@ for (const [label, value] of validCatchBodies) {
   body.writes[0].update.fields.catchesJson = stringValue(value);
   await commit(`validated catches ${label} allowed`, schemaMember.token, body, 200);
 }
+const aliasRecordId = 'schema-location-alias';
+const aliasCreate = mutationCommit({
+  uid: schemaMember.uid, recordId: aliasRecordId, outboxId: aliasRecordId,
+  operationType: 'create', baseVersionNo: 0, resultingVersionNo: 1,
+  latitude: 35, longitude: 129,
+});
+const validAlias = '별'.repeat(100);
+aliasCreate.writes[0].update.fields.locationAlias = stringValue(validAlias);
+aliasCreate.writes[0].update.fields.catchesJson = stringValue(validCatchBodies[1][1]);
+await commit('location alias allowed with coordinates and maximum catches', schemaMember.token, aliasCreate, 200);
+const aliasPath = `/users/${schemaMember.uid}/records/${aliasRecordId}`;
+const aliasResponse = await request(aliasPath, {token: schemaMember.token});
+await expectStatus('location alias record readback', aliasResponse, 200);
+const aliasFields = (await aliasResponse.json()).fields;
+if (aliasFields.locationAlias?.stringValue !== validAlias) {
+  throw new Error('location alias did not round-trip');
+}
+await commit(
+  'location alias can be removed',
+  schemaMember.token,
+  mutationCommit({
+    uid: schemaMember.uid, recordId: aliasRecordId, outboxId: `${aliasRecordId}-clear`,
+    operationType: 'update', baseVersionNo: 1, resultingVersionNo: 2,
+    createdAt: aliasFields.createdAt, latitude: 35, longitude: 129,
+  }),
+  200,
+);
+const clearedAliasResponse = await request(aliasPath, {token: schemaMember.token});
+await expectStatus('cleared location alias record readback', clearedAliasResponse, 200);
+if (Object.hasOwn((await clearedAliasResponse.json()).fields, 'locationAlias')) {
+  throw new Error('cleared location alias is still present');
+}
+for (const [label, alias] of [
+  ['blank', stringValue('  \t')],
+  ['too-long', stringValue('별'.repeat(101))],
+  ['numeric', integerValue(42)],
+  ['null', nullValue()],
+]) {
+  const recordId = `${aliasRecordId}-${label}`;
+  const body = mutationCommit({
+    uid: schemaMember.uid, recordId, outboxId: recordId,
+    operationType: 'create', baseVersionNo: 0, resultingVersionNo: 1,
+  });
+  body.writes[0].update.fields.locationAlias = alias;
+  await commit(`location alias ${label} denied`, schemaMember.token, body, 403);
+}
 const invalidCatchBodies = [
   ['number-item', '[42]'],
   ['string-item', '["fish"]'],

@@ -72,7 +72,9 @@ class ConflictItem {
       localRecord?.summaryTitle ?? remoteRecord?.summaryTitle ?? '삭제된 출조 기록';
 
   String get location =>
-      localRecord?.location ?? remoteRecord?.location ?? '위치 정보 없음';
+      localRecord?.locationDisplayName ??
+      remoteRecord?.locationDisplayName ??
+      '위치 정보 없음';
 
   List<ConflictField> get fields {
     if (localDeleted || remoteDeleted) {
@@ -166,8 +168,20 @@ class ConflictItem {
       ),
     ];
 
+    final locationChanged =
+        (mine.location, mine.locationAlias, mine.latitude, mine.longitude) !=
+        (
+          theirs.location,
+          theirs.locationAlias,
+          theirs.latitude,
+          theirs.longitude,
+        );
     final changed = candidates
-        .where((field) => field.mineValue != field.theirsValue)
+        .where(
+          (field) => field.key == ConflictFieldKey.location
+              ? locationChanged
+              : field.mineValue != field.theirsValue,
+        )
         .toList(growable: false);
     if (changed.isNotEmpty) {
       return changed;
@@ -198,6 +212,11 @@ class ConflictItem {
         ConflictFieldKey.location,
         mine.location,
         theirs.location,
+      ),
+      locationAlias: choose(
+        ConflictFieldKey.location,
+        mine.locationAlias,
+        theirs.locationAlias,
       ),
       latitude: choose(
         ConflictFieldKey.location,
@@ -289,11 +308,13 @@ class ConflictItem {
       value == null ? '-' : '$value$suffix';
 
   static String _formatLocation(FishingRecord record) {
-    if (record.latitude == null && record.longitude == null) {
-      return record.location;
-    }
-    return '${record.location}\n'
-        '위도 ${record.latitude ?? '-'} · 경도 ${record.longitude ?? '-'}';
+    final alias = record.locationAlias;
+    return [
+      record.location,
+      if (alias != null) '별칭: $alias',
+      if (record.latitude != null || record.longitude != null)
+        '위도 ${record.latitude ?? '-'} · 경도 ${record.longitude ?? '-'}',
+    ].join('\n');
   }
 
   static String _formatDateTime(DateTime value) {

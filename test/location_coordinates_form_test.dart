@@ -42,6 +42,7 @@ void main() {
     tester,
   ) async {
     await _openPage(tester, _newForm());
+    await tester.enterText(_field('위치 별칭 (선택)'), '   ');
     await _selectGenre(tester);
 
     await _save(tester);
@@ -49,6 +50,7 @@ void main() {
     expect(find.byType(RecordFormPage), findsNothing);
     final saved = (await store.readRecordsForOwner(auth.dataOwnerKey)).single;
     expect(saved.location, '좌표 테스트 방파제');
+    expect(saved.locationAlias, isNull);
     expect(saved.latitude, isNull);
     expect(saved.longitude, isNull);
     final queued = (await store.readOutboxItemsForOwner(
@@ -56,6 +58,7 @@ void main() {
     )).single;
     expect(queued.payload!.containsKey('latitude'), isFalse);
     expect(queued.payload!.containsKey('longitude'), isFalse);
+    expect(queued.payload!.containsKey('locationAlias'), isFalse);
     expect(tester.takeException(), isNull);
   });
 
@@ -64,11 +67,14 @@ void main() {
   ) async {
     await _openPage(tester, _newForm(latitude: 35.1796, longitude: 129.0756));
     _expectNoCoordinateInputs();
+    await tester.enterText(_field('위치 별칭 (선택)'), '  단골 방파제  ');
     await _selectGenre(tester);
 
     await _save(tester);
 
     final saved = records.getAllRecords().single;
+    expect(saved.location, '좌표 테스트 방파제');
+    expect(saved.locationAlias, '단골 방파제');
     expect(saved.latitude, 35.1796);
     expect(saved.longitude, 129.0756);
     final queued = (await store.readOutboxItemsForOwner(
@@ -76,25 +82,32 @@ void main() {
     )).single;
     expect(queued.payload!['latitude'], 35.1796);
     expect(queued.payload!['longitude'], 129.0756);
+    expect(queued.payload!['locationAlias'], '단골 방파제');
     await tester.pumpWidget(MaterialApp(home: RecordDetailPage(record: saved)));
     await tester.pumpAndSettle();
     expect(find.text('위도 35.1796 · 경도 129.0756'), findsOneWidget);
+    expect(find.text('위치 별칭: 단골 방파제'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
     'editing unrelated fields preserves hidden coordinates and their queue payload',
     (tester) async {
-      final original = _record();
+      final original = _record(locationAlias: '기존 별칭');
       await records.addRecord(original);
       await _openPage(tester, RecordFormPage(editingRecord: original));
       _expectNoCoordinateInputs();
+      expect(
+        tester.widget<TextField>(_field('위치 별칭 (선택)')).controller!.text,
+        '기존 별칭',
+      );
       await tester.ensureVisible(_field('메모'));
       await tester.enterText(_field('메모'), '장소를 유지하고 메모만 수정');
       await _save(tester);
       final edited = records.getRecordById(original.id)!;
       expect(edited.latitude, original.latitude);
       expect(edited.longitude, original.longitude);
+      expect(edited.locationAlias, original.locationAlias);
 
       final latest = (await store.readOutboxItemsForOwner(
         auth.dataOwnerKey,
@@ -104,6 +117,26 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('clearing a location alias preserves the place and coordinates', (
+    tester,
+  ) async {
+    final original = _record(locationAlias: '지울 별칭');
+    await records.addRecord(original);
+    await _openPage(tester, RecordFormPage(editingRecord: original));
+    await tester.enterText(_field('위치 별칭 (선택)'), '');
+    await _save(tester);
+
+    final edited = (await store.readRecordsForOwner(auth.dataOwnerKey)).single;
+    expect(edited.locationAlias, isNull);
+    expect(edited.location, original.location);
+    expect(edited.latitude, original.latitude);
+    expect(edited.longitude, original.longitude);
+    final latest = (await store.readOutboxItemsForOwner(
+      auth.dataOwnerKey,
+    )).last;
+    expect(latest.payload!.containsKey('locationAlias'), isFalse);
+  });
 
   for (final (latitude, longitude, error) in <(double?, double?, String)>[
     (35, null, '위도와 경도를 함께 입력하세요.'),
@@ -258,9 +291,10 @@ void _expectNoCoordinateInputs() {
   expect(find.text('좌표 지우기'), findsNothing);
 }
 
-FishingRecord _record() => FishingRecord(
+FishingRecord _record({String? locationAlias}) => FishingRecord(
   id: 'coordinate-form-edit',
   location: '원래 장소',
+  locationAlias: locationAlias,
   latitude: 35.1796,
   longitude: 129.0756,
   startAt: DateTime(2026, 11, 1, 8),

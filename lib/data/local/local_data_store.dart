@@ -108,6 +108,7 @@ class LocalDataStore {
             FishingRecord(
               id: recordId,
               location: row['location']! as String,
+              locationAlias: row['location_alias'] as String?,
               latitude: (row['latitude'] as num?)?.toDouble(),
               longitude: (row['longitude'] as num?)?.toDouble(),
               startAt: DateTime.parse(row['start_at']! as String),
@@ -176,6 +177,7 @@ class LocalDataStore {
       'owner_key': ownerKey,
       'record_id': record.id,
       'location': record.location,
+      'location_alias': record.locationAlias,
       'latitude': record.latitude,
       'longitude': record.longitude,
       'start_at': record.startAt.toIso8601String(),

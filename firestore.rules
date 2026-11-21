@@ -248,7 +248,7 @@ service cloud.firestore {
     function validActiveRecord(data, uid, recordId) {
       return data.keys().hasOnly([
           'schemaVersion', 'ownerUid', 'recordId', 'recordStatus',
-          'location', 'startAt', 'endAt', 'genreName', 'tide', 'weather',
+          'location', 'locationAlias', 'startAt', 'endAt', 'genreName', 'tide', 'weather',
           'airTemperature', 'waterTemperature', 'catchesJson', 'memo',
           'photoUploadPending', 'versionNo', 'clientModifiedAt',
           'createdAt', 'serverUpdatedAt', 'lastOutboxId',
@@ -271,6 +271,10 @@ service cloud.firestore {
         && data.location.size() > 0
         && data.location.trim().size() > 0
         && data.location.size() <= 200
+        && (!data.keys().hasAny(['locationAlias'])
+          || (data.locationAlias is string
+            && data.locationAlias.trim().size() > 0
+            && data.locationAlias.size() <= 100))
         && data.startAt is timestamp
         && data.endAt is timestamp
         && data.startAt < data.endAt

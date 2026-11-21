@@ -6,7 +6,6 @@ import '../../data/maps/current_location_gateway.dart';
 import '../../data/maps/geolocator_current_location_gateway.dart';
 import '../../data/maps/kakao_map_configuration.dart';
 import '../../data/maps/map_location.dart';
-import '../../data/maps/map_search_gateway.dart';
 import '../../data/maps/open_map_water_service.dart';
 import '../../data/maps/water_area.dart';
 import '../../data/maps/water_area_service.dart';
@@ -29,12 +28,7 @@ import 'map_fallback_page.dart';
 import 'map_selection_controller.dart';
 import 'tide_panel.dart';
 
-typedef MapCanvasBuilder =
-    Widget Function(
-      MapLocation selection,
-      ValueChanged<MapSearchGateway?> onGatewayChanged,
-      void Function(double latitude, double longitude) onPointSelected,
-    );
+export 'kakao_map_canvas.dart' show MapCanvasBuilder;
 
 class MapPage extends StatefulWidget {
   const MapPage({
@@ -692,7 +686,7 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
                 child: const Text('위치 서비스 설정 열기'),
               ),
             const SizedBox(height: 12),
-            _MapCanvasHost(
+            MapCanvasHost(
               key: const ValueKey('map-canvas'),
               isActive: widget.isActive,
               child: SizedBox(
@@ -909,40 +903,6 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
         ),
       ),
     );
-  }
-}
-
-// Search results can move the map outside the viewport. Keep its WebView and
-// in-flight requests alive until the map tab is deactivated.
-class _MapCanvasHost extends StatefulWidget {
-  const _MapCanvasHost({
-    super.key,
-    required this.isActive,
-    required this.child,
-  });
-
-  final bool isActive;
-  final Widget child;
-
-  @override
-  State<_MapCanvasHost> createState() => _MapCanvasHostState();
-}
-
-class _MapCanvasHostState extends State<_MapCanvasHost>
-    with AutomaticKeepAliveClientMixin<_MapCanvasHost> {
-  @override
-  bool get wantKeepAlive => widget.isActive;
-
-  @override
-  void didUpdateWidget(_MapCanvasHost oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.isActive != widget.isActive) updateKeepAlive();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return widget.child;
   }
 }
 

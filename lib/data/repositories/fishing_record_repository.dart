@@ -682,6 +682,7 @@ class FishingRecordRepository extends ChangeNotifier {
     return FishingRecord(
       id: remoteRecord.id,
       location: remoteRecord.location,
+      locationAlias: remoteRecord.locationAlias,
       latitude: remoteRecord.latitude,
       longitude: remoteRecord.longitude,
       startAt: remoteRecord.startAt,
