@@ -14,6 +14,7 @@ import 'package:fishing_build/data/services/network_status_service.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/presentation/calendar/calendar_page.dart';
 import 'package:fishing_build/presentation/calendar/daily_record_list_page.dart';
+import 'package:fishing_build/presentation/map/kakao_map_canvas.dart';
 import 'package:fishing_build/presentation/map/map_page.dart';
 import 'package:fishing_build/presentation/map/map_selection_controller.dart';
 import 'package:fishing_build/presentation/personal_best/personal_best_detail_page.dart';
@@ -137,7 +138,12 @@ void main() {
             .id,
         persisted.id,
       );
-      expect(find.text('위도 35.1796 · 경도 129.0756'), findsOneWidget);
+      final map = tester.widget<KakaoMapCanvas>(
+        find.byKey(const ValueKey('record-detail-location-map')),
+      );
+      expect(map.selection.name, persisted.location);
+      expect(map.selection.latitude, persisted.latitude);
+      expect(map.selection.longitude, persisted.longitude);
 
       // Use default repositories and change listeners, as the real tabs do.
       await tester.pumpWidget(const SizedBox.shrink());
