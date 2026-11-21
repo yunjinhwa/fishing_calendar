@@ -6,6 +6,7 @@ import 'package:fishing_build/data/repositories/conflict_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
+import 'package:fishing_build/presentation/map/kakao_map_canvas.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
 import 'package:flutter/material.dart';
@@ -59,6 +60,10 @@ void main() {
     expect(queued.payload!.containsKey('latitude'), isFalse);
     expect(queued.payload!.containsKey('longitude'), isFalse);
     expect(queued.payload!.containsKey('locationAlias'), isFalse);
+    await tester.pumpWidget(MaterialApp(home: RecordDetailPage(record: saved)));
+    await tester.pumpAndSettle();
+    expect(find.text(saved.location), findsOneWidget);
+    expect(find.byType(KakaoMapCanvas), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -85,7 +90,16 @@ void main() {
     expect(queued.payload!['locationAlias'], '단골 방파제');
     await tester.pumpWidget(MaterialApp(home: RecordDetailPage(record: saved)));
     await tester.pumpAndSettle();
-    expect(find.text('위도 35.1796 · 경도 129.0756'), findsOneWidget);
+    final map = tester.widget<KakaoMapCanvas>(
+      find.byKey(const ValueKey('record-detail-location-map')),
+    );
+    expect(map.selection.name, saved.location);
+    expect(map.selection.latitude, 35.1796);
+    expect(map.selection.longitude, 129.0756);
+    expect(find.text('지도를 표시할 수 없습니다.'), findsOneWidget);
+    expect(find.textContaining('35.1796'), findsNothing);
+    expect(find.textContaining('129.0756'), findsNothing);
+    expect(find.text(saved.location), findsOneWidget);
     expect(find.text('위치 별칭: 단골 방파제'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/maps/kakao_map_configuration.dart';
+import '../../data/maps/map_location.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/models/record_cache_policy.dart';
 import '../../data/models/record_edit_snapshot.dart';
@@ -11,6 +13,7 @@ import '../../data/services/record_mutation_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../common/top_card_notification.dart';
+import '../map/kakao_map_canvas.dart';
 import 'record_form_page.dart';
 import 'record_photo_thumbnail.dart';
 import 'record_photo_viewer.dart';
@@ -201,8 +204,26 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
     unawaited(Navigator.of(context).maybePop());
   }
 
+  MapLocation? _locationForMap() {
+    if (_unavailableReason != null ||
+        record.latitude == null ||
+        record.longitude == null) {
+      return null;
+    }
+    try {
+      return MapLocation(
+        name: record.location,
+        latitude: record.latitude,
+        longitude: record.longitude,
+      );
+    } on ArgumentError {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final mapLocation = _locationForMap();
     return PopScope<bool>(
       canPop: !_isPreparingDelete && !_isDeleting,
       onPopInvokedWithResult: (didPop, result) {
@@ -296,12 +317,16 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],
-                    if (record.latitude != null &&
-                        record.longitude != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '위도 ${record.latitude} · 경도 ${record.longitude}',
-                        style: Theme.of(context).textTheme.bodySmall,
+                    if (mapLocation != null) ...[
+                      const SizedBox(height: 12),
+                      MapCanvasHost(
+                        key: const ValueKey('record-detail-map-host'),
+                        isActive: true,
+                        child: KakaoMapCanvas.preview(
+                          key: const ValueKey('record-detail-location-map'),
+                          configuration: const KakaoMapConfiguration(),
+                          selection: mapLocation,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 24),

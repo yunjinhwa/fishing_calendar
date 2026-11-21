@@ -52,16 +52,27 @@ class KakaoMapCanvas extends StatefulWidget {
     super.key,
     required this.configuration,
     required this.selection,
-    required this.onGatewayChanged,
-    required this.onPointSelected,
+    required ValueChanged<MapSearchGateway?> this.onGatewayChanged,
+    required void Function(double latitude, double longitude)
+    this.onPointSelected,
     this.recenterRequest = 0,
   });
 
+  const KakaoMapCanvas.preview({
+    super.key,
+    required this.configuration,
+    required this.selection,
+  }) : onGatewayChanged = null,
+       onPointSelected = null,
+       recenterRequest = 0;
+
   final KakaoMapConfiguration configuration;
   final MapLocation selection;
-  final ValueChanged<MapSearchGateway?> onGatewayChanged;
-  final void Function(double latitude, double longitude) onPointSelected;
+  final ValueChanged<MapSearchGateway?>? onGatewayChanged;
+  final void Function(double latitude, double longitude)? onPointSelected;
   final int recenterRequest;
+
+  bool get _isPreview => onGatewayChanged == null;
 
   @override
   State<KakaoMapCanvas> createState() => _KakaoMapCanvasState();
@@ -90,7 +101,8 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.configuration.javascriptKey !=
             widget.configuration.javascriptKey ||
-        oldWidget.configuration.baseUrl != widget.configuration.baseUrl) {
+        oldWidget.configuration.baseUrl != widget.configuration.baseUrl ||
+        oldWidget._isPreview != widget._isPreview) {
       _prepareAttempt();
       _notifyGateway(null);
     } else if (oldWidget.recenterRequest != widget.recenterRequest) {
@@ -117,10 +129,11 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
   }
 
   void _notifyGateway(MapSearchGateway? gateway) {
+    if (widget._isPreview) return;
     final attempt = _attempt;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || attempt != _attempt) return;
-      widget.onGatewayChanged(gateway);
+      widget.onGatewayChanged?.call(gateway);
     });
     WidgetsBinding.instance.ensureVisualUpdate();
   }
@@ -152,12 +165,13 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
   void _onMapCreated(KakaoMapController controller, int attempt) {
     if (!mounted || _failed || attempt != _attempt) return;
     _readinessTimer?.cancel();
-    _gateway?.dispose();
-    final gateway = KakaoMapSearchGateway(controller);
-    _gateway = gateway;
-    _mapController = controller;
+    if (!widget._isPreview) {
+      _gateway?.dispose();
+      _gateway = KakaoMapSearchGateway(controller);
+      _mapController = controller;
+    }
     setState(() => _ready = true);
-    _notifyGateway(gateway);
+    _notifyGateway(_gateway);
   }
 
   void _retry() {
@@ -177,50 +191,68 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
   @override
   Widget build(BuildContext context) {
     final selection = widget.selection;
+    final isPreview = widget._isPreview;
     final center = selection.hasCoordinates
         ? LatLng(selection.latitude!, selection.longitude!)
         : LatLng(35.1796, 129.0756);
     final attempt = _attempt;
     return SizedBox(
-      height: 280,
+      height: isPreview ? 200 : 280,
       width: double.infinity,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: !_canCreateMap
-            ? const _MapNotice(message: '현재 지도를 표시할 수 없습니다. 장소를 직접 입력해 주세요.')
+            ? isPreview
+                  ? const _MapNotice(message: '지도를 표시할 수 없습니다.')
+                  : const _MapNotice(
+                      message: '현재 지도를 표시할 수 없습니다. 장소를 직접 입력해 주세요.',
+                    )
             : _failed
             ? _MapNotice(
-                message: '지도를 불러오지 못했습니다. 인터넷 연결을 확인하거나 장소를 직접 입력해 주세요.',
+                message: isPreview
+                    ? '지도를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'
+                    : '지도를 불러오지 못했습니다. 인터넷 연결을 확인하거나 장소를 직접 입력해 주세요.',
                 onRetry: _retry,
               )
             : Stack(
                 children: [
                   Positioned.fill(
-                    child: KakaoMap(
-                      key: ValueKey(attempt),
-                      center: center,
-                      currentLevel: 4,
-                      minLevel: 1,
-                      maxLevel: 14,
-                      zoomControl: true,
-                      libraries: {KakaoMapLibrary.services},
-                      // Gestures begun inside the map should reach its WebView
-                      // instead of scrolling the surrounding page.
-                      gestureRecognizers: {
-                        const Factory<OneSequenceGestureRecognizer>(
-                          EagerGestureRecognizer.new,
-                        ),
-                      },
-                      onMapCreated: (controller) =>
-                          _onMapCreated(controller, attempt),
-                      onMapTap: (point) {
-                        if (!_ready || attempt != _attempt) return;
-                        widget.onPointSelected(point.latitude, point.longitude);
-                      },
-                      markers: [
-                        if (selection.hasCoordinates)
-                          Marker(markerId: 'selected-location', latLng: center),
-                      ],
+                    child: IgnorePointer(
+                      ignoring: isPreview,
+                      child: KakaoMap(
+                        key: ValueKey(attempt),
+                        center: center,
+                        currentLevel: 4,
+                        minLevel: 1,
+                        maxLevel: 14,
+                        zoomControl: !isPreview,
+                        libraries: {if (!isPreview) KakaoMapLibrary.services},
+                        // Let a preview's surrounding page handle scrolling.
+                        gestureRecognizers: {
+                          if (!isPreview)
+                            const Factory<OneSequenceGestureRecognizer>(
+                              EagerGestureRecognizer.new,
+                            ),
+                        },
+                        onMapCreated: (controller) =>
+                            _onMapCreated(controller, attempt),
+                        onMapTap: isPreview
+                            ? null
+                            : (point) {
+                                if (!_ready || attempt != _attempt) return;
+                                widget.onPointSelected?.call(
+                                  point.latitude,
+                                  point.longitude,
+                                );
+                              },
+                        markers: [
+                          if (selection.hasCoordinates)
+                            Marker(
+                              markerId: 'selected-location',
+                              latLng: center,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                   if (!_ready)
