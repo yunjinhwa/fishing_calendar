@@ -56,35 +56,20 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
         appBar: AppBar(title: const Text('오프라인 모드')),
         body: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(16),
             children: [
-              NetworkStatusSummary(service: networkStatus),
+              NetworkStatusSummary(service: networkStatus, compact: true),
               const SizedBox(height: 12),
-
-              Text(
-                '유료 회원은 오프라인에서 캐시된 기록만 조회할 수 있고, '
-                '새 기록은 대기열에 저장된 뒤 온라인 복구 시 서버에 업로드됩니다.',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
 
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.pending_actions_outlined),
                   title: const Text('업로드 대기'),
-                  subtitle: const Text('서버 반영이 끝나지 않은 항목 수입니다.'),
-                  trailing: Text('$pendingCount건'),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              const Card(
-                child: ListTile(
-                  leading: Icon(Icons.cached_outlined),
-                  title: Text('캐시 기록'),
-                  subtitle: Text('최근 캐시된 기록만 조회 가능합니다.'),
-                  trailing: Icon(Icons.cloud_queue),
+                  subtitle: const Text('인터넷에 연결되면 대기 중인 변경 사항을 서버에 반영합니다.'),
+                  trailing: Text(
+                    '$pendingCount건',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -134,7 +119,7 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
               ),
               const SizedBox(height: 12),
 
-              OutlinedButton.icon(
+              FilledButton.tonalIcon(
                 onPressed: () async {
                   final allowed = await requireOutboxAccess(
                     context,
@@ -156,7 +141,19 @@ class _OfflinePaidPageState extends State<OfflinePaidPage> {
                 icon: const Icon(Icons.queue_outlined),
                 label: const Text('대기열 보기'),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
+
+              Card(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                child: const ListTile(
+                  leading: Icon(Icons.cached_outlined),
+                  title: Text('캐시 기록'),
+                  subtitle: Text(
+                    '유료 회원은 오프라인에서 캐시된 기록만 확인할 수 있습니다. '
+                    '연결 전에는 일부 기록이 최신 상태가 아닐 수 있습니다.',
+                  ),
+                ),
+              ),
 
               NetworkStatusRetryButton(service: networkStatus),
             ],

@@ -98,6 +98,7 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final conflicts = ConflictRepository.instance.getPendingItems();
     final unresolvedCount = ConflictRepository.instance.unresolvedCount;
     final syncService = RecordSyncService.instance;
@@ -119,21 +120,7 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
       message: '동기화와 충돌 관리는 유료 플랜에서 사용할 수 있습니다.',
       migrationDestinationBuilder: (_) => const OutboxPage(),
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('동기화/충돌 관리'),
-          actions: [
-            IconButton(
-              onPressed: isSyncing ? null : _syncNow,
-              tooltip: '지금 동기화',
-              icon: isSyncing
-                  ? const SizedBox.square(
-                      dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.sync),
-            ),
-          ],
-        ),
+        appBar: AppBar(title: const Text('동기화/충돌 관리')),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(16),
@@ -142,28 +129,53 @@ class _SyncConflictPageState extends State<SyncConflictPage> {
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        syncStatus.icon,
-                        size: 48,
-                        color: Theme.of(context).colorScheme.primary,
+                      Text(
+                        '동기화 상태',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const SizedBox(height: 12),
-                      Text(
-                        syncStatus.title,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            syncStatus.icon,
+                            size: 22,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              syncStatus.title,
+                              style: theme.textTheme.titleSmall,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       Text(
                         syncStatus.detail,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
                 ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: isSyncing ? null : _syncNow,
+                icon: isSyncing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync),
+                label: Text(isSyncing ? '동기화 중' : '지금 동기화'),
               ),
               const SizedBox(height: 16),
 

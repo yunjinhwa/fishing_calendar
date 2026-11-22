@@ -52,14 +52,18 @@ class LocationConditionsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Card(
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
     child: Padding(
       padding: EdgeInsets.all(compact ? 12 : 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('날씨·낚시 정보', style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            '날씨·낚시 정보',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           if (waterAreaSelector != null) ...[
             const SizedBox(height: 12),
             waterAreaSelector!,
@@ -97,7 +101,12 @@ class LocationConditionsCard extends StatelessWidget {
             const SizedBox(height: 16),
             const Divider(height: 1),
             const SizedBox(height: 16),
-            Text('만조·간조', style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              '만조·간조',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
             if (tideControls == null && tideForecast != null)
               Text(
                 '${tideForecast!.day.label} · ${tideForecast!.station.name}',

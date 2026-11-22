@@ -22,25 +22,16 @@ class OfflineFreePage extends StatelessWidget {
       appBar: AppBar(title: const Text('오프라인 모드')),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(16),
           children: [
-            NetworkStatusSummary(service: networkStatus),
+            NetworkStatusSummary(service: networkStatus, compact: true),
             const SizedBox(height: 12),
-
-            Text(
-              '무료 회원은 이 기기에 저장된 로컬 기록을 작성하고 조회할 수 있습니다. '
-              '단, 날씨/물때/수온 같은 외부 데이터는 제공되지 않습니다.',
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
 
             const Card(
               child: ListTile(
                 leading: Icon(Icons.save_outlined),
                 title: Text('이 기기에 저장됨'),
-                subtitle: Text('로컬 기록은 현재 기기에만 보관됩니다.'),
-                trailing: Icon(Icons.phone_android),
+                subtitle: Text('무료 회원은 이 기기에 저장된 로컬 기록을 작성하고 조회할 수 있습니다.'),
               ),
             ),
             const SizedBox(height: 16),
@@ -87,7 +78,15 @@ class OfflineFreePage extends StatelessWidget {
               icon: const Icon(Icons.calendar_month_outlined),
               label: const Text('캘린더 보기'),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
+
+            Card(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              child: const ListTile(
+                leading: Icon(Icons.info_outline),
+                title: Text('오프라인에서는 날씨·물때·수온 정보가 제공되지 않습니다.'),
+              ),
+            ),
 
             NetworkStatusRetryButton(service: networkStatus),
           ],

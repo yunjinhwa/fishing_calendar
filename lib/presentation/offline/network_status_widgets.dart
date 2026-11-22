@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/services/network_status_service.dart';
 import '../common/top_card_notification.dart';
 
 class NetworkStatusSummary extends StatelessWidget {
   final NetworkStatusService service;
   final double iconSize;
+  final bool compact;
 
   const NetworkStatusSummary({
     super.key,
     required this.service,
     this.iconSize = 64,
+    this.compact = false,
   });
 
   @override
@@ -19,21 +22,46 @@ class NetworkStatusSummary extends StatelessWidget {
       animation: service,
       builder: (context, _) {
         final presentation = _presentationFor(context, service);
+        final text = Theme.of(context).textTheme;
+        if (compact) {
+          return Card(
+            color: AppTheme.coolGray,
+            child: ListTile(
+              leading: Icon(presentation.icon, color: presentation.color),
+              title: Text(
+                presentation.title,
+                style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              subtitle: Text(presentation.description),
+            ),
+          );
+        }
         return Column(
           children: [
-            Icon(presentation.icon, size: iconSize, color: presentation.color),
-            const SizedBox(height: 24),
+            DecoratedBox(
+              decoration: const BoxDecoration(
+                color: AppTheme.coolGray,
+                shape: BoxShape.circle,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Icon(
+                  presentation.icon,
+                  size: iconSize,
+                  color: presentation.color,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
             Text(
               presentation.title,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              style: text.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
               presentation.description,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: text.bodyMedium?.copyWith(color: AppTheme.muted),
               textAlign: TextAlign.center,
             ),
           ],

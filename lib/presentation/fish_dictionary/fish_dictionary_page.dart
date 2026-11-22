@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/fish/fish_catalog_service.dart';
 import '../../data/models/fish_species.dart';
 import '../../data/repositories/fish_species_repository.dart';
@@ -250,7 +251,7 @@ class _FishDictionaryPageState extends State<FishDictionaryPage> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: TextField(
                   controller: _searchController,
                   decoration: const InputDecoration(
@@ -360,10 +361,12 @@ class _FishDictionaryPageState extends State<FishDictionaryPage> {
                                   : null;
                             },
                             physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(16),
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                             itemCount: items.length,
                             separatorBuilder: (context, index) =>
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 8),
                             itemBuilder: (context, index) {
                               final fish = items[index];
                               return _FishSpeciesCard(
@@ -480,29 +483,41 @@ class _FishSpeciesCardState extends State<_FishSpeciesCard> {
   @override
   Widget build(BuildContext context) {
     final fish = _fish;
+    final theme = Theme.of(context);
     final summary = [
       fish.categoryLabel,
       if (fish.family.trim().isNotEmpty) fish.family,
       if (fish.scientificName.trim().isNotEmpty) fish.scientificName,
     ].join(' · ');
     return Card(
+      margin: EdgeInsets.zero,
       child: ListTile(
-        leading: SizedBox(
-          width: 56,
-          height: 56,
-          child: FishSpeciesPhoto(
-            fish: fish,
-            height: 56,
-            compact: true,
-            allowNetwork: widget.allowNetwork,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: 60,
+            child: FishSpeciesPhoto(
+              fish: fish,
+              height: 48,
+              compact: true,
+              allowNetwork: widget.allowNetwork,
+            ),
           ),
         ),
         title: Text(
           fish.name,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
         ),
-        subtitle: Text(summary, maxLines: 2, overflow: TextOverflow.ellipsis),
-        trailing: const Icon(Icons.chevron_right),
+        subtitle: Text(
+          summary,
+          style: theme.textTheme.bodySmall?.copyWith(color: AppTheme.muted),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
         onTap: () => widget.onTap(_fish),
       ),
     );
@@ -534,7 +549,7 @@ class _CatalogNotice extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Card(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        color: AppTheme.coolGray,
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(

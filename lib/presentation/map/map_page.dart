@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/maps/current_location_gateway.dart';
 import '../../data/maps/geolocator_current_location_gateway.dart';
 import '../../data/maps/kakao_map_configuration.dart';
@@ -21,6 +22,7 @@ import '../../data/water_temperature/khoa_water_temperature_service.dart';
 import '../../data/water_temperature/water_temperature_models.dart';
 import '../../data/water_temperature/water_temperature_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/record_action_footer.dart';
 import '../record/record_form_page.dart';
 import 'kakao_map_canvas.dart';
 import 'map_detail_page.dart';
@@ -583,6 +585,27 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
     unawaited(_controller.search(query));
   }
 
+  void _openMapDetail() {
+    final location = _controller.selection;
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MapDetailPage(
+            selectedLocation: location.name,
+            configuration: widget.configuration,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            externalData: _currentExternalData,
+            tideReference: _tideReference,
+            tideName: _tideName,
+            waterArea: _waterArea,
+            waterTemperatureObservation: _currentWaterTemperature,
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openRecordForm() async {
     final allowed = await requireMemberAccess(
       context,
@@ -628,7 +651,12 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final selected = _controller.selection;
+    final results = _controller.results;
+    final selectedResultIndex = results.indexOf(selected);
+    final colors = Theme.of(context).colorScheme;
     final choosing = _controller.isLocating || _controller.isResolving;
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    const actionPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 8);
     return Scaffold(
       appBar: AppBar(
         title: const Text('지도'),
@@ -640,6 +668,32 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
           ),
         ],
       ),
+      bottomNavigationBar: keyboardVisible
+          ? null
+          : RecordActionFooter(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: choosing ? null : _openMapDetail,
+                      style: OutlinedButton.styleFrom(padding: actionPadding),
+                      icon: const Icon(Icons.info_outline),
+                      label: const Text('자세히 보기', textAlign: TextAlign.center),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: choosing ? null : _openRecordForm,
+                      style: FilledButton.styleFrom(padding: actionPadding),
+                      icon: const Icon(Icons.edit_note),
+                      label: const Text('기록 작성', textAlign: TextAlign.center),
+                    ),
+                  ),
+                ],
+              ),
+            ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -691,73 +745,88 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
               isActive: widget.isActive,
               child: SizedBox(
                 height: 280,
-                child: !widget.isActive
-                    ? const SizedBox.shrink()
-                    : _network.isDisconnected
-                    ? const Card(
-                        child: Center(child: Text('오프라인에서는 장소를 직접 입력해 주세요.')),
-                      )
-                    : widget.mapBuilder?.call(
-                            selected,
-                            _controller.setGateway,
-                            (lat, lon) => unawaited(
-                              _controller.selectCoordinates(lat, lon),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: ColoredBox(
+                    color: AppTheme.coolGray,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (widget.isActive)
+                          if (_network.isDisconnected)
+                            const Center(child: Text('오프라인에서는 장소를 직접 입력해 주세요.'))
+                          else
+                            widget.mapBuilder?.call(
+                                  selected,
+                                  _controller.setGateway,
+                                  (lat, lon) => unawaited(
+                                    _controller.selectCoordinates(lat, lon),
+                                  ),
+                                ) ??
+                                KakaoMapCanvas(
+                                  key: ValueKey(_mapAttempt),
+                                  configuration: widget.configuration,
+                                  selection: selected,
+                                  onGatewayChanged: _controller.setGateway,
+                                  onPointSelected: (lat, lon) => unawaited(
+                                    _controller.selectCoordinates(lat, lon),
+                                  ),
+                                ),
+                        Positioned(
+                          right: 12,
+                          bottom: 12,
+                          child: IconButton.filled(
+                            tooltip: '현재 위치',
+                            style: IconButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.white,
                             ),
-                          ) ??
-                          KakaoMapCanvas(
-                            key: ValueKey(_mapAttempt),
-                            configuration: widget.configuration,
-                            selection: selected,
-                            onGatewayChanged: _controller.setGateway,
-                            onPointSelected: (lat, lon) => unawaited(
-                              _controller.selectCoordinates(lat, lon),
-                            ),
+                            onPressed: _controller.isLocating
+                                ? null
+                                : () => unawaited(
+                                    _controller.useCurrentLocation(),
+                                  ),
+                            icon: const Icon(Icons.my_location),
                           ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _controller.isLocating
-                        ? null
-                        : () => unawaited(_controller.useCurrentLocation()),
-                    icon: const Icon(Icons.my_location),
-                    label: const Text('현재 위치'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _openFallback,
-                    icon: const Icon(Icons.edit_location_alt_outlined),
-                    label: const Text('장소 직접 입력'),
-                  ),
-                ),
-              ],
-            ),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      selected.name,
-                      key: const ValueKey('map-selected-location'),
-                      style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
                     ),
-                    if (selected.address != null &&
-                        selected.address != selected.name)
-                      Text(selected.address!),
-                    if (choosing) const Text('위치를 확인하고 있습니다.'),
-                  ],
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            if (_controller.results.isNotEmpty)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _openFallback,
+                icon: const Icon(Icons.edit_location_alt_outlined),
+                label: const Text('장소 직접 입력'),
+              ),
+            ),
+            if (results.isEmpty)
+              Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        selected.name,
+                        key: const ValueKey('map-selected-location'),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      if (selected.address != null &&
+                          selected.address != selected.name)
+                        Text(selected.address!),
+                      if (choosing) const Text('위치를 확인하고 있습니다.'),
+                    ],
+                  ),
+                ),
+              )
+            else
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 320),
                 child: Scrollbar(
@@ -768,19 +837,38 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
                     primary: false,
                     shrinkWrap: true,
                     padding: EdgeInsets.zero,
-                    itemCount: _controller.results.length,
+                    itemCount: results.length,
                     itemBuilder: (context, index) {
-                      final result = _controller.results[index];
+                      final result = results[index];
+                      final isSelected = index == selectedResultIndex;
                       return Card(
+                        key: ValueKey('map-search-result-outline-$index'),
+                        elevation: 0,
+                        color: isSelected
+                            ? AppTheme.primaryContainer
+                            : colors.surface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: isSelected
+                                ? colors.primary
+                                : colors.outlineVariant,
+                            width: isSelected ? 2 : 1,
+                          ),
+                        ),
                         child: ListTile(
                           minTileHeight: 72,
+                          selected: isSelected,
                           leading: const Icon(Icons.place_outlined),
                           title: Text(result.name),
                           subtitle: result.address == null
                               ? null
                               : Text(result.address!),
                           onTap: () {
-                            _controller.selectLocation(result);
+                            _controller.selectLocation(
+                              result,
+                              preserveSearchResults: true,
+                            );
                             FocusScope.of(context).unfocus();
                           },
                         ),
@@ -789,6 +877,7 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
                   ),
                 ),
               ),
+            const SizedBox(height: 12),
             TidePanel(
               clock: widget.clock,
               key: const ValueKey('map-tide-panel'),
@@ -858,46 +947,6 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
                 if (identical(_tideReference, reference)) return;
                 setState(() => _tideReference = reference);
               },
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: choosing
-                        ? null
-                        : () {
-                            unawaited(
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => MapDetailPage(
-                                    selectedLocation: selected.name,
-                                    latitude: selected.latitude,
-                                    longitude: selected.longitude,
-                                    externalData: _currentExternalData,
-                                    tideReference: _tideReference,
-                                    tideName: _tideName,
-                                    waterArea: _waterArea,
-                                    waterTemperatureObservation:
-                                        _currentWaterTemperature,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                    icon: const Icon(Icons.info_outline),
-                    label: const Text('자세히 보기'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: choosing ? null : _openRecordForm,
-                    icon: const Icon(Icons.edit_note),
-                    label: const Text('기록 작성'),
-                  ),
-                ),
-              ],
             ),
           ],
         ),

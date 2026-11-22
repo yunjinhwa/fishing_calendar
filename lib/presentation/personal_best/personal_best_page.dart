@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/models/personal_best_record.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
@@ -105,7 +106,7 @@ class _PersonalBestPageState extends State<PersonalBestPage> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: TextField(
                   controller: _searchController,
                   enabled: _auth.isMember && !_auth.hasPendingAccountDeletion,
@@ -129,30 +130,34 @@ class _PersonalBestPageState extends State<PersonalBestPage> {
                   onChanged: (_) => setState(_filterRecords),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('크기순'),
-                      selected: _sortType == PersonalBestSortType.length,
-                      onSelected: (_) =>
-                          _selectSort(PersonalBestSortType.length),
-                    ),
-                    ChoiceChip(
-                      label: const Text('무게순'),
-                      selected: _sortType == PersonalBestSortType.weight,
-                      onSelected: (_) =>
-                          _selectSort(PersonalBestSortType.weight),
-                    ),
-                    ChoiceChip(
-                      label: const Text('이름순'),
-                      selected: _sortType == PersonalBestSortType.name,
-                      onSelected: (_) => _selectSort(PersonalBestSortType.name),
-                    ),
-                  ],
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('크기순'),
+                        selected: _sortType == PersonalBestSortType.length,
+                        onSelected: (_) =>
+                            _selectSort(PersonalBestSortType.length),
+                      ),
+                      ChoiceChip(
+                        label: const Text('무게순'),
+                        selected: _sortType == PersonalBestSortType.weight,
+                        onSelected: (_) =>
+                            _selectSort(PersonalBestSortType.weight),
+                      ),
+                      ChoiceChip(
+                        label: const Text('이름순'),
+                        selected: _sortType == PersonalBestSortType.name,
+                        onSelected: (_) =>
+                            _selectSort(PersonalBestSortType.name),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               Expanded(
@@ -161,12 +166,12 @@ class _PersonalBestPageState extends State<PersonalBestPage> {
                     : _filteredRecords.isEmpty
                     ? const Center(child: Text('검색 결과가 없습니다.'))
                     : ListView.separated(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         keyboardDismissBehavior:
                             ScrollViewKeyboardDismissBehavior.onDrag,
                         itemCount: _filteredRecords.length,
                         separatorBuilder: (context, index) =>
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 8),
                         itemBuilder: (context, index) {
                           final record = _filteredRecords[index];
                           return _PersonalBestCard(
@@ -201,13 +206,16 @@ class _PersonalBestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = record.sourceRecord;
+    final theme = Theme.of(context);
     final criterion = record.selectedType == PersonalBestSortType.length
         ? '크기 기록'
         : '무게 기록';
     return Card(
+      margin: EdgeInsets.zero,
       child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
         leading: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           child: PersonalBestPhoto(
             photo: source.photos.firstOrNull,
             width: 56,
@@ -216,14 +224,27 @@ class _PersonalBestCard extends StatelessWidget {
         ),
         title: Text(
           record.speciesName,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
         ),
-        subtitle: Text(
-          '최고 크기 ${record.lengthText} · 최고 무게 ${record.weightText}\n'
-          '$criterion · ${_formatDate(record.caughtAt)} | ${record.locationText}',
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '최고 크기 ${record.lengthText} · 최고 무게 ${record.weightText}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              '$criterion · ${_formatDate(record.caughtAt)} | ${record.locationText}',
+              style: theme.textTheme.bodySmall?.copyWith(color: AppTheme.muted),
+            ),
+          ],
         ),
         isThreeLine: true,
-        trailing: const Icon(Icons.chevron_right),
+        trailing: const Icon(Icons.chevron_right, color: AppTheme.muted),
         onTap: onTap,
       ),
     );

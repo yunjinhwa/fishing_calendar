@@ -245,7 +245,7 @@ void main() {
     await authSession.continueAsGuest();
 
     await tester.pumpWidget(const MaterialApp(home: AppShell(initialIndex: 1)));
-    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.tap(find.widgetWithText(NavigationDestination, '기록'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '로그인'));
     await tester.pumpAndSettle();
@@ -380,6 +380,7 @@ void main() {
       300,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.pumpAndSettle();
     await tester.tap(submitButton);
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pumpAndSettle();

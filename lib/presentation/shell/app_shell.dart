@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/services/network_status_service.dart';
 import '../../data/services/record_sync_service.dart';
@@ -91,102 +92,123 @@ class _AppShellState extends State<AppShell> {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      body: IndexedStack(
-        index: selectedIndex,
-        children: [
-          for (var index = 0; index < tabPages.length; index++)
-            MediaQuery.removeViewInsets(
-              context: context,
-              removeBottom: index != selectedIndex,
-              child: TopCardNotificationScope(
-                enabled: index == selectedIndex,
-                route: ModalRoute.of(context),
-                isActive: () =>
-                    mounted &&
-                    index == selectedIndex &&
-                    authSession.sessionGeneration == noticeGeneration,
-                child: tabPages[index],
+      body: Builder(
+        builder: (bodyContext) => IndexedStack(
+          index: selectedIndex,
+          children: [
+            for (var index = 0; index < tabPages.length; index++)
+              MediaQuery.removeViewInsets(
+                // Use the Scaffold padding to avoid reserving the bottom inset
+                // again inside tabs when the navigation bar already uses it.
+                context: bodyContext,
+                removeBottom: index != selectedIndex,
+                child: TopCardNotificationScope(
+                  enabled: index == selectedIndex,
+                  route: ModalRoute.of(context),
+                  isActive: () =>
+                      mounted &&
+                      index == selectedIndex &&
+                      authSession.sessionGeneration == noticeGeneration,
+                  child: tabPages[index],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
       bottomNavigationBar:
           isKeyboardVisible || authSession.isAccountDeletedRemotely
           ? null
-          : NavigationBar(
-              selectedIndex: selectedIndex,
-              onDestinationSelected: (index) async {
-                if (authSession.hasPendingAccountDeletion && index != 4) {
-                  if (mounted) {
-                    TopCardNotification.show(
-                      context,
-                      authSession.isAccountDeletedRemotely
-                          ? '탈퇴된 계정입니다. 로그아웃해 주세요.'
-                          : '회원 탈퇴 처리를 먼저 완료해 주세요.',
-                      type: TopCardNotificationType.warning,
-                    );
-                  }
-                  return;
-                }
-                if (_isMemberOnlyTab(index) && !authSession.canManageRecords) {
-                  final allowed = await requireMemberAccess(
-                    context,
-                    message: '출조 기록과 내 정보 관리는 로그인 후 사용할 수 있습니다.',
-                  );
-
-                  if (!allowed || !mounted) {
+          : DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: AppTheme.border)),
+              ),
+              child: NavigationBar(
+                selectedIndex: selectedIndex,
+                onDestinationSelected: (index) async {
+                  if (authSession.hasPendingAccountDeletion && index != 4) {
+                    if (mounted) {
+                      TopCardNotification.show(
+                        context,
+                        authSession.isAccountDeletedRemotely
+                            ? '탈퇴된 계정입니다. 로그아웃해 주세요.'
+                            : '회원 탈퇴 처리를 먼저 완료해 주세요.',
+                        type: TopCardNotificationType.warning,
+                      );
+                    }
                     return;
                   }
-                }
+                  if (_isMemberOnlyTab(index) &&
+                      !authSession.canManageRecords) {
+                    final allowed = await requireMemberAccess(
+                      context,
+                      message: '출조 기록과 내 정보 관리는 로그인 후 사용할 수 있습니다.',
+                    );
 
-                final isTabChange = index != selectedIndex;
-                if (isTabChange || index == 0) TopCardNotification.dismissAll();
-                if (index == 0) {
-                  calendarNavigatorKey.currentState?.popUntil(
-                    (route) => route.isFirst,
-                  );
-                }
-
-                if (isTabChange || index == 0) {
-                  setState(() {
-                    selectedIndex = index;
-                    if (index == 0) {
-                      calendarRefreshKey++;
+                    if (!allowed || !mounted) {
+                      return;
                     }
-                  });
-                }
+                  }
 
-                if (isTabChange) {
-                  unawaited(RecordSyncService.instance.syncNow());
-                }
-              },
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.calendar_month_outlined),
-                  selectedIcon: Icon(Icons.calendar_month),
-                  label: '캘린더',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.map_outlined),
-                  selectedIcon: Icon(Icons.map),
-                  label: '지도',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.add_circle_outline),
-                  selectedIcon: Icon(Icons.add_circle),
-                  label: '기록',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.menu_book_outlined),
-                  selectedIcon: Icon(Icons.menu_book),
-                  label: '도감',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.person_outline),
-                  selectedIcon: Icon(Icons.person),
-                  label: '내정보',
-                ),
-              ],
+                  final isTabChange = index != selectedIndex;
+                  if (isTabChange || index == 0) {
+                    TopCardNotification.dismissAll();
+                  }
+                  if (index == 0) {
+                    calendarNavigatorKey.currentState?.popUntil(
+                      (route) => route.isFirst,
+                    );
+                  }
+
+                  if (isTabChange || index == 0) {
+                    setState(() {
+                      selectedIndex = index;
+                      if (index == 0) {
+                        calendarRefreshKey++;
+                      }
+                    });
+                  }
+
+                  if (isTabChange) {
+                    unawaited(RecordSyncService.instance.syncNow());
+                  }
+                },
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.calendar_month_outlined),
+                    selectedIcon: Icon(Icons.calendar_month),
+                    label: '캘린더',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.map_outlined),
+                    selectedIcon: Icon(Icons.map),
+                    label: '지도',
+                  ),
+                  NavigationDestination(
+                    icon: SizedBox.square(
+                      dimension: 42,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.add, color: Colors.white, size: 26),
+                      ),
+                    ),
+                    label: '기록',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.menu_book_outlined),
+                    selectedIcon: Icon(Icons.menu_book),
+                    label: '도감',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.person_outline),
+                    selectedIcon: Icon(Icons.person),
+                    label: '내정보',
+                  ),
+                ],
+              ),
             ),
     );
   }

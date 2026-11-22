@@ -292,6 +292,99 @@ class _MapHistoryPageState extends State<MapHistoryPage> {
     );
   }
 
+  Widget _buildHistoryControls(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.place_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.selectedLocation,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const spacing = 12.0;
+                final isWide =
+                    constraints.maxWidth >= 332 &&
+                    MediaQuery.textScalerOf(context).scale(1) <= 1.25;
+                final width = isWide
+                    ? (constraints.maxWidth - spacing) / 2
+                    : constraints.maxWidth;
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: width,
+                      child: OutlinedButton.icon(
+                        key: const ValueKey('history-date'),
+                        onPressed: _pickDate,
+                        icon: const Icon(Icons.calendar_month_outlined),
+                        label: Text(
+                          '${_selectedDate.year}.'
+                          '${_selectedDate.month.toString().padLeft(2, '0')}.'
+                          '${_selectedDate.day.toString().padLeft(2, '0')}',
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: width,
+                      child: DropdownButtonFormField<int>(
+                        key: ValueKey(
+                          'history-hour-$_selectedDate-$_selectedHour',
+                        ),
+                        initialValue: _selectedHour,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: '조회 시간 (KST)',
+                        ),
+                        items: [
+                          for (
+                            var hour = 0;
+                            hour <= _maxHour(_selectedDate);
+                            hour++
+                          )
+                            DropdownMenuItem(
+                              value: hour,
+                              child: Text(
+                                '${hour.toString().padLeft(2, '0')}:00',
+                              ),
+                            ),
+                        ],
+                        onChanged: (hour) {
+                          if (hour == null || hour == _selectedHour) return;
+                          setState(() => _selectedHour = hour);
+                          _reload();
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _weatherRevision++;
@@ -313,48 +406,23 @@ class _MapHistoryPageState extends State<MapHistoryPage> {
           );
     return Scaffold(
       appBar: AppBar(title: const Text('과거 정보 조회')),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: FilledButton.icon(
+            onPressed: _openRecord,
+            icon: const Icon(Icons.edit_note),
+            label: const Text('이 정보로 기록 작성'),
+          ),
+        ),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(
-              widget.selectedLocation,
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              key: const ValueKey('history-date'),
-              onPressed: _pickDate,
-              icon: const Icon(Icons.calendar_month_outlined),
-              label: Text(
-                '${_selectedDate.year}.'
-                '${_selectedDate.month.toString().padLeft(2, '0')}.'
-                '${_selectedDate.day.toString().padLeft(2, '0')}',
-              ),
-            ),
+            _buildHistoryControls(context),
             const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              key: ValueKey('history-hour-$_selectedDate-$_selectedHour'),
-              initialValue: _selectedHour,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: '조회 시간 (KST)',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                for (var hour = 0; hour <= _maxHour(_selectedDate); hour++)
-                  DropdownMenuItem(
-                    value: hour,
-                    child: Text('${hour.toString().padLeft(2, '0')}:00'),
-                  ),
-              ],
-              onChanged: (hour) {
-                if (hour == null || hour == _selectedHour) return;
-                setState(() => _selectedHour = hour);
-                _reload();
-              },
-            ),
-            const SizedBox(height: 16),
             if (!_location.hasCoordinates)
               const Padding(
                 padding: EdgeInsets.only(bottom: 12),
@@ -368,7 +436,9 @@ class _MapHistoryPageState extends State<MapHistoryPage> {
                   children: [
                     Text(
                       '과거 날씨·낚시 정보',
-                      style: Theme.of(context).textTheme.titleMedium,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     if (_weatherLoading || _waterLoading) ...[
@@ -402,12 +472,6 @@ class _MapHistoryPageState extends State<MapHistoryPage> {
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _openRecord,
-              icon: const Icon(Icons.edit_note),
-              label: const Text('이 정보로 기록 작성'),
             ),
           ],
         ),

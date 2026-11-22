@@ -7,6 +7,7 @@ class CalendarTodaySummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 360;
     return SafeArea(
       top: false,
       child: Padding(
@@ -16,8 +17,12 @@ class CalendarTodaySummary extends StatelessWidget {
             key: const ValueKey('calendar-today-open'),
             borderRadius: BorderRadius.circular(12),
             onTap: onPressed,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              padding: EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: compact ? 12 : 16,
+              ),
               child: Row(
                 children: [
                   Icon(
@@ -34,11 +39,13 @@ class CalendarTodaySummary extends StatelessWidget {
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '오늘의 출조 기록을 확인할 수 있습니다.',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        if (!compact) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '오늘의 출조 기록을 확인할 수 있습니다.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                       ],
                     ),
                   ),

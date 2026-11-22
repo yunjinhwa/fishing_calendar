@@ -217,9 +217,17 @@ Future<void> _enterFields(
 
 void _expectChoiceButtonsEnabled(WidgetTester tester, {required bool enabled}) {
   final callbacks = [
-    tester.widget<OutlinedButton>(find.byType(OutlinedButton)).onPressed,
-    tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
-    tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+    tester
+        .widget<OutlinedButton>(
+          find.widgetWithText(OutlinedButton, '비회원으로 시작하기'),
+        )
+        .onPressed,
+    tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, '로그인'))
+        .onPressed,
+    tester
+        .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '회원가입'))
+        .onPressed,
   ];
   for (final callback in callbacks) {
     expect(callback, enabled ? isNotNull : isNull);

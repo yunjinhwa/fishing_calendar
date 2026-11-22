@@ -115,8 +115,11 @@ void main() {
       const MaterialApp(home: PlanPage(enableDevelopmentPlanControls: true)),
     );
 
-    final refresh = find.text('서버 플랜 새로고침');
+    final refresh = find
+        .widgetWithText(FilledButton, '서버 플랜 새로고침')
+        .hitTestable();
     await tester.scrollUntilVisible(refresh, 300);
+    await tester.pumpAndSettle();
     expect(find.text('유료 플랜으로 변경'), findsNothing);
     expect(find.text('무료 플랜으로 변경'), findsNothing);
     await tester.tap(refresh);

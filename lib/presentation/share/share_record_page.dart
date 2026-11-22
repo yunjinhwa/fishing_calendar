@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/models/personal_best_record.dart';
 import '../../data/models/share_record_data.dart';
 import '../../data/models/user_plan_policy.dart';
@@ -295,50 +296,62 @@ class _ShareRecordPageState extends State<ShareRecordPage> {
     TopCardNotification.show(context, text, type: type);
   }
 
+  Widget _exportActions() {
+    final enabled = !_busy && !_loadingPhoto;
+    final saveButton = OutlinedButton.icon(
+      onPressed: enabled ? () => _export(share: false) : null,
+      icon: const Icon(Icons.download_outlined),
+      label: const Text('이미지 저장'),
+    );
+    final shareButton = FilledButton.icon(
+      key: _shareButtonKey,
+      onPressed: enabled ? () => _export(share: true) : null,
+      icon: const Icon(Icons.ios_share_outlined),
+      label: const Text('공유하기'),
+    );
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: AppTheme.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_busy) const LinearProgressIndicator(minHeight: 2),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 300 ||
+                    MediaQuery.textScalerOf(context).scale(14) > 18) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [saveButton, shareButton],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: saveButton),
+                    const SizedBox(width: 12),
+                    Expanded(child: shareButton),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final valid = _sameSession && !_stale && _data != null;
     return Scaffold(
       appBar: AppBar(title: const Text('공유 이미지 미리보기')),
-      bottomNavigationBar: valid
-          ? SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: Row(
-                  children: [
-                    if (_busy) ...[
-                      const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: 12),
-                    ],
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _busy || _loadingPhoto
-                            ? null
-                            : () => _export(share: false),
-                        icon: const Icon(Icons.download_outlined),
-                        label: const Text('이미지 저장'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        key: _shareButtonKey,
-                        onPressed: _busy || _loadingPhoto
-                            ? null
-                            : () => _export(share: true),
-                        icon: const Icon(Icons.ios_share_outlined),
-                        label: const Text('공유하기'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : null,
+      bottomNavigationBar: valid ? _exportActions() : null,
       body: SafeArea(
         child: RecordHistoryScope(
           isActive: _sameSession,
@@ -372,14 +385,23 @@ class _ShareRecordPageState extends State<ShareRecordPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Center(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: RepaintBoundary(
-                                  key: _boundaryKey,
-                                  child: ShareRecordCard(
-                                    data: _data!,
-                                    options: _options,
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: AppTheme.coolGray,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Center(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: RepaintBoundary(
+                                      key: _boundaryKey,
+                                      child: ShareRecordCard(
+                                        data: _data!,
+                                        options: _options,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),

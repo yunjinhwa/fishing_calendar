@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/validation/fishing_record_validator.dart';
 import '../../data/maps/current_location_gateway.dart';
 import '../../data/maps/geolocator_current_location_gateway.dart';
@@ -184,7 +185,6 @@ class _RecordLocationSearchPageState extends State<RecordLocationSearchPage> {
               decoration: InputDecoration(
                 labelText: '장소 또는 주소',
                 hintText: '예: 흰여울문화마을, 부산 영도구',
-                border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
                   key: const ValueKey('record-location-search'),
                   tooltip: '장소 검색',
@@ -198,23 +198,50 @@ class _RecordLocationSearchPageState extends State<RecordLocationSearchPage> {
             if (_isBusy) const LinearProgressIndicator(),
             if (error != null) ...[
               const SizedBox(height: 8),
-              Semantics(liveRegion: true, child: Text(error)),
-              if (_controller.locationFailure ==
-                  CurrentLocationFailure.deniedForever)
-                TextButton(
-                  onPressed: () async {
-                    await _controller.openAppSettings();
-                  },
-                  child: const Text('앱 권한 설정 열기'),
+              Semantics(
+                liveRegion: true,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF5E5),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.warning_amber_rounded,
+                            size: 20,
+                            color: Color(0xFF8F4E00),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(error)),
+                        ],
+                      ),
+                      if (_controller.locationFailure ==
+                          CurrentLocationFailure.deniedForever)
+                        TextButton(
+                          onPressed: () async {
+                            await _controller.openAppSettings();
+                          },
+                          child: const Text('앱 권한 설정 열기'),
+                        ),
+                      if (_controller.locationFailure ==
+                          CurrentLocationFailure.serviceDisabled)
+                        TextButton(
+                          onPressed: () async {
+                            await _controller.openLocationSettings();
+                          },
+                          child: const Text('위치 서비스 설정 열기'),
+                        ),
+                    ],
+                  ),
                 ),
-              if (_controller.locationFailure ==
-                  CurrentLocationFailure.serviceDisabled)
-                TextButton(
-                  onPressed: () async {
-                    await _controller.openLocationSettings();
-                  },
-                  child: const Text('위치 서비스 설정 열기'),
-                ),
+              ),
+              const SizedBox(height: 8),
             ],
             Align(
               alignment: Alignment.centerLeft,
@@ -246,14 +273,25 @@ class _RecordLocationSearchPageState extends State<RecordLocationSearchPage> {
                   ),
             ),
             const SizedBox(height: 12),
-            if (!_mayUseSelection)
-              const Text('검색 결과나 지도에서 위치를 선택한 뒤 아래 버튼을 눌러 주세요.'),
+            if (!_mayUseSelection) ...[
+              const Text(
+                '검색 결과나 지도에서 위치를 선택한 뒤 아래 버튼을 눌러 주세요.',
+                style: TextStyle(color: AppTheme.muted),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (_controller.results.isNotEmpty) ...[
+              Text('검색 결과', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+            ],
             for (final (index, location) in _controller.results.indexed)
               Card(
                 key: ValueKey('record-location-result-outline-$index'),
                 margin: const EdgeInsets.only(bottom: 8),
                 elevation: 0,
-                color: colors.surface,
+                color: index == selectedResultIndex
+                    ? AppTheme.primaryContainer
+                    : colors.surface,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                   side: BorderSide(
@@ -283,13 +321,19 @@ class _RecordLocationSearchPageState extends State<RecordLocationSearchPage> {
           ],
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.all(16),
-        child: FilledButton.icon(
-          key: const ValueKey('record-location-confirm'),
-          onPressed: _canConfirm ? _confirm : null,
-          icon: const Icon(Icons.check),
-          label: const Text('이 위치 사용'),
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: AppTheme.border)),
+        ),
+        child: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: FilledButton.icon(
+            key: const ValueKey('record-location-confirm'),
+            onPressed: _canConfirm ? _confirm : null,
+            icon: const Icon(Icons.check),
+            label: const Text('이 위치 사용'),
+          ),
         ),
       ),
     );
