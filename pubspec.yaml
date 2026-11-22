@@ -82,6 +82,7 @@ flutter:
     - assets/data/fish_catalog.json
     - assets/data/fish_enrichment.json
     - third_party/klc_LICENSE.txt
+    - third_party/material_icons_LICENSE.txt
     - third_party/open_map_water_NOTICE.txt
     - third_party/fish_encyclopedia_NOTICE.txt
 

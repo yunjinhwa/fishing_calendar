@@ -15,6 +15,9 @@ void registerAppLicenses() {
       'klc (Korean lunar calendar data)',
     ], await rootBundle.loadString('third_party/klc_LICENSE.txt'));
     yield LicenseEntryWithLineBreaks([
+      'Material Icons',
+    ], await rootBundle.loadString('third_party/material_icons_LICENSE.txt'));
+    yield LicenseEntryWithLineBreaks([
       'OpenFreeMap / OpenMapTiles / OpenStreetMap',
     ], await rootBundle.loadString('third_party/open_map_water_NOTICE.txt'));
     yield LicenseEntryWithLineBreaks([

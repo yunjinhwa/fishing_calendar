@@ -245,6 +245,44 @@ flutter run --dart-define=FIREBASE_AUTH_ENABLED=true --dart-define-from-file=kak
 
 </details>
 
+### 4. Android 릴리스 APK 만들기
+
+설치 이름은 **낚시 캘린더**, 앱 ID는 `com.jinhwan.fishing_build`, 기본 버전은 `1.0.0+1`입니다. Firebase의 Android 앱에도 같은 앱 ID를 등록하고, 빌드에 연결할 프로젝트의 인증과 Firestore 설정을 확인합니다.
+
+Android 런처 아이콘에는 기존 로그인 화면의 낚시 아이콘과 코발트색을 적용했습니다. 기기별 아이콘 모양과 테마를 위해 적응형·단색 리소스를 제공합니다. [Android 적응형 아이콘 안내](https://developer.android.com/develop/ui/compose/system/icon_design_adaptive) · [Material Icons 라이선스](https://github.com/google/material-design-icons#license)
+
+이미 발급한 릴리스 서명 키가 있으면 해당 키를 사용합니다. 처음 만든다면 저장소 밖의 보관 폴더에서 JDK의 `keytool`을 실행하고 비밀번호를 프롬프트에 입력합니다.
+
+```powershell
+keytool -genkeypair -keystore fishing-upload.p12 -storetype PKCS12 -alias upload -keyalg RSA -keysize 2048 -validity 10000
+```
+
+`android/key.properties`에 키 파일 경로, 별칭, 비밀번호를 설정합니다. 아래는 형식 예시입니다. Windows 절대 경로에는 `/`를 사용합니다.
+
+```properties
+storeFile=C:/path/to/fishing-upload.p12
+keyAlias=upload
+storePassword=YOUR_PASSWORD
+keyPassword=YOUR_PASSWORD
+```
+
+서명 파일과 `key.properties`는 Git에서 제외합니다. 릴리스 빌드에 계속 사용할 키 파일과 비밀번호를 안전하게 백업합니다. [Flutter Android 릴리스 가이드](https://docs.flutter.dev/deployment/android#sign-the-app)
+
+프로젝트 루트에서 아래 PowerShell 명령으로 64비트 ARM 기기용 APK를 빌드합니다. `flutter`를 찾지 못하면 설치 경로에 맞춰 명령의 `flutter`를 `& 'C:/flutter/bin/flutter.bat'`로 바꿉니다.
+
+```powershell
+flutter build apk --release --target-platform android-arm64 `
+  --dart-define=FIREBASE_AUTH_ENABLED=true `
+  --dart-define-from-file=kakao.local.json `
+  --dart-define-from-file=weather.local.json `
+  --dart-define-from-file=tide.local.json `
+  --dart-define-from-file=fish.local.json
+```
+
+결과 파일은 `build/app/outputs/flutter-apk/app-release.apk`입니다. 빌드에 전달한 설정값은 APK에서 확인할 수 있으므로 클라이언트 사용이 허용된 값만 전달합니다.
+
+Android SDK Build Tools의 `apksigner verify --print-certs build/app/outputs/flutter-apk/app-release.apk`로 서명과 인증서를 확인합니다. 같은 앱 ID의 디버그 설치본에 다른 서명으로 업데이트하면 설치가 거절됩니다. 기존 기기 기록을 보존하려면 새 에뮬레이터 또는 전용 테스트 기기에 설치합니다. 설치 후 테스트 계정으로 로그인, 비밀번호 재설정, 지도 조회, 기록 저장과 동기화를 확인합니다. [Android 서명 안내](https://developer.android.com/studio/publish/app-signing) · [APK 서명 검증](https://developer.android.com/tools/apksigner#verify)
+
 ## 테스트와 현재 상태
 
 ### MVP 실행 확인

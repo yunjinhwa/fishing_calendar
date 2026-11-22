@@ -80,6 +80,7 @@ void main() {
       expect(text.contains('creativecommons.org'), isTrue);
       for (final package in [
         'klc (Korean lunar calendar data)',
+        'Material Icons',
         'OpenFreeMap / OpenMapTiles / OpenStreetMap',
         'NIFS / Wikidata / Wikipedia / Wikimedia Commons / iNaturalist / GBIF',
       ]) {
