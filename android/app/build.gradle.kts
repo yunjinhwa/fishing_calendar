@@ -1,3 +1,6 @@
+import java.io.IOException
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // START: FlutterFire Configuration
@@ -7,6 +10,27 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystorePropertiesError =
+    if (keystorePropertiesFile.isFile) {
+        try {
+            keystorePropertiesFile.reader(Charsets.UTF_8).use { keystoreProperties.load(it) }
+            null
+        } catch (_: IOException) {
+            "Unable to read android/key.properties. Check the file permissions."
+        } catch (_: IllegalArgumentException) {
+            "Unable to parse android/key.properties. Check the properties and path escaping."
+        }
+    } else {
+        "Release signing requires android/key.properties."
+    }
+val releaseKeystore = keystoreProperties.getProperty("storeFile")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { rootProject.file(it) }
+val missingSigningProperties = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+    .filter { keystoreProperties.getProperty(it).isNullOrBlank() }
 
 android {
     namespace = "com.example.fishing_build"
@@ -33,12 +57,38 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = releaseKeystore
+            storePassword = keystoreProperties.getProperty("storePassword")
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
+    }
+}
+
+val validateReleaseSigningProperties = tasks.register("validateReleaseSigningProperties") {
+    doLast {
+        val error = keystorePropertiesError ?: when {
+            missingSigningProperties.isNotEmpty() ->
+                "Set ${missingSigningProperties.joinToString()} in android/key.properties."
+            releaseKeystore?.isFile != true ->
+                "Set storeFile in android/key.properties to an existing release keystore."
+            else -> null
+        }
+        if (error != null) throw GradleException(error)
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.lifecycleTasks.registerPreBuild(validateReleaseSigningProperties)
     }
 }
 
