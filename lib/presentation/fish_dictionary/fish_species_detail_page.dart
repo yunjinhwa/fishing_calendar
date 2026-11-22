@@ -7,6 +7,7 @@ import '../../data/models/fish_species.dart';
 import '../../data/repositories/fish_species_repository.dart';
 import '../../data/services/network_status_service.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/record_action_footer.dart';
 import '../record/record_form_page.dart';
 import 'fish_species_photo.dart';
 
@@ -113,6 +114,19 @@ class _FishSpeciesDetailPageState extends State<FishSpeciesDetailPage> {
     super.dispose();
   }
 
+  Future<void> _writeRecord(String fishName) async {
+    final allowed = await requireMemberAccess(
+      context,
+      message: '도감의 어종을 출조 기록으로 저장하려면 로그인이 필요합니다.',
+    );
+    if (!allowed || !mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => RecordFormPage(initialFishName: fishName),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final fish = _fish;
@@ -131,108 +145,84 @@ class _FishSpeciesDetailPageState extends State<FishSpeciesDetailPage> {
           ),
         ],
       ),
+      bottomNavigationBar: RecordActionFooter(
+        child: FilledButton.icon(
+          onPressed: () => _writeRecord(fish.name),
+          icon: const Icon(Icons.edit_note),
+          label: const Text('이 어종으로 기록 작성하기'),
+        ),
+      ),
       body: SafeArea(
+        bottom: false,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.zero,
           children: [
             FishSpeciesPhoto(
               fish: fish,
+              height: 196,
               allowNetwork: !_network.isDisconnected,
             ),
-            const SizedBox(height: 24),
-            Text(
-              fish.name,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Chip(label: Text(fish.categoryLabel)),
-            ),
-            const SizedBox(height: 16),
-            if (_isLoading) ...[
-              const LinearProgressIndicator(),
-              const SizedBox(height: 8),
-              const Text('상세 정보를 불러오는 중입니다.'),
-              const SizedBox(height: 16),
-            ],
-            if (hasTransientPartial) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('일부 정보를 불러오지 못했습니다.'),
-                      TextButton(
-                        onPressed: () => _loadDetail(forceRefresh: true),
-                        child: const Text('상세 정보 다시 시도'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-            if (_failure != null) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_detailFailureMessage(_failure!)),
-                      const Text('기본 어종 정보는 계속 확인할 수 있습니다.'),
-                      TextButton(
-                        onPressed: () => _loadDetail(forceRefresh: true),
-                        child: const Text('상세 정보 다시 시도'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-            const _SectionTitle(title: '기본 정보'),
-            const SizedBox(height: 8),
-            _InfoCard(
-              children: [
-                _InfoRow(label: '학명', value: fish.scientificName),
-                _InfoRow(label: '분류', value: fish.family),
-                _InfoRow(label: '서식지', value: fish.habitat),
-                _InfoRow(label: '크기', value: fish.sizeDescription),
-                if (fish.aliases.isNotEmpty)
-                  _InfoRow(label: '다른 이름', value: fish.aliases.join(', ')),
-              ],
-            ),
-            const SizedBox(height: 24),
-            const _SectionTitle(title: '특징'),
-            const SizedBox(height: 8),
-            _FeatureDescription(
-              description: fish.feature,
-              retryPending: fish.detailNeedsRetry,
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: () async {
-                final allowed = await requireMemberAccess(
-                  context,
-                  message: '도감의 어종을 출조 기록으로 저장하려면 로그인이 필요합니다.',
-                );
-                if (!allowed || !context.mounted) return;
-                unawaited(
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          RecordFormPage(initialFishName: fish.name),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_isLoading) ...[
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 8),
+                    const Text('상세 정보를 불러오는 중입니다.'),
+                    const SizedBox(height: 16),
+                  ],
+                  if (hasTransientPartial || _failure != null) ...[
+                    _InfoCard(
+                      children: [
+                        Text(
+                          _failure == null
+                              ? '일부 정보를 불러오지 못했습니다.'
+                              : _detailFailureMessage(_failure!),
+                        ),
+                        if (_failure != null)
+                          const Text('기본 어종 정보는 계속 확인할 수 있습니다.'),
+                        TextButton(
+                          onPressed: () => _loadDetail(forceRefresh: true),
+                          child: const Text('상세 정보 다시 시도'),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 16),
+                  ],
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const _SectionTitle(title: '기본 정보'),
+                      Chip(label: Text(fish.categoryLabel)),
+                    ],
                   ),
-                );
-              },
-              icon: const Icon(Icons.edit_note),
-              label: const Text('이 어종으로 기록 작성하기'),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    children: [
+                      _InfoRow(label: '학명', value: fish.scientificName),
+                      _InfoRow(label: '분류', value: fish.family),
+                      _InfoRow(label: '서식지', value: fish.habitat),
+                      _InfoRow(label: '크기', value: fish.sizeDescription),
+                      if (fish.aliases.isNotEmpty)
+                        _InfoRow(
+                          label: '다른 이름',
+                          value: fish.aliases.join(', '),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  const _SectionTitle(title: '특징'),
+                  const SizedBox(height: 8),
+                  _FeatureDescription(
+                    description: fish.feature,
+                    retryPending: fish.detailNeedsRetry,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -268,6 +258,7 @@ class _InfoCard extends StatelessWidget {
   final List<Widget> children;
   @override
   Widget build(BuildContext context) => Card(
+    margin: EdgeInsets.zero,
     child: Padding(
       padding: const EdgeInsets.all(16),
       child: Column(

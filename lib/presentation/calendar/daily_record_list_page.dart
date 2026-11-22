@@ -163,13 +163,18 @@ class _DailyRecordListPageState extends State<DailyRecordListPage>
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (widget.isTodaySummary)
+                  if (widget.isTodaySummary || records.isNotEmpty)
                     Padding(
-                      key: const ValueKey('today-summary-count'),
+                      key: widget.isTodaySummary
+                          ? const ValueKey('today-summary-count')
+                          : null,
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                       child: Text(
-                        '${_selectedDate.month}월 ${_selectedDate.day}일 · 출조 ${records.length}건',
-                        style: Theme.of(context).textTheme.titleMedium,
+                        widget.isTodaySummary
+                            ? '${_selectedDate.month}월 ${_selectedDate.day}일 · 출조 ${records.length}건'
+                            : '출조 기록 ${records.length}건',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                     ),
                   Expanded(
@@ -187,21 +192,35 @@ class _DailyRecordListPageState extends State<DailyRecordListPage>
                                 const SizedBox(height: 12),
                             itemBuilder: (context, index) {
                               final record = records[index];
+                              final theme = Theme.of(context);
 
                               return Card(
+                                margin: EdgeInsets.zero,
                                 child: ListTile(
                                   contentPadding: const EdgeInsets.all(16),
                                   title: Text(
-                                    record.summaryTitle,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
+                                    _formatTimeRange(
+                                      record.startAt,
+                                      record.endAt,
                                     ),
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700),
                                   ),
                                   subtitle: Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: Text(
-                                      '${_formatTimeRange(record.startAt, record.endAt)}\n'
-                                      '${record.locationDisplayName}\n${_syncStatusFor(record.id)}',
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(record.summaryTitle),
+                                        const SizedBox(height: 4),
+                                        Text(record.locationDisplayName),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          _syncStatusFor(record.id),
+                                          style: theme.textTheme.labelMedium,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   isThreeLine: true,

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
@@ -468,34 +469,44 @@ class _CalendarGrid extends StatelessWidget {
     final textScaler = MediaQuery.textScalerOf(context);
     final dateExtent = math.max(20.0, textScaler.scale(11) + 6);
     final barHeight = math.max(16.0, textScaler.scale(10) + 6);
-    final barTop = 7 + dateExtent + 3;
-    final overflowTop = barTop + calendarVisibleRecordLanes * (barHeight + 2);
+    final barTop = 4 + dateExtent + 3;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final columnWidth = math.max(0.0, constraints.maxWidth - 24) / 7;
-        final rowHeight = math.max(
-          columnWidth / 0.62,
-          overflowTop + textScaler.scale(11) + 9,
-        );
+        final preferredRowHeight =
+            ((constraints.maxHeight - 8) / layout.weeks.length)
+                .clamp(44.0, math.max(44.0, columnWidth / 0.62))
+                .toDouble();
         return ListView.builder(
           key: ValueKey(
             'calendar-grid-${focusedMonth.year}-${focusedMonth.month}',
           ),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           itemCount: layout.weeks.length,
-          itemBuilder: (context, index) => _CalendarWeek(
-            layout: layout,
-            week: layout.weeks[index],
-            today: today,
-            rowHeight: rowHeight,
-            columnWidth: columnWidth,
-            dateExtent: dateExtent,
-            barTop: barTop,
-            barHeight: barHeight,
-            overflowTop: overflowTop,
-            onDateTap: (date) => _openDate(context, date),
-          ),
+          itemBuilder: (context, index) {
+            final week = layout.weeks[index];
+            final visibleLanes = math.min(
+              week.laneCount,
+              calendarVisibleRecordLanes,
+            );
+            final overflowTop = barTop + visibleLanes * (barHeight + 2);
+            final requiredHeight =
+                overflowTop +
+                (week.laneCount > visibleLanes ? textScaler.scale(11) + 7 : 3);
+            return _CalendarWeek(
+              layout: layout,
+              week: week,
+              today: today,
+              rowHeight: math.max(preferredRowHeight, requiredHeight),
+              columnWidth: columnWidth,
+              dateExtent: dateExtent,
+              barTop: barTop,
+              barHeight: barHeight,
+              overflowTop: overflowTop,
+              onDateTap: (date) => _openDate(context, date),
+            );
+          },
         );
       },
     );
@@ -576,8 +587,8 @@ class _CalendarWeek extends StatelessWidget {
                   label: label,
                   onTap: () => onDateTap(date),
                   child: ExcludeSemantics(
-                    child: Card(
-                      margin: const EdgeInsets.all(3),
+                    child: Material(
+                      color: Colors.transparent,
                       child: InkWell(
                         key: ValueKey('calendar-day-${_dateKey(date)}'),
                         borderRadius: BorderRadius.circular(12),
@@ -586,24 +597,30 @@ class _CalendarWeek extends StatelessWidget {
                           children: [
                             Positioned(
                               top: 4,
-                              left: 4,
-                              child: Container(
-                                width: dateExtent,
-                                height: dateExtent,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: isToday
-                                      ? colors.primary
-                                      : Colors.transparent,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Text(
-                                  '$day',
-                                  style: TextStyle(
-                                    fontSize: 11,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: Container(
+                                  width: dateExtent,
+                                  height: dateExtent,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
                                     color: isToday
-                                        ? colors.onPrimary
-                                        : colors.onSurface,
+                                        ? AppTheme.primary
+                                        : Colors.transparent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    '$day',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isToday
+                                          ? Colors.white
+                                          : colors.onSurface,
+                                      fontWeight: isToday
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -677,7 +694,7 @@ class _RecordRangeBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       alignment: Alignment.centerLeft,
       decoration: BoxDecoration(
-        color: Colors.blue.shade200.withValues(alpha: 0.6),
+        color: AppTheme.primaryContainer,
         borderRadius: BorderRadius.horizontal(
           left: segment.continuesBefore
               ? Radius.zero
@@ -694,7 +711,7 @@ class _RecordRangeBar extends StatelessWidget {
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
           fontSize: 10,
           height: 1,
-          color: Colors.blue.shade900,
+          color: AppTheme.ink,
           fontWeight: FontWeight.w600,
         ),
       ),

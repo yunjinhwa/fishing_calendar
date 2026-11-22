@@ -4,6 +4,7 @@ import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/presentation/calendar/calendar_page.dart';
+import 'package:fishing_build/presentation/common/record_action_footer.dart';
 import 'package:fishing_build/presentation/common/top_card_notification.dart';
 import 'package:fishing_build/presentation/record/record_detail_page.dart';
 import 'package:fishing_build/presentation/record/record_form_page.dart';
@@ -30,6 +31,42 @@ void main() {
 
     expect(find.byIcon(Icons.phishing), findsOneWidget);
   });
+
+  testWidgets(
+    'map and record actions have even padding above the bottom tabs',
+    (tester) async {
+      addTearDown(tester.view.reset);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(393, 780);
+      tester.view.padding = const FakeViewPadding(bottom: 24);
+      tester.view.viewPadding = const FakeViewPadding(bottom: 24);
+      await AuthSessionRepository.instance.setSessionForTesting(
+        plan: UserPlan.free,
+        email: 'compact-actions@example.com',
+      );
+      await tester.pumpWidget(const FishingBuildApp());
+      await tester.pumpAndSettle();
+
+      for (final label in ['지도', '기록']) {
+        await tester.tap(find.widgetWithText(NavigationDestination, label));
+        await tester.pumpAndSettle();
+
+        final create = find.widgetWithText(FilledButton, '기록 작성').hitTestable();
+        final footer = find.ancestor(
+          of: create,
+          matching: find.byType(RecordActionFooter),
+        );
+        final button = tester.getRect(create);
+        final footerBounds = tester.getRect(footer);
+        final tabs = tester.getRect(find.byType(NavigationBar));
+        expect(button.top - footerBounds.top, 10);
+        expect(tabs.top - button.bottom, 10);
+        expect(footerBounds.bottom, tabs.top);
+        expect(tabs.bottom, 780);
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('tab changes reject old tab notices before the next frame', (
     tester,
@@ -280,7 +317,7 @@ void main() {
 
     expect(find.text('지도'), findsWidgets);
 
-    await tester.tap(find.byIcon(Icons.add_circle_outline));
+    await tester.tap(find.widgetWithText(NavigationDestination, '기록'));
     await tester.pumpAndSettle();
 
     expect(find.text('로그인이 필요합니다'), findsOneWidget);

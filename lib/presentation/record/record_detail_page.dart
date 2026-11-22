@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/maps/kakao_map_configuration.dart';
 import '../../data/maps/map_location.dart';
 import '../../data/models/fishing_record.dart';
@@ -224,6 +225,9 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
   @override
   Widget build(BuildContext context) {
     final mapLocation = _locationForMap();
+    final theme = Theme.of(context);
+    final canChange =
+        _unavailableReason == null && !_isPreparingDelete && !_isDeleting;
     return PopScope<bool>(
       canPop: !_isPreparingDelete && !_isDeleting,
       onPopInvokedWithResult: (didPop, result) {
@@ -239,28 +243,58 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                   child: LinearProgressIndicator(),
                 )
               : null,
-          actions: [
-            IconButton(
-              onPressed:
-                  _unavailableReason != null ||
-                      _isPreparingDelete ||
-                      _isDeleting
-                  ? null
-                  : editRecord,
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: '수정',
+        ),
+        bottomNavigationBar: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: AppTheme.border)),
+          ),
+          child: SafeArea(
+            minimum: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: IconButton.outlined(
+                    onPressed: canChange ? editRecord : null,
+                    tooltip: '수정',
+                    icon: const _DetailActionLabel(
+                      icon: Icons.edit_outlined,
+                      label: '수정',
+                    ),
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: const BorderSide(color: AppTheme.border),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: IconButton.outlined(
+                    onPressed: canChange ? deleteRecord : null,
+                    tooltip: '삭제',
+                    icon: const _DetailActionLabel(
+                      icon: Icons.delete_outline,
+                      label: '삭제',
+                    ),
+                    style: IconButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error,
+                      side: BorderSide(
+                        color: canChange
+                            ? theme.colorScheme.error
+                            : AppTheme.border,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            IconButton(
-              onPressed:
-                  _unavailableReason != null ||
-                      _isPreparingDelete ||
-                      _isDeleting
-                  ? null
-                  : deleteRecord,
-              icon: const Icon(Icons.delete_outline),
-              tooltip: '삭제',
-            ),
-          ],
+          ),
         ),
         body: _unavailableReason != null
             ? SafeArea(
@@ -299,13 +333,19 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
 
                     Text(
                       _formatDateTimeRange(record.startAt, record.endAt),
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: AppTheme.muted,
+                      ),
                     ),
                     const SizedBox(height: 12),
 
                     Row(
                       children: [
-                        const Icon(Icons.place_outlined, size: 18),
+                        const Icon(
+                          Icons.place_outlined,
+                          size: 18,
+                          color: AppTheme.primary,
+                        ),
                         const SizedBox(width: 6),
                         Expanded(child: Text(record.location)),
                       ],
@@ -331,10 +371,10 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
                     ],
                     const SizedBox(height: 24),
 
-                    const _SectionTitle(title: '외부 데이터'),
-                    const SizedBox(height: 8),
                     _InfoCard(
                       children: [
+                        const _SectionTitle(title: '외부 데이터'),
+                        const SizedBox(height: 12),
                         _InfoRow(label: '물때', value: record.tide ?? '-'),
                         _InfoRow(label: '날씨', value: record.weather ?? '-'),
                         _InfoRow(
@@ -448,6 +488,27 @@ class _RecordDetailPageState extends State<RecordDetailPage> {
   }
 }
 
+class _DetailActionLabel extends StatelessWidget {
+  const _DetailActionLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(label, style: Theme.of(context).textTheme.labelLarge),
+        ),
+      ],
+    );
+  }
+}
+
 class _SectionTitle extends StatelessWidget {
   final String title;
 
@@ -473,7 +534,7 @@ class _InfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: margin,
+      margin: margin ?? EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -504,7 +565,7 @@ class _InfoRow extends StatelessWidget {
               label,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+              ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
             ),
           ),
           Expanded(
@@ -532,7 +593,7 @@ class _EmptyInfoCard extends StatelessWidget {
           message,
           style: Theme.of(
             context,
-          ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+          ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
         ),
       ],
     );

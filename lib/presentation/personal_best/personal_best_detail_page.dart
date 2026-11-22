@@ -1,5 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/models/personal_best_record.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
@@ -100,8 +103,20 @@ class _PersonalBestDetailPageState extends State<PersonalBestDetailPage> {
   Widget build(BuildContext context) {
     final record = _record;
     return Scaffold(
-      appBar: AppBar(title: const Text('기록어 상세')),
+      appBar: AppBar(title: Text(record?.speciesName ?? '기록어 상세')),
+      bottomNavigationBar: record == null
+          ? null
+          : SafeArea(
+              top: false,
+              minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton.icon(
+                onPressed: _openShare,
+                icon: const Icon(Icons.ios_share_outlined),
+                label: const Text('공유 이미지 미리보기'),
+              ),
+            ),
       body: SafeArea(
+        bottom: false,
         child: RecordHistoryScope(
           isActive: _isCurrentSession,
           child: record == null
@@ -118,13 +133,35 @@ class _PersonalBestDetailPageState extends State<PersonalBestDetailPage> {
                     ),
                   ),
                 )
-              : _buildRecord(context, record),
+              : _buildRecord(record),
         ),
       ),
     );
   }
 
-  Widget _buildRecord(BuildContext context, PersonalBestRecord record) {
+  Future<void> _openShare() async {
+    final allowed = await requireMemberAccess(
+      context,
+      message: '기록어 공유는 로그인 후 사용할 수 있습니다.',
+    );
+    if (!allowed || !mounted || !_isCurrentSession) return;
+    final latest = _repository.getPersonalBest(
+      widget.record.speciesName,
+      sortType: _sortType,
+    );
+    if (latest == null) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ShareRecordPage(
+          record: latest,
+          repository: _repository,
+          recordChanges: _recordChanges,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecord(PersonalBestRecord record) {
     final source = record.sourceRecord;
     final criterion = record.selectedType == PersonalBestSortType.length
         ? '크기 기록'
@@ -132,25 +169,6 @@ class _PersonalBestDetailPageState extends State<PersonalBestDetailPage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text(
-          record.speciesName,
-          style: Theme.of(
-            context,
-          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 16),
-        _BestEvidenceCard(
-          title: '최고 크기',
-          value: record.lengthText,
-          evidence: record.lengthBest,
-        ),
-        const SizedBox(height: 8),
-        _BestEvidenceCard(
-          title: '최고 무게',
-          value: record.weightText,
-          evidence: record.weightBest,
-        ),
-        const SizedBox(height: 16),
         Wrap(
           spacing: 8,
           children: [
@@ -170,36 +188,70 @@ class _PersonalBestDetailPageState extends State<PersonalBestDetailPage> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        _SectionTitle(title: '$criterion의 출조 사진'),
-        const SizedBox(height: 8),
-        if (source.photos.isEmpty)
+        const SizedBox(height: 12),
+        if (source.photos.length <= 1)
           ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: const PersonalBestPhoto(
-              photo: null,
+            borderRadius: BorderRadius.circular(12),
+            child: PersonalBestPhoto(
+              photo: source.photos.firstOrNull,
               width: double.infinity,
-              height: 180,
+              height: 196,
             ),
           )
         else
-          SizedBox(
-            height: 180,
-            child: ListView.separated(
-              key: ValueKey('${source.id}-${record.selectedType}'),
-              scrollDirection: Axis.horizontal,
-              itemCount: source.photos.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (context, index) => ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: PersonalBestPhoto(
-                  photo: source.photos[index],
-                  width: 260,
-                  height: 180,
+          LayoutBuilder(
+            builder: (context, constraints) => SizedBox(
+              height: 196,
+              child: ListView.separated(
+                key: ValueKey('${source.id}-${record.selectedType}'),
+                scrollDirection: Axis.horizontal,
+                itemCount: source.photos.length,
+                separatorBuilder: (context, index) => const SizedBox(width: 8),
+                itemBuilder: (context, index) => ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: PersonalBestPhoto(
+                    photo: source.photos[index],
+                    width: math.min(constraints.maxWidth * 0.84, 360.0),
+                    height: 196,
+                  ),
                 ),
               ),
             ),
           ),
+        const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const gap = 8.0;
+            final stack =
+                constraints.maxWidth < 280 ||
+                MediaQuery.textScalerOf(context).scale(16) > 20;
+            final cardWidth = stack
+                ? constraints.maxWidth
+                : (constraints.maxWidth - gap) / 2;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                SizedBox(
+                  width: cardWidth,
+                  child: _BestEvidenceCard(
+                    title: '최고 크기',
+                    value: record.lengthText,
+                    evidence: record.lengthBest,
+                  ),
+                ),
+                SizedBox(
+                  width: cardWidth,
+                  child: _BestEvidenceCard(
+                    title: '최고 무게',
+                    value: record.weightText,
+                    evidence: record.weightBest,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
         const SizedBox(height: 24),
         _SectionTitle(title: '$criterion의 출조 정보'),
         const SizedBox(height: 8),
@@ -225,40 +277,6 @@ class _PersonalBestDetailPageState extends State<PersonalBestDetailPage> {
             ),
           ],
         ),
-        const SizedBox(height: 24),
-        const _SectionTitle(title: '공유 이미지'),
-        const SizedBox(height: 8),
-        _InfoCard(
-          children: [
-            const Text('선택한 조과의 수치와 출조 사진으로 공유 이미지를 만듭니다.'),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () async {
-                final allowed = await requireMemberAccess(
-                  context,
-                  message: '기록어 공유는 로그인 후 사용할 수 있습니다.',
-                );
-                if (!allowed || !context.mounted || !_isCurrentSession) return;
-                final latest = _repository.getPersonalBest(
-                  widget.record.speciesName,
-                  sortType: _sortType,
-                );
-                if (latest == null) return;
-                await Navigator.of(context).push<void>(
-                  MaterialPageRoute(
-                    builder: (_) => ShareRecordPage(
-                      record: latest,
-                      repository: _repository,
-                      recordChanges: _recordChanges,
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.ios_share_outlined),
-              label: const Text('공유 이미지 미리보기'),
-            ),
-          ],
-        ),
       ],
     );
   }
@@ -278,15 +296,27 @@ class _BestEvidenceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = evidence?.record;
+    final theme = Theme.of(context);
     return _InfoCard(
       children: [
-        _InfoRow(label: title, value: value),
+        Text(
+          title,
+          style: theme.textTheme.labelLarge?.copyWith(color: AppTheme.muted),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
         Text(
           source == null
               ? '측정 기록이 없습니다.'
               : '${_formatDate(source.startAt)} · ${source.location} · '
                     '${evidence!.catchIndex + 1}번째 조과',
-          style: Theme.of(context).textTheme.bodySmall,
+          style: theme.textTheme.bodySmall?.copyWith(color: AppTheme.muted),
         ),
       ],
     );
@@ -327,6 +357,7 @@ class _InfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

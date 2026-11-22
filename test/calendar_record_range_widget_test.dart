@@ -248,6 +248,20 @@ void main() {
     },
   );
 
+  testWidgets('a sparse six-week month fits on a compact screen', (
+    tester,
+  ) async {
+    final month = DateTime(2026, 11);
+    final start = DateTime(2026, 11, 5);
+    await records.addRecord(_record('compact-month', start, _nextDate(start)));
+    await _pumpCalendar(tester, size: const Size(320, 500), month: month);
+
+    expect(_day(month).hitTestable(), findsOneWidget);
+    expect(_day(DateTime(2026, 11, 30)).hitTestable(), findsOneWidget);
+    expect(_segment('compact-month', _weekIndex(start)), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'narrow screens and large text keep ranges and overflow tappable',
     (tester) async {
@@ -294,6 +308,7 @@ Future<void> _pumpCalendar(
   WidgetTester tester, {
   Size size = const Size(800, 1600),
   TextScaler textScaler = TextScaler.noScaling,
+  DateTime? month,
 }) async {
   addTearDown(tester.view.reset);
   tester.view.physicalSize = size;
@@ -307,7 +322,7 @@ Future<void> _pumpCalendar(
         data: MediaQuery.of(context).copyWith(textScaler: textScaler),
         child: child!,
       ),
-      home: const CalendarPage(),
+      home: CalendarPage(initialMonth: month),
     ),
   );
   await tester.pumpAndSettle();

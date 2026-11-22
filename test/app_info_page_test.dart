@@ -178,12 +178,13 @@ void main() {
       );
       final owner = auth.dataOwnerKey;
       await tester.pumpWidget(const MaterialApp(home: MyPage()));
-      final tile = find.widgetWithText(ListTile, '앱 정보');
+      final tile = find.widgetWithText(ListTile, '앱 정보').hitTestable();
       await tester.scrollUntilVisible(
         tile,
         250,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.pumpAndSettle();
       await tester.tap(tile);
       await tester.pumpAndSettle();
       expect(find.byType(AppInfoPage), findsOneWidget);

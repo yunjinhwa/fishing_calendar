@@ -111,7 +111,7 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('비밀번호 재설정'),
+      backgroundColor: Colors.white,
       actions: [
         IconButton(
           tooltip: '재설정 화면 새로고침',
@@ -131,13 +131,8 @@ class _PasswordResetPageState extends State<PasswordResetPage> {
               padding: const EdgeInsets.all(24),
               children: [
                 const SizedBox(height: 16),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Icon(Icons.lock_reset_outlined, size: 40),
-                ),
-                const SizedBox(height: 20),
                 Text(
-                  '비밀번호를 잊으셨나요?',
+                  '비밀번호 재설정',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),

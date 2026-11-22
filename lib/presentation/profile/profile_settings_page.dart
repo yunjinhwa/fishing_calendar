@@ -229,7 +229,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
         body: !(_allowed || _canResumeDeletion)
             ? Center(
                 child: Padding(
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(16),
                   child: Text(
                     _sameSession
                         ? '현재 계정 상태에서는 회원 정보를 변경할 수 없습니다.'
@@ -246,11 +246,11 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
                       InputDecorator(
                         decoration: const InputDecoration(
                           labelText: '이메일',
-                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.email_outlined),
                         ),
                         child: SelectableText(_email),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
                       TextField(
                         key: const ValueKey('profile-nickname'),
                         controller: _nicknameController,
@@ -263,7 +263,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
                         onSubmitted: (_) => _save(),
                         decoration: InputDecoration(
                           labelText: '닉네임',
-                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.person_outline),
                           helperText: '2~20자 · 한글, 영문, 숫자, 공백, 밑줄, 하이픈',
                           helperMaxLines: 3,
                           errorText: _error,
@@ -304,9 +304,8 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
                         child: Text(_isSaving ? '저장 중...' : '저장'),
                       ),
                     ],
-                    const SizedBox(height: 32),
-                    const Divider(),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 24),
+                    const Divider(height: 24),
                     if (_canResumeDeletion) ...[
                       Card(
                         color: Theme.of(context).colorScheme.errorContainer,

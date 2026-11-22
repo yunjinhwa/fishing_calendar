@@ -10,6 +10,7 @@ import 'package:fishing_build/data/repositories/auth_session_repository.dart';
 import 'package:fishing_build/data/repositories/fishing_record_repository.dart';
 import 'package:fishing_build/data/services/external_data_service.dart';
 import 'package:fishing_build/data/services/network_status_service.dart';
+import 'package:fishing_build/presentation/common/record_action_footer.dart';
 import 'package:fishing_build/presentation/map/location_conditions_card.dart';
 import 'package:fishing_build/presentation/map/map_detail_page.dart';
 import 'package:fishing_build/presentation/map/map_page.dart';
@@ -36,6 +37,54 @@ void main() {
       plan: UserPlan.free,
       email: 'map-widget@example.com',
     );
+  });
+
+  testWidgets('map actions stay together below the scrollable map', (
+    tester,
+  ) async {
+    final controller = MapSelectionController(
+      locationGateway: _LocationGateway(),
+    );
+    await _openMap(
+      tester,
+      controller: controller,
+      viewSize: const Size(393, 640),
+    );
+
+    final footer = find.byType(RecordActionFooter);
+    final details = find.descendant(
+      of: footer,
+      matching: find.widgetWithText(OutlinedButton, '자세히 보기'),
+    );
+    final create = find.descendant(
+      of: footer,
+      matching: find.widgetWithText(FilledButton, '기록 작성'),
+    );
+    final detailsPosition = tester.getCenter(details);
+    final createPosition = tester.getCenter(create);
+    expect(detailsPosition.dy, createPosition.dy);
+    expect(detailsPosition.dx, lessThan(createPosition.dx));
+
+    final scrollView = find.byType(ListView).first;
+    await tester.drag(scrollView, const Offset(0, -240));
+    await tester.pumpAndSettle();
+    final scrollable = find
+        .descendant(of: scrollView, matching: find.byType(Scrollable))
+        .first;
+    expect(
+      tester.state<ScrollableState>(scrollable).position.pixels,
+      greaterThan(0),
+    );
+    expect(tester.getCenter(details), detailsPosition);
+    expect(tester.getCenter(create), createPosition);
+
+    tester.view.viewInsets = const FakeViewPadding(bottom: 220);
+    await tester.pumpAndSettle();
+    expect(footer, findsNothing);
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
+    expect(tester.getCenter(create), createPosition);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('inactive map and ungranted location never request GPS', (
@@ -562,11 +611,26 @@ void main() {
           matching: find.byType(Scrollable),
         ),
       );
+      await tester.pumpAndSettle();
+      final resultsPosition = tester
+          .state<ScrollableState>(
+            find.descendant(of: resultList, matching: find.byType(Scrollable)),
+          )
+          .position;
+      final resultsOffset = resultsPosition.pixels;
       await tester.tap(find.widgetWithText(ListTile, '검색 항구 29'));
       await tester.pumpAndSettle();
       expect(controller.selection.name, '검색 항구 29');
       expect(controller.selection.latitude, closeTo(35.029, 0.0000001));
       expect(controller.selection.longitude, 129);
+      expect(controller.results, hasLength(30));
+      expect(resultsPosition.pixels, resultsOffset);
+      expect(
+        tester
+            .widget<ListTile>(find.widgetWithText(ListTile, '검색 항구 29'))
+            .selected,
+        isTrue,
+      );
       expect(lifecycle.created, 1);
       expect(lifecycle.disposed, 0);
 
@@ -581,6 +645,56 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('selecting places keeps the results and moves the outline', (
+    tester,
+  ) async {
+    final results = _searchResults(3);
+    final controller = MapSelectionController(
+      locationGateway: _LocationGateway(),
+    )..setGateway(_SearchGateway(results));
+    await _openMap(tester, controller: controller);
+
+    const summaryKey = ValueKey('map-selected-location');
+    expect(find.byKey(summaryKey), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '항구');
+    await tester.tap(find.byTooltip('검색'));
+    await tester.pumpAndSettle();
+
+    final visibleResults = controller.results;
+    expect(controller.selection, same(results.first));
+    expect(find.byKey(summaryKey), findsNothing);
+
+    for (final index in [2, 1, 0]) {
+      final result = find.widgetWithText(ListTile, results[index].name);
+      await tester.tap(result);
+      await tester.pumpAndSettle();
+
+      expect(controller.selection, same(results[index]));
+      expect(controller.results, same(visibleResults));
+      expect(find.byKey(summaryKey), findsNothing);
+      for (var row = 0; row < results.length; row++) {
+        final outline = find.byKey(ValueKey('map-search-result-outline-$row'));
+        final card = tester.widget<Card>(outline);
+        final colors = Theme.of(tester.element(outline)).colorScheme;
+        final border = (card.shape! as RoundedRectangleBorder).side;
+        expect(border.width, row == index ? 2 : 1);
+        expect(
+          border.color,
+          row == index ? colors.primary : colors.outlineVariant,
+        );
+        expect(
+          tester
+              .widget<ListTile>(
+                find.widgetWithText(ListTile, results[row].name),
+              )
+              .selected,
+          row == index,
+        );
+      }
+    }
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'a new search starts at the first result without recreating the map',

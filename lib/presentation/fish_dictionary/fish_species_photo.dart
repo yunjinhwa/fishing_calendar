@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/fish/fish_photo_validation.dart';
 import '../../data/models/fish_species.dart';
 
@@ -24,7 +25,7 @@ class FishSpeciesPhoto extends StatelessWidget {
     final url = fish.imageUrl?.trim();
     final hasPhoto = hasUsableFishPhoto(fish);
     return ColoredBox(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      color: AppTheme.coolGray,
       child: SizedBox(
         height: height,
         width: double.infinity,

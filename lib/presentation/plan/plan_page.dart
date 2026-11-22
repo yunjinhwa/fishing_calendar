@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/models/plan_entitlement.dart';
 import '../../data/models/user_plan.dart';
 import '../../data/repositories/auth_session_repository.dart';
@@ -201,36 +202,53 @@ class _PlanPageState extends State<PlanPage> {
           appBar: AppBar(title: const Text('플랜 정보')),
           body: SafeArea(
             child: ListView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(16),
               children: [
-                Card(
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: isPaid
+                        ? AppTheme.primaryContainer
+                        : AppTheme.coolGray,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Column(
-                      children: [
-                        Icon(
-                          isPaid
-                              ? Icons.workspace_premium
-                              : Icons.person_outline,
-                          size: 48,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          authSession.planLabel,
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          isPaid
-                              ? authSession.isPlanMigrationPending
-                                    ? '기존 로컬 기록을 클라우드로 이전할 준비 중입니다.'
-                                    : '클라우드 동기화와 오프라인 업로드 대기열을 사용할 수 있습니다.'
-                              : '출조 기록 원본을 현재 기기에 저장합니다.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
+                    child: DefaultTextStyle.merge(
+                      style: const TextStyle(color: AppTheme.ink),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                isPaid
+                                    ? Icons.workspace_premium_outlined
+                                    : Icons.phone_android_outlined,
+                                color: isPaid ? AppTheme.primary : AppTheme.ink,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  authSession.planLabel,
+                                  style: Theme.of(context).textTheme.titleLarge
+                                      ?.copyWith(
+                                        color: AppTheme.ink,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            isPaid
+                                ? authSession.isPlanMigrationPending
+                                      ? '기존 로컬 기록을 클라우드로 이전할 준비 중입니다.'
+                                      : '클라우드 동기화와 오프라인 업로드 대기열을 사용할 수 있습니다.'
+                                : '출조 기록 원본을 현재 기기에 저장합니다.',
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

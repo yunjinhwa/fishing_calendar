@@ -282,12 +282,15 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: MyPage()));
 
       for (final document in PolicyDocument.values) {
-        final tile = find.widgetWithText(ListTile, document.title);
+        final tile = find
+            .widgetWithText(ListTile, document.title)
+            .hitTestable();
         await tester.scrollUntilVisible(
           tile,
           250,
           scrollable: find.byType(Scrollable).first,
         );
+        await tester.pumpAndSettle();
         await tester.tap(tile);
         await tester.pumpAndSettle();
 

@@ -1,13 +1,31 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../auth/auth_access_guard.dart';
+import '../common/record_action_footer.dart';
 import '../record/record_detail_page.dart';
 import '../record/record_form_page.dart';
 import '../record/record_history_scope.dart';
+import '../record/record_photo_thumbnail.dart';
 
 enum RecordSortType { newest, oldest }
+
+typedef _RecordFilters = ({
+  String? genre,
+  DateTime? start,
+  DateTime? end,
+  RecordSortType sort,
+});
+
+const _defaultRecordFilters = (
+  genre: null,
+  start: null,
+  end: null,
+  sort: RecordSortType.newest,
+);
+const _recordGenres = ['전체', '루어', '찌낚시', '선상', '원투', '기타'];
 
 class RecordSearchPage extends StatefulWidget {
   final bool showAppBar;
@@ -29,12 +47,7 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
   final searchController = TextEditingController();
   final _recordRepository = FishingRecordRepository.instance;
 
-  String? selectedGenre;
-  DateTime? startDate;
-  DateTime? endDate;
-  RecordSortType sortType = RecordSortType.newest;
-
-  final genres = const ['전체', '루어', '찌낚시', '선상', '원투', '기타'];
+  _RecordFilters _filters = _defaultRecordFilters;
 
   @override
   void initState() {
@@ -60,6 +73,12 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
   List<FishingRecord> get filteredRecords {
     final keyword = searchController.text.trim();
     final records = _recordRepository.getAllRecords();
+    final (
+      genre: selectedGenre,
+      start: startDate,
+      end: endDate,
+      sort: sortType,
+    ) = _filters;
 
     final filtered = records.where((record) {
       final matchesKeyword =
@@ -80,16 +99,16 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
       final matchesStartDate =
           startDate == null ||
           !record.startAt.isBefore(
-            DateTime(startDate!.year, startDate!.month, startDate!.day),
+            DateTime(startDate.year, startDate.month, startDate.day),
           );
 
       final matchesEndDate =
           endDate == null ||
           record.startAt.isBefore(
             DateTime(
-              endDate!.year,
-              endDate!.month,
-              endDate!.day,
+              endDate.year,
+              endDate.month,
+              endDate.day,
             ).add(const Duration(days: 1)),
           );
 
@@ -111,87 +130,61 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
     return filtered;
   }
 
-  Future<void> pickStartDate() async {
-    final pickedDate = await showDatePicker(
+  Future<void> _showFilters() async {
+    FocusScope.of(context).unfocus();
+    final filters = await showModalBottomSheet<_RecordFilters>(
       context: context,
-      initialDate: startDate ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2035),
+      useSafeArea: true,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _RecordFilterSheet(initial: _filters),
     );
-
-    if (pickedDate == null) {
-      return;
-    }
-
-    setState(() {
-      startDate = pickedDate;
-    });
-  }
-
-  Future<void> pickEndDate() async {
-    final pickedDate = await showDatePicker(
-      context: context,
-      initialDate: endDate ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2035),
-    );
-
-    if (pickedDate == null) {
-      return;
-    }
-
-    setState(() {
-      endDate = pickedDate;
-    });
+    if (!mounted || filters == null) return;
+    setState(() => _filters = filters);
   }
 
   void resetFilters() {
     setState(() {
       searchController.clear();
-      selectedGenre = null;
-      startDate = null;
-      endDate = null;
-      sortType = RecordSortType.newest;
+      _filters = _defaultRecordFilters;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final records = filteredRecords;
+    final (
+      genre: selectedGenre,
+      start: startDate,
+      end: endDate,
+      sort: sortType,
+    ) = _filters;
+    final hasFilters = _filters != _defaultRecordFilters;
+    final showWriteAction =
+        widget.showAppBar && MediaQuery.viewInsetsOf(context).bottom == 0;
 
     return Scaffold(
       appBar: widget.showAppBar
-          ? AppBar(
-              title: Text(widget.appBarTitle),
-              actions: [
-                TextButton.icon(
-                  onPressed: () async {
-                    final allowed = await requireMemberAccess(
-                      context,
-                      message: '출조 기록 작성은 로그인 후 사용할 수 있습니다.',
-                    );
-
-                    if (!allowed || !context.mounted) {
-                      return;
-                    }
-
-                    final saved = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(builder: (_) => const RecordFormPage()),
-                    );
-
-                    if (saved == true && context.mounted) {
-                      setState(() {});
-                    }
-                  },
-                  icon: const Icon(Icons.edit_note),
-                  label: const Text('기록 작성'),
-                ),
-                IconButton(
-                  onPressed: resetFilters,
-                  icon: const Icon(Icons.refresh),
-                  tooltip: '필터 초기화',
-                ),
-              ],
+          ? AppBar(title: Text(widget.appBarTitle))
+          : null,
+      bottomNavigationBar: showWriteAction
+          ? RecordActionFooter(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: FilledButton.icon(
+                onPressed: () async {
+                  final allowed = await requireMemberAccess(
+                    context,
+                    message: '출조 기록 작성은 로그인 후 사용할 수 있습니다.',
+                  );
+                  if (!allowed || !context.mounted) return;
+                  final saved = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(builder: (_) => const RecordFormPage()),
+                  );
+                  if (saved == true && context.mounted) setState(() {});
+                },
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('기록 작성'),
+              ),
             )
           : null,
       body: SafeArea(
@@ -200,38 +193,80 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
-                child: _SearchFilterArea(
-                  searchController: searchController,
-                  genres: genres,
-                  selectedGenre: selectedGenre,
-                  startDate: startDate,
-                  endDate: endDate,
-                  sortType: sortType,
-                  onSearchChanged: () {
-                    setState(() {});
-                  },
-                  onGenreChanged: (genre) {
-                    setState(() {
-                      selectedGenre = genre;
-                    });
-                  },
-                  onStartDateTap: pickStartDate,
-                  onEndDateTap: pickEndDate,
-                  onSortChanged: (value) {
-                    setState(() {
-                      sortType = value;
-                    });
-                  },
-                  onStartDateClear: () {
-                    setState(() {
-                      startDate = null;
-                    });
-                  },
-                  onEndDateClear: () {
-                    setState(() {
-                      endDate = null;
-                    });
-                  },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: searchController,
+                              textInputAction: TextInputAction.search,
+                              decoration: InputDecoration(
+                                labelText: '검색어',
+                                hintText: '장소, 위치 별칭, 어종, 메모 검색',
+                                prefixIcon: const Icon(Icons.search),
+                                suffixIcon: searchController.text.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: '검색어 지우기',
+                                        onPressed: () {
+                                          setState(searchController.clear);
+                                        },
+                                        icon: const Icon(Icons.close),
+                                      ),
+                              ),
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.outlined(
+                            tooltip: '필터',
+                            isSelected: hasFilters,
+                            onPressed: _showFilters,
+                            icon: const Icon(Icons.tune),
+                            style: hasFilters
+                                ? IconButton.styleFrom(
+                                    backgroundColor: AppTheme.primaryContainer,
+                                    foregroundColor: AppTheme.primary,
+                                  )
+                                : null,
+                          ),
+                        ],
+                      ),
+                      if (hasFilters) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            if (selectedGenre != null)
+                              Chip(label: Text(selectedGenre)),
+                            if (startDate != null)
+                              Chip(
+                                label: Text(
+                                  '${_formatFilterDate(startDate)}부터',
+                                ),
+                              ),
+                            if (endDate != null)
+                              Chip(
+                                label: Text('${_formatFilterDate(endDate)}까지'),
+                              ),
+                            TextButton(
+                              onPressed: () {
+                                setState(
+                                  () => _filters = _defaultRecordFilters,
+                                );
+                              },
+                              child: const Text('필터 초기화'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
               SliverToBoxAdapter(
@@ -256,9 +291,13 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
                 ),
               ),
               if (records.isEmpty)
-                const SliverFillRemaining(
+                SliverFillRemaining(
                   hasScrollBody: false,
-                  child: _EmptySearchResultView(),
+                  child: _EmptySearchResultView(
+                    onReset: hasFilters || searchController.text.isNotEmpty
+                        ? resetFilters
+                        : null,
+                  ),
                 )
               else
                 SliverPadding(
@@ -297,109 +336,139 @@ class _RecordSearchPageState extends State<RecordSearchPage> {
   }
 }
 
-class _SearchFilterArea extends StatelessWidget {
-  final TextEditingController searchController;
-  final List<String> genres;
-  final String? selectedGenre;
-  final DateTime? startDate;
-  final DateTime? endDate;
-  final RecordSortType sortType;
-  final VoidCallback onSearchChanged;
-  final ValueChanged<String?> onGenreChanged;
-  final VoidCallback onStartDateTap;
-  final VoidCallback onEndDateTap;
-  final VoidCallback onStartDateClear;
-  final VoidCallback onEndDateClear;
-  final ValueChanged<RecordSortType> onSortChanged;
+class _RecordFilterSheet extends StatefulWidget {
+  const _RecordFilterSheet({required this.initial});
 
-  const _SearchFilterArea({
-    required this.searchController,
-    required this.genres,
-    required this.selectedGenre,
-    required this.startDate,
-    required this.endDate,
-    required this.sortType,
-    required this.onSearchChanged,
-    required this.onGenreChanged,
-    required this.onStartDateTap,
-    required this.onEndDateTap,
-    required this.onStartDateClear,
-    required this.onEndDateClear,
-    required this.onSortChanged,
-  });
+  final _RecordFilters initial;
+
+  @override
+  State<_RecordFilterSheet> createState() => _RecordFilterSheetState();
+}
+
+class _RecordFilterSheetState extends State<_RecordFilterSheet> {
+  late _RecordFilters _draft = widget.initial;
+
+  Future<void> _pickDate({required bool isStart}) async {
+    final current = isStart ? _draft.start : _draft.end;
+    final date = await showDatePicker(
+      context: context,
+      initialDate: current ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (!mounted || date == null) return;
+    _changeDate(isStart: isStart, date: date);
+  }
+
+  void _changeDate({required bool isStart, required DateTime? date}) {
+    setState(() {
+      _draft = (
+        genre: _draft.genre,
+        start: isStart ? date : _draft.start,
+        end: isStart ? _draft.end : date,
+        sort: _draft.sort,
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      elevation: 1,
-      color: Theme.of(context).colorScheme.surface,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+    final (genre: selectedGenre, :start, :end, :sort) = _draft;
+    final textTheme = Theme.of(context).textTheme;
+    return SafeArea(
+      top: false,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: searchController,
-              decoration: const InputDecoration(
-                labelText: '검색어',
-                hintText: '장소, 위치 별칭, 어종, 메모 검색',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.search),
-              ),
-              onChanged: (_) => onSearchChanged(),
-            ),
-            const SizedBox(height: 12),
-
-            DropdownButtonFormField<String>(
-              initialValue: selectedGenre,
-              decoration: const InputDecoration(
-                labelText: '낚시 장르',
-                border: OutlineInputBorder(),
-              ),
-              items: genres
-                  .map(
-                    (genre) =>
-                        DropdownMenuItem(value: genre, child: Text(genre)),
-                  )
-                  .toList(),
-              onChanged: onGenreChanged,
-            ),
-            const SizedBox(height: 12),
-
             Row(
               children: [
-                Expanded(
-                  child: _DateFilterButton(
-                    label: '시작일',
-                    date: startDate,
-                    onTap: onStartDateTap,
-                    onClear: onStartDateClear,
+                Expanded(child: Text('필터', style: textTheme.titleLarge)),
+                const CloseButton(),
+              ],
+            ),
+            Text('낚시 장르', style: textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final genre in _recordGenres)
+                  ChoiceChip(
+                    label: Text(genre),
+                    selected: (selectedGenre ?? '전체') == genre,
+                    onSelected: (_) => setState(() {
+                      _draft = (
+                        genre: genre == '전체' ? null : genre,
+                        start: start,
+                        end: end,
+                        sort: sort,
+                      );
+                    }),
                   ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Text('기간', style: textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _DateFilterButton(
+                  label: '시작일',
+                  date: start,
+                  onTap: () => _pickDate(isStart: true),
+                  onClear: () => _changeDate(isStart: true, date: null),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _DateFilterButton(
-                    label: '종료일',
-                    date: endDate,
-                    onTap: onEndDateTap,
-                    onClear: onEndDateClear,
-                  ),
+                _DateFilterButton(
+                  label: '종료일',
+                  date: end,
+                  onTap: () => _pickDate(isStart: false),
+                  onClear: () => _changeDate(isStart: false, date: null),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-
-            Row(
+            const SizedBox(height: 20),
+            Text('정렬 기준', style: textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
               children: [
-                ChoiceChip(
-                  label: const Text('최신순'),
-                  selected: sortType == RecordSortType.newest,
-                  onSelected: (_) => onSortChanged(RecordSortType.newest),
+                for (final value in RecordSortType.values)
+                  ChoiceChip(
+                    label: Text(
+                      value == RecordSortType.newest ? '최신순' : '오래된순',
+                    ),
+                    selected: sort == value,
+                    onSelected: (_) => setState(() {
+                      _draft = (
+                        genre: selectedGenre,
+                        start: start,
+                        end: end,
+                        sort: value,
+                      );
+                    }),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            OverflowBar(
+              alignment: MainAxisAlignment.end,
+              spacing: 8,
+              overflowSpacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: () =>
+                      setState(() => _draft = _defaultRecordFilters),
+                  child: const Text('초기화'),
                 ),
-                const SizedBox(width: 8),
-                ChoiceChip(
-                  label: const Text('오래된순'),
-                  selected: sortType == RecordSortType.oldest,
-                  onSelected: (_) => onSortChanged(RecordSortType.oldest),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(_draft),
+                  child: const Text('적용하기'),
                 ),
               ],
             ),
@@ -434,12 +503,13 @@ class _DateFilterButton extends StatelessWidget {
     }
 
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
+        Flexible(
           child: OutlinedButton.icon(
             onPressed: onTap,
             icon: const Icon(Icons.calendar_month_outlined),
-            label: Text(_formatDate(date!)),
+            label: Text('$label ${_formatFilterDate(date!)}'),
           ),
         ),
         IconButton(
@@ -450,12 +520,11 @@ class _DateFilterButton extends StatelessWidget {
       ],
     );
   }
+}
 
-  String _formatDate(DateTime date) {
-    String twoDigits(int value) => value.toString().padLeft(2, '0');
-
-    return '${date.year}.${twoDigits(date.month)}.${twoDigits(date.day)}';
-  }
+String _formatFilterDate(DateTime date) {
+  String twoDigits(int value) => value.toString().padLeft(2, '0');
+  return '${date.year}.${twoDigits(date.month)}.${twoDigits(date.day)}';
 }
 
 class _RecordSearchResultCard extends StatelessWidget {
@@ -466,20 +535,58 @@ class _RecordSearchResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final photo = record.photos.firstOrNull;
     return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(16),
-        title: Text(
-          record.summaryTitle,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text(
-          '${_formatDateTime(record.startAt)}\n'
-          '${record.locationDisplayName} · ${record.genreName}',
-        ),
-        isThreeLine: true,
-        trailing: const Icon(Icons.chevron_right),
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
         onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: photo == null
+                    ? const ColoredBox(
+                        color: AppTheme.coolGray,
+                        child: SizedBox.square(
+                          dimension: 64,
+                          child: Icon(
+                            Icons.set_meal_outlined,
+                            color: AppTheme.muted,
+                          ),
+                        ),
+                      )
+                    : RecordPhotoThumbnail(
+                        photo: photo,
+                        size: 64,
+                        compact: true,
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      record.summaryTitle,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_formatDateTime(record.startAt)}\n'
+                      '${record.locationDisplayName}',
+                      style: const TextStyle(color: AppTheme.muted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right, color: AppTheme.muted),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -493,7 +600,9 @@ class _RecordSearchResultCard extends StatelessWidget {
 }
 
 class _EmptySearchResultView extends StatelessWidget {
-  const _EmptySearchResultView();
+  const _EmptySearchResultView({required this.onReset});
+
+  final VoidCallback? onReset;
 
   @override
   Widget build(BuildContext context) {
@@ -503,10 +612,19 @@ class _EmptySearchResultView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.search_off_outlined,
-              size: 56,
-              color: Theme.of(context).colorScheme.primary,
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppTheme.coolGray,
+                shape: BoxShape.circle,
+              ),
+              child: SizedBox.square(
+                dimension: 72,
+                child: Icon(
+                  Icons.search_outlined,
+                  size: 36,
+                  color: AppTheme.muted,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -519,8 +637,14 @@ class _EmptySearchResultView extends StatelessWidget {
             Text(
               '검색어 또는 필터 조건을 변경해보세요.',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppTheme.muted),
             ),
+            if (onReset != null) ...[
+              const SizedBox(height: 16),
+              OutlinedButton(onPressed: onReset, child: const Text('전체 기록 보기')),
+            ],
           ],
         ),
       ),

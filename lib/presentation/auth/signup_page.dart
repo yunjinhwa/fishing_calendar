@@ -188,28 +188,20 @@ class _SignupPageState extends State<SignupPage> {
     return PopScope(
       canPop: !isSubmitting,
       child: Scaffold(
-        appBar: AppBar(title: const Text('회원가입')),
+        appBar: AppBar(backgroundColor: Colors.white),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
 
               Text(
-                '계정을 만들어 출조 기록을 관리하세요',
+                '회원가입',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 8),
-
-              Text(
-                '가입 후 무료 회원으로 시작합니다.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 20),
 
               TextField(
                 controller: emailController,
@@ -220,7 +212,7 @@ class _SignupPageState extends State<SignupPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               HoldToRevealPasswordField(
                 controller: passwordController,
@@ -231,7 +223,7 @@ class _SignupPageState extends State<SignupPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               HoldToRevealPasswordField(
                 controller: passwordConfirmController,
@@ -242,7 +234,7 @@ class _SignupPageState extends State<SignupPage> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               TextField(
                 controller: nicknameController,

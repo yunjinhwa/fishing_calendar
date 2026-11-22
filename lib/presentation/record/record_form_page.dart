@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/validation/fishing_record_validator.dart';
 import '../../data/history/historical_conditions.dart';
 import '../../data/maps/map_location.dart';
@@ -743,20 +744,74 @@ class _RecordFormPageState extends State<RecordFormPage> {
     try {
       final discard = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('저장하지 않고 나가시겠습니까?'),
-          content: const Text('작성한 내용이 저장되지 않습니다.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('계속 작성'),
+        builder: (context) {
+          final theme = Theme.of(context);
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
             ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('나가기'),
+            insetPadding: const EdgeInsets.all(20),
+            scrollable: true,
+            titleTextStyle: theme.textTheme.titleMedium?.copyWith(
+              color: AppTheme.ink,
+              fontWeight: FontWeight.w700,
             ),
-          ],
-        ),
+            title: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryContainer,
+                    borderRadius: BorderRadius.all(Radius.circular(14)),
+                  ),
+                  child: SizedBox.square(
+                    dimension: 48,
+                    child: Icon(
+                      Icons.edit_note_rounded,
+                      color: AppTheme.primary,
+                      size: 26,
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text('저장하지 않고 나가시겠습니까?'),
+              ],
+            ),
+            contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+            contentTextStyle: theme.textTheme.bodyMedium?.copyWith(
+              color: AppTheme.muted,
+            ),
+            content: const Text('작성한 내용이 저장되지 않습니다.'),
+            actionsPadding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            actionsOverflowButtonSpacing: 8,
+            actions: [
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: theme.colorScheme.errorContainer,
+                  foregroundColor: theme.colorScheme.onErrorContainer,
+                  minimumSize: const Size(0, 48),
+                ),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('나가기'),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('계속 작성'),
+              ),
+            ],
+          );
+        },
       );
       if (discard == true && mounted) Navigator.of(context).pop();
     } finally {
@@ -1526,6 +1581,22 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
   @override
   Widget build(BuildContext context) {
+    final canSave =
+        !isPickingPhoto &&
+        !_isSaving &&
+        !_isPreparingEdit &&
+        !_isChoosingLocation;
+    final theme = Theme.of(context);
+    final String? conditionsNotice;
+    if (_loadingLocationConditions) {
+      conditionsNotice = '선택한 위치의 외부 정보를 불러오는 중입니다.';
+    } else if (_locationConditionsUnavailable) {
+      conditionsNotice = '일부 정보를 자동으로 입력하지 못했습니다. 필요한 값은 직접 입력해 주세요.';
+    } else if (_locationAutoFields.isNotEmpty) {
+      conditionsNotice = '선택한 위치의 외부 정보를 자동 입력했습니다.';
+    } else {
+      conditionsNotice = null;
+    }
     return PopScope<bool>(
       canPop:
           !_hasUnsavedChanges &&
@@ -1540,6 +1611,21 @@ class _RecordFormPageState extends State<RecordFormPage> {
         appBar: AppBar(
           leading: BackButton(onPressed: _requestExit),
           title: Text(isEditMode ? '출조 기록 수정' : '출조 기록 작성'),
+          actions: [
+            TextButton(
+              key: const ValueKey('record-toolbar-save'),
+              onPressed: canSave ? saveRecord : null,
+              style: TextButton.styleFrom(foregroundColor: AppTheme.ink),
+              child: const Text('저장'),
+            ),
+            const SizedBox(width: 4),
+          ],
+          bottom: _isPreparingEdit || _isSaving
+              ? const PreferredSize(
+                  preferredSize: Size.fromHeight(2),
+                  child: LinearProgressIndicator(minHeight: 2),
+                )
+              : null,
         ),
         body: SafeArea(
           child: AbsorbPointer(
@@ -1547,8 +1633,6 @@ class _RecordFormPageState extends State<RecordFormPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                if (_isPreparingEdit || _isSaving)
-                  const LinearProgressIndicator(),
                 if (_editConflictReason != null || _editLoadError != null)
                   Card(
                     color: Theme.of(context).colorScheme.errorContainer,
@@ -1580,7 +1664,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   decoration: InputDecoration(
                     labelText: '위치 *',
                     hintText: '예: 부산 영도구 동삼동',
-                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.place_outlined),
                     suffixIcon: IconButton(
                       key: const ValueKey('record-location-search'),
                       tooltip: '위치 검색',
@@ -1598,22 +1682,33 @@ class _RecordFormPageState extends State<RecordFormPage> {
                   decoration: const InputDecoration(
                     labelText: '위치 별칭 (선택)',
                     hintText: '예: 자주 가는 방파제',
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                _DateTimeField(
-                  label: '시작 시간 *',
-                  value: formatDateTime(startAt),
-                  onTap: pickStartDateTime,
-                ),
-                const SizedBox(height: 12),
-
-                _DateTimeField(
-                  label: '종료 시간 *',
-                  value: formatDateTime(endAt),
-                  onTap: pickEndDateTime,
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('낚시 시간', style: theme.textTheme.titleSmall),
+                        const SizedBox(height: 12),
+                        _DateTimeField(
+                          label: '시작 시간 *',
+                          value: formatDateTime(startAt),
+                          onTap: pickStartDateTime,
+                        ),
+                        const SizedBox(height: 12),
+                        _DateTimeField(
+                          label: '종료 시간 *',
+                          value: formatDateTime(endAt),
+                          onTap: pickEndDateTime,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
 
@@ -1658,101 +1753,132 @@ class _RecordFormPageState extends State<RecordFormPage> {
 
                 const _SectionTitle(title: '날씨·낚시 정보'),
                 const SizedBox(height: 12),
-                if (_loadingLocationConditions ||
-                    _locationConditionsUnavailable) ...[
+                if (conditionsNotice != null) ...[
                   Semantics(
                     liveRegion: true,
-                    child: Text(
-                      _loadingLocationConditions
-                          ? '선택한 위치의 외부 정보를 불러오는 중입니다.'
-                          : '일부 정보를 자동으로 입력하지 못했습니다. 필요한 값은 직접 입력해 주세요.',
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _locationConditionsUnavailable
+                            ? const Color(0xFFFFF5E5)
+                            : AppTheme.coolGray,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            _locationConditionsUnavailable
+                                ? Icons.warning_amber_rounded
+                                : _loadingLocationConditions
+                                ? Icons.cloud_download_outlined
+                                : Icons.check_circle_outline,
+                            size: 20,
+                            color: _locationConditionsUnavailable
+                                ? const Color(0xFF8F4E00)
+                                : AppTheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(conditionsNotice)),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
                 ],
 
-                TextField(
-                  key: const ValueKey('record-tide'),
-                  controller: tideController,
-                  onChanged: (_) {
-                    setState(() {
-                      _tideManuallyEdited = true;
-                      _locationAutoFields.remove(tideController);
-                    });
-                  },
-                  maxLength: FishingRecordValidator.maxTideLength,
-                  decoration: const InputDecoration(
-                    labelText: '물때 (선택)',
-                    hintText: '예: 7물',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      children: [
+                        TextField(
+                          key: const ValueKey('record-tide'),
+                          controller: tideController,
+                          onChanged: (_) {
+                            setState(() {
+                              _tideManuallyEdited = true;
+                              _locationAutoFields.remove(tideController);
+                            });
+                          },
+                          maxLength: FishingRecordValidator.maxTideLength,
+                          decoration: const InputDecoration(
+                            labelText: '물때 (선택)',
+                            hintText: '예: 7물',
+                          ),
+                        ),
+                        const SizedBox(height: 16),
 
-                TextField(
-                  key: const ValueKey('record-weather'),
-                  controller: weatherController,
-                  onChanged: (_) {
-                    setState(() {
-                      _weatherManuallyEdited = true;
-                      _locationAutoFields.remove(weatherController);
-                      _automaticWeather = false;
-                      _automaticHistoricalWeather = false;
-                    });
-                  },
-                  maxLength: FishingRecordValidator.maxWeatherLength,
-                  decoration: const InputDecoration(
-                    labelText: '날씨 *',
-                    hintText: '예: 흐림',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
+                        TextField(
+                          key: const ValueKey('record-weather'),
+                          controller: weatherController,
+                          onChanged: (_) {
+                            setState(() {
+                              _weatherManuallyEdited = true;
+                              _locationAutoFields.remove(weatherController);
+                              _automaticWeather = false;
+                              _automaticHistoricalWeather = false;
+                            });
+                          },
+                          maxLength: FishingRecordValidator.maxWeatherLength,
+                          decoration: const InputDecoration(
+                            labelText: '날씨 *',
+                            hintText: '예: 흐림',
+                          ),
+                        ),
+                        const SizedBox(height: 16),
 
-                TextField(
-                  key: const ValueKey('record-air-temperature'),
-                  controller: airTemperatureController,
-                  onChanged: (_) {
-                    setState(() {
-                      _airTemperatureManuallyEdited = true;
-                      _locationAutoFields.remove(airTemperatureController);
-                      _automaticAirTemperature = false;
-                      _automaticHistoricalAirTemperature = false;
-                    });
-                  },
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: '기온 *',
-                    hintText: '예: 18',
-                    suffixText: '℃',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
+                        TextField(
+                          key: const ValueKey('record-air-temperature'),
+                          controller: airTemperatureController,
+                          onChanged: (_) {
+                            setState(() {
+                              _airTemperatureManuallyEdited = true;
+                              _locationAutoFields.remove(
+                                airTemperatureController,
+                              );
+                              _automaticAirTemperature = false;
+                              _automaticHistoricalAirTemperature = false;
+                            });
+                          },
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: '기온 *',
+                            hintText: '예: 18',
+                            suffixText: '℃',
+                          ),
+                        ),
+                        const SizedBox(height: 16),
 
-                TextField(
-                  key: const ValueKey('record-water-temperature'),
-                  controller: waterTemperatureController,
-                  onChanged: (_) {
-                    setState(() {
-                      _waterTemperatureManuallyEdited = true;
-                      _locationAutoFields.remove(waterTemperatureController);
-                      _automaticWaterTemperature = false;
-                      _automaticHistoricalWaterTemperature = false;
-                    });
-                  },
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: '수온 (선택)',
-                    hintText: '예: 16.2',
-                    suffixText: '℃',
-                    border: OutlineInputBorder(),
+                        TextField(
+                          key: const ValueKey('record-water-temperature'),
+                          controller: waterTemperatureController,
+                          onChanged: (_) {
+                            setState(() {
+                              _waterTemperatureManuallyEdited = true;
+                              _locationAutoFields.remove(
+                                waterTemperatureController,
+                              );
+                              _automaticWaterTemperature = false;
+                              _automaticHistoricalWaterTemperature = false;
+                            });
+                          },
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: '수온 (선택)',
+                            hintText: '예: 16.2',
+                            suffixText: '℃',
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -1877,9 +2003,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
                 const SizedBox(height: 24),
 
                 FilledButton(
-                  onPressed: isPickingPhoto || _isSaving || _isPreparingEdit
-                      ? null
-                      : saveRecord,
+                  onPressed: canSave ? saveRecord : null,
                   child: Text(_isSaving ? '저장 중…' : '저장'),
                 ),
               ],
@@ -1900,9 +2024,10 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: Theme.of(
-        context,
-      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.bold,
+        color: AppTheme.primary,
+      ),
     );
   }
 }
@@ -1922,11 +2047,10 @@ class _DateTimeField extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(10),
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
-          border: const OutlineInputBorder(),
           suffixIcon: const Icon(Icons.calendar_month_outlined),
         ),
         child: Text(value),

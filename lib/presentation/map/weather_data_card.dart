@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/history/historical_conditions.dart';
 import '../../data/maps/water_area.dart';
 import '../../data/models/external_data.dart';
@@ -113,7 +114,7 @@ class _WeatherDataCardState extends State<WeatherDataCard>
       builder: (context, constraints) {
         final textScale = MediaQuery.textScalerOf(context).scale(1);
         final columns = constraints.maxWidth >= 280 && textScale <= 1.5 ? 2 : 1;
-        const spacing = 12.0;
+        const spacing = 10.0;
         final width =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
         final history = widget.historicalWeather;
@@ -199,7 +200,6 @@ class _WeatherDataCardState extends State<WeatherDataCard>
     );
     if (widget.embedded) return metrics;
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -248,17 +248,17 @@ class _WeatherValue extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
+        color: AppTheme.coolGray,
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+              Icon(icon, size: 18, color: AppTheme.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -278,7 +278,7 @@ class _WeatherValue extends StatelessWidget {
                     color: theme.colorScheme.onSurfaceVariant,
                   )
                 : theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
           ),
           if (detail != null) ...[

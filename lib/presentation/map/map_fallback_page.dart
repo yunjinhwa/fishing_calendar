@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/validation/fishing_record_validator.dart';
 import '../common/top_card_notification.dart';
 
@@ -48,17 +49,43 @@ class _MapFallbackPageState extends State<MapFallbackPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Icon(Icons.edit_location_alt_outlined, size: 56),
+          const Card(
+            color: AppTheme.coolGray,
+            child: ListTile(
+              leading: Icon(Icons.edit_location_alt_outlined),
+              title: Text('지도를 사용하지 않고 장소 이름을 입력할 수 있습니다.'),
+            ),
+          ),
           const SizedBox(height: 16),
-          const Text('지도를 사용하지 않고 장소 이름을 입력할 수 있습니다.'),
-          const SizedBox(height: 24),
+          Text('장소 이름 선택', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (final (index, name) in _suggestions.indexed) ...[
+                  if (index > 0)
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                  ListTile(
+                    leading: const Icon(Icons.place_outlined),
+                    title: Text(name),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).pop(name),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('직접 입력', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
           TextField(
             controller: _locationController,
             maxLength: FishingRecordValidator.maxLocationLength,
             decoration: const InputDecoration(
               labelText: '위치명',
               hintText: '예: 부산광역시 영도구 동삼동',
-              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.edit_outlined),
             ),
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => _submit(),
@@ -69,18 +96,6 @@ class _MapFallbackPageState extends State<MapFallbackPage> {
             icon: const Icon(Icons.check),
             label: const Text('위치 확정'),
           ),
-          const SizedBox(height: 24),
-          Text('장소 이름 선택', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          for (final name in _suggestions)
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.place_outlined),
-                title: Text(name),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).pop(name),
-              ),
-            ),
         ],
       ),
     ),

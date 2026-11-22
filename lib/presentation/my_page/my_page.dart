@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
@@ -197,284 +198,326 @@ class MyPage extends StatelessWidget {
           appBar: AppBar(title: const Text('내정보')),
           body: SafeArea(
             child: ListView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.only(bottom: 24),
               children: [
-                CircleAvatar(
-                  radius: 36,
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.primaryContainer,
-                  child: Icon(
-                    Icons.person_outline,
-                    size: 40,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
+                _ProfileHeader(
+                  name: authSession.displayName,
+                  email: authSession.email,
+                  planLabel: authSession.planLabel,
                 ),
-                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: ListTile(
+                          key: const ValueKey('my-page-profile-settings'),
+                          leading: const Icon(Icons.manage_accounts_outlined),
+                          title: const Text('프로필 설정'),
+                          subtitle: authSession.canResumeAccountDeletion
+                              ? const Text('중단된 회원 탈퇴를 계속할 수 있습니다.')
+                              : null,
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap:
+                              authSession.isAuthOperationInProgress ||
+                                  (authSession.isMember &&
+                                      !authSession.canEditProfile &&
+                                      !authSession.canResumeAccountDeletion)
+                              ? null
+                              : () async {
+                                  if (!authSession.canEditProfile &&
+                                      !authSession.canResumeAccountDeletion) {
+                                    final allowed = await requireMemberAccess(
+                                      context,
+                                      message: '프로필 설정은 로그인 후 이용할 수 있습니다.',
+                                    );
+                                    if (!allowed || !context.mounted) return;
+                                  }
+                                  if (!context.mounted ||
+                                      (!authSession.canEditProfile &&
+                                          !authSession
+                                              .canResumeAccountDeletion)) {
+                                    return;
+                                  }
+                                  await Navigator.of(context).push<void>(
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          const ProfileSettingsPage(),
+                                    ),
+                                  );
+                                },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
 
-                Text(
-                  authSession.displayName,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-
-                Text(
-                  '${authSession.planLabel} 상태입니다.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-
-                Card(
-                  child: ListTile(
-                    key: const ValueKey('my-page-profile-settings'),
-                    leading: const Icon(Icons.manage_accounts_outlined),
-                    title: const Text('프로필 설정'),
-                    subtitle: Text(
-                      authSession.canResumeAccountDeletion
-                          ? '중단된 회원 탈퇴를 계속할 수 있습니다.'
-                          : '이메일을 확인하고 닉네임을 변경합니다.',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap:
-                        authSession.isAuthOperationInProgress ||
-                            (authSession.isMember &&
-                                !authSession.canEditProfile &&
-                                !authSession.canResumeAccountDeletion)
-                        ? null
-                        : () async {
-                            if (!authSession.canEditProfile &&
-                                !authSession.canResumeAccountDeletion) {
-                              final allowed = await requireMemberAccess(
-                                context,
-                                message: '프로필 설정은 로그인 후 이용할 수 있습니다.',
-                              );
-                              if (!allowed || !context.mounted) return;
-                            }
-                            if (!context.mounted ||
-                                (!authSession.canEditProfile &&
-                                    !authSession.canResumeAccountDeletion)) {
-                              return;
-                            }
-                            await Navigator.of(context).push<void>(
-                              MaterialPageRoute(
-                                builder: (_) => const ProfileSettingsPage(),
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.workspace_premium_outlined),
+                          title: const Text('플랜 정보'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(authSession.planLabel),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                          onTap: () {
+                            unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const PlanPage(),
+                                ),
                               ),
                             );
                           },
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.workspace_premium_outlined),
-                    title: const Text('플랜 정보'),
-                    subtitle: Text('현재 ${authSession.planLabel}으로 이용 중입니다.'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      unawaited(
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const PlanPage()),
                         ),
-                      );
-                    },
-                  ),
-                ),
-                if (authSession.requiresPasswordSetup) ...[
-                  const SizedBox(height: 8),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.password_outlined),
-                      title: const Text('계정 비밀번호 설정 필요'),
-                      subtitle: const Text(
-                        '이전 버전에서 이전된 계정입니다. 로그아웃 전에 비밀번호를 설정해 주세요.',
                       ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _showPasswordSetupDialog(context),
-                    ),
-                  ),
-                ],
-                if (recordRepository.hasQuarantinedLegacyData) ...[
-                  const SizedBox(height: 8),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.inventory_2_outlined),
-                      title: const Text('이전 기기 기록 보관함'),
-                      subtitle: Text(
-                        recordRepository.canImportQuarantinedLegacyRecords
-                            ? '계정 정보 없이 저장된 기록 '
-                                  '${recordRepository.quarantinedLegacyRecordCount}건이 보존되어 있습니다.'
-                            : '이전 기록 원본이 보존되어 있지만 자동으로 읽을 수 없습니다.',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _showLegacyRecordImportDialog(context),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.emoji_events_outlined),
-                    title: const Text('내 기록어'),
-                    subtitle: const Text('어종별 최고 크기와 최고 무게 기록을 확인합니다.'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      final allowed = await requireMemberAccess(
-                        context,
-                        message: '내 기록어는 로그인 후 확인할 수 있습니다.',
-                      );
-
-                      if (!allowed || !context.mounted) {
-                        return;
-                      }
-
-                      unawaited(
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const PersonalBestPage(),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                Card(
-                  child: ListTile(
-                    leading: Icon(
-                      authSession.canUseCloudSync
-                          ? Icons.sync_outlined
-                          : Icons.lock_outline,
-                    ),
-                    title: const Text('동기화/충돌 관리'),
-                    subtitle: Text(
-                      authSession.canUseCloudSync
-                          ? '충돌 알림과 동기화 상태를 확인합니다.'
-                          : authSession.isPlanMigrationPending
-                          ? '기존 기록을 업로드한 뒤 사용할 수 있습니다.'
-                          : '유료 플랜에서 사용할 수 있습니다.',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      final allowed = await requirePaidAccess(
-                        context,
-                        message: '동기화와 충돌 관리는 유료 플랜에서 사용할 수 있습니다.',
-                        migrationDestinationBuilder: (_) => const OutboxPage(),
-                      );
-
-                      if (!allowed || !context.mounted) {
-                        return;
-                      }
-
-                      unawaited(
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const SyncConflictPage(),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                Text(
-                  '오프라인 이용',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                Card(
-                  child: ListTile(
-                    leading: Icon(
-                      authSession.isPaid
-                          ? Icons.cloud_queue_outlined
-                          : Icons.phone_android_outlined,
-                    ),
-                    title: Text('${authSession.planLabel} 오프라인 이용'),
-                    subtitle: Text(
-                      authSession.isPaid
-                          ? '캐시된 기록과 업로드 대기열을 사용합니다.'
-                          : '기기에 저장된 기록을 작성하고 조회합니다.',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () {
-                      unawaited(
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => OfflineModePage(
-                              networkStatusService: networkStatusService,
+                      if (authSession.requiresPasswordSetup) ...[
+                        const SizedBox(height: 8),
+                        Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.password_outlined),
+                            title: const Text('계정 비밀번호 설정 필요'),
+                            subtitle: const Text(
+                              '이전 버전에서 이전된 계정입니다. 로그아웃 전에 비밀번호를 설정해 주세요.',
                             ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => _showPasswordSetupDialog(context),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.info_outline),
-                    title: const Text('앱 정보'),
-                    subtitle: const Text('버전·자료 출처·오픈소스 라이선스'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context).push<void>(
-                      MaterialPageRoute(builder: (_) => const AppInfoPage()),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                Text(
-                  '약관 및 정책',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: Column(
-                    children: [
-                      for (final document in PolicyDocument.values)
-                        ListTile(
-                          leading: Icon(
-                            document == PolicyDocument.terms
-                                ? Icons.description_outlined
-                                : Icons.privacy_tip_outlined,
+                      ],
+                      if (recordRepository.hasQuarantinedLegacyData) ...[
+                        const SizedBox(height: 8),
+                        Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.inventory_2_outlined),
+                            title: const Text('이전 기기 기록 보관함'),
+                            subtitle: Text(
+                              recordRepository.canImportQuarantinedLegacyRecords
+                                  ? '계정 정보 없이 저장된 기록 '
+                                        '${recordRepository.quarantinedLegacyRecordCount}건이 보존되어 있습니다.'
+                                  : '이전 기록 원본이 보존되어 있지만 자동으로 읽을 수 없습니다.',
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => _showLegacyRecordImportDialog(context),
                           ),
-                          title: Text(document.title),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.emoji_events_outlined),
+                          title: const Text('내 기록어'),
                           trailing: const Icon(Icons.chevron_right),
-                          onTap: () => Navigator.of(context).push<void>(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  PolicyDocumentPage(document: document),
-                            ),
-                          ),
+                          onTap: () async {
+                            final allowed = await requireMemberAccess(
+                              context,
+                              message: '내 기록어는 로그인 후 확인할 수 있습니다.',
+                            );
+
+                            if (!allowed || !context.mounted) {
+                              return;
+                            }
+
+                            unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const PersonalBestPage(),
+                                ),
+                              ),
+                            );
+                          },
                         ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      Card(
+                        child: ListTile(
+                          leading: Icon(
+                            authSession.canUseCloudSync
+                                ? Icons.sync_outlined
+                                : Icons.lock_outline,
+                          ),
+                          title: const Text('동기화/충돌 관리'),
+                          subtitle: Text(
+                            authSession.canUseCloudSync
+                                ? '충돌 알림과 동기화 상태를 확인합니다.'
+                                : authSession.isPlanMigrationPending
+                                ? '기존 기록을 업로드한 뒤 사용할 수 있습니다.'
+                                : '유료 플랜에서 사용할 수 있습니다.',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () async {
+                            final allowed = await requirePaidAccess(
+                              context,
+                              message: '동기화와 충돌 관리는 유료 플랜에서 사용할 수 있습니다.',
+                              migrationDestinationBuilder: (_) =>
+                                  const OutboxPage(),
+                            );
+
+                            if (!allowed || !context.mounted) {
+                              return;
+                            }
+
+                            unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const SyncConflictPage(),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      Card(
+                        child: ListTile(
+                          leading: Icon(
+                            authSession.isPaid
+                                ? Icons.cloud_queue_outlined
+                                : Icons.phone_android_outlined,
+                          ),
+                          title: Text('${authSession.planLabel} 오프라인 이용'),
+                          subtitle: Text(
+                            authSession.isPaid
+                                ? '캐시된 기록과 업로드 대기열을 사용합니다.'
+                                : '기기에 저장된 기록을 작성하고 조회합니다.',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => OfflineModePage(
+                                    networkStatusService: networkStatusService,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      Text(
+                        '앱 정보 및 정책',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          children: [
+                            ListTile(
+                              leading: const Icon(Icons.info_outline),
+                              title: const Text('앱 정보'),
+                              subtitle: const Text('버전·자료 출처·오픈소스 라이선스'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => Navigator.of(context).push<void>(
+                                MaterialPageRoute(
+                                  builder: (_) => const AppInfoPage(),
+                                ),
+                              ),
+                            ),
+                            for (final document in PolicyDocument.values) ...[
+                              const Divider(
+                                height: 1,
+                                indent: 16,
+                                endIndent: 16,
+                              ),
+                              ListTile(
+                                leading: Icon(
+                                  document == PolicyDocument.terms
+                                      ? Icons.description_outlined
+                                      : Icons.privacy_tip_outlined,
+                                ),
+                                title: Text(document.title),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push<void>(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        PolicyDocumentPage(document: document),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      OutlinedButton.icon(
+                        onPressed: () => _logout(context),
+                        icon: const Icon(Icons.logout),
+                        label: const Text('로그아웃'),
+                      ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 24),
-
-                OutlinedButton.icon(
-                  onPressed: () => _logout(context),
-                  icon: const Icon(Icons.logout),
-                  label: const Text('로그아웃'),
                 ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader({
+    required this.name,
+    required this.email,
+    required this.planLabel,
+  });
+
+  final String name;
+  final String? email;
+  final String planLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return ColoredBox(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: Row(
+          children: [
+            const CircleAvatar(
+              radius: 24,
+              backgroundColor: AppTheme.primaryContainer,
+              foregroundColor: AppTheme.primary,
+              child: Icon(Icons.person_outline),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: text.titleLarge?.copyWith(
+                      color: AppTheme.ink,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    email != null && email != name ? email! : planLabel,
+                    style: text.bodyMedium?.copyWith(color: AppTheme.ink),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

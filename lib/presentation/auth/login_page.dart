@@ -185,7 +185,7 @@ class _LoginPageState extends State<LoginPage> {
     return PopScope(
       canPop: !isSubmitting,
       child: Scaffold(
-        appBar: AppBar(title: const Text('로그인')),
+        appBar: AppBar(backgroundColor: Colors.white),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(24),
@@ -193,20 +193,12 @@ class _LoginPageState extends State<LoginPage> {
               const SizedBox(height: 24),
 
               Text(
-                '다시 오신 것을 환영합니다',
+                '로그인',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 8),
-
-              Text(
-                '출조 기록을 안전하게 관리하려면 로그인하세요.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
 
               TextField(
                 controller: emailController,
@@ -271,8 +263,9 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 24),
 
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   const Text('계정이 없으신가요?'),
                   TextButton(

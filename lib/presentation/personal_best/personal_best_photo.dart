@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/models/fishing_record.dart';
 import '../../data/photos/record_photo_file_store.dart';
 
@@ -113,7 +114,7 @@ class _PersonalBestPhotoState extends State<PersonalBestPhoto> {
     return Container(
       width: widget.width,
       height: widget.height,
-      color: colors.primaryContainer,
+      color: AppTheme.coolGray,
       alignment: Alignment.center,
       child: Icon(icon, color: colors.onPrimaryContainer),
     );

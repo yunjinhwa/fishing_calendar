@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/validation/fishing_record_validator.dart';
 import '../../data/models/conflict_item.dart';
 import '../../data/models/fishing_record.dart';
@@ -163,20 +164,30 @@ class _ConflictDetailPageState extends State<ConflictDetailPage> {
             else if (isResolving)
               const _ResolvingNotice()
             else ...[
-              FilledButton.icon(
-                onPressed: () => _resolve(ConflictResolutionType.useMine),
-                icon: const Icon(Icons.person_outline),
-                label: const Text('내 변경 적용'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () => _resolve(ConflictResolutionType.useTheirs),
-                icon: const Icon(Icons.cloud_outlined),
-                label: const Text('서버 변경 적용'),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _resolve(ConflictResolutionType.useMine),
+                      child: const Text('내 변경 적용', textAlign: TextAlign.center),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () =>
+                          _resolve(ConflictResolutionType.useTheirs),
+                      child: const Text(
+                        '서버 변경 적용',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               if (conflict.canManualMerge) ...[
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
+                FilledButton.icon(
                   onPressed: _openManualMerge,
                   icon: const Icon(Icons.merge_type_outlined),
                   label: const Text('필드별로 선택하여 병합'),
@@ -343,11 +354,19 @@ class _ConflictFieldCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _ValueBox(title: '내 변경', value: field.mineValue),
+                  child: _ValueBox(
+                    title: '내 변경',
+                    value: field.mineValue,
+                    backgroundColor: AppTheme.primaryContainer,
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _ValueBox(title: '서버 변경', value: field.theirsValue),
+                  child: _ValueBox(
+                    title: '서버 변경',
+                    value: field.theirsValue,
+                    backgroundColor: AppTheme.coolGray,
+                  ),
                 ),
               ],
             ),
@@ -361,8 +380,13 @@ class _ConflictFieldCard extends StatelessWidget {
 class _ValueBox extends StatelessWidget {
   final String title;
   final String value;
+  final Color backgroundColor;
 
-  const _ValueBox({required this.title, required this.value});
+  const _ValueBox({
+    required this.title,
+    required this.value,
+    required this.backgroundColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -370,7 +394,7 @@ class _ValueBox extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -380,7 +404,7 @@ class _ValueBox extends StatelessWidget {
             title,
             style: Theme.of(
               context,
-            ).textTheme.labelMedium?.copyWith(color: Colors.grey.shade600),
+            ).textTheme.labelMedium?.copyWith(color: AppTheme.muted),
           ),
           const SizedBox(height: 8),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),

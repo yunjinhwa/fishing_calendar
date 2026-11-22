@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../data/maps/kakao_map_configuration.dart';
+import '../../data/maps/map_location.dart';
 import '../../data/maps/water_area.dart';
 import '../../data/models/external_data.dart';
 import '../../data/tides/tide_models.dart';
@@ -9,11 +11,13 @@ import '../../data/tides/tide_name.dart';
 import '../../data/water_temperature/water_temperature_models.dart';
 import '../auth/auth_access_guard.dart';
 import '../record/record_form_page.dart';
+import 'kakao_map_canvas.dart';
 import 'location_conditions_card.dart';
 import 'map_history_page.dart';
 
 class MapDetailPage extends StatelessWidget {
   final String selectedLocation;
+  final KakaoMapConfiguration configuration;
   final double? latitude;
   final double? longitude;
   final ExternalData? externalData;
@@ -25,6 +29,7 @@ class MapDetailPage extends StatelessWidget {
   const MapDetailPage({
     super.key,
     required this.selectedLocation,
+    this.configuration = const KakaoMapConfiguration(),
     this.latitude,
     this.longitude,
     this.externalData,
@@ -34,14 +39,44 @@ class MapDetailPage extends StatelessWidget {
     this.waterTemperatureObservation,
   });
 
+  MapLocation? _previewLocation() {
+    if (!configuration.isConfigured ||
+        !configuration.supportsPlatform ||
+        latitude == null ||
+        longitude == null) {
+      return null;
+    }
+    try {
+      return MapLocation(
+        name: selectedLocation,
+        latitude: latitude,
+        longitude: longitude,
+      );
+    } on ArgumentError {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final previewLocation = _previewLocation();
     return Scaffold(
       appBar: AppBar(title: const Text('지도 상세')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (previewLocation != null) ...[
+              MapCanvasHost(
+                key: const ValueKey('map-detail-preview'),
+                isActive: true,
+                child: KakaoMapCanvas.preview(
+                  configuration: configuration,
+                  selection: previewLocation,
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             Text(
               selectedLocation,
               style: Theme.of(
