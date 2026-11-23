@@ -26,7 +26,6 @@ import '../common/record_action_footer.dart';
 import '../record/record_form_page.dart';
 import 'kakao_map_canvas.dart';
 import 'map_detail_page.dart';
-import 'map_fallback_page.dart';
 import 'map_selection_controller.dart';
 import 'tide_panel.dart';
 
@@ -571,15 +570,6 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _openFallback() async {
-    final name = await Navigator.of(
-      context,
-    ).push<String>(MaterialPageRoute(builder: (_) => const MapFallbackPage()));
-    if (!mounted || name == null || name.trim().isEmpty) return;
-    _controller.selectLocation(MapLocation(name: name));
-    _searchController.clear();
-  }
-
   void _search(String query) {
     FocusScope.of(context).unfocus();
     unawaited(_controller.search(query));
@@ -658,16 +648,7 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
     final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
     const actionPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 8);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('지도'),
-        actions: [
-          IconButton(
-            onPressed: _openFallback,
-            icon: const Icon(Icons.edit_location_alt_outlined),
-            tooltip: '위치 대체 입력',
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('지도')),
       bottomNavigationBar: keyboardVisible
           ? null
           : RecordActionFooter(
@@ -754,7 +735,12 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
                       children: [
                         if (widget.isActive)
                           if (_network.isDisconnected)
-                            const Center(child: Text('오프라인에서는 장소를 직접 입력해 주세요.'))
+                            const Center(
+                              child: Text(
+                                '오프라인에서는 지도를 불러올 수 없습니다.\n기록 작성 화면에서 위치를 입력할 수 있습니다.',
+                                textAlign: TextAlign.center,
+                              ),
+                            )
                           else
                             widget.mapBuilder?.call(
                                   selected,
@@ -796,14 +782,6 @@ class _MapPageState extends State<MapPage> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: _openFallback,
-                icon: const Icon(Icons.edit_location_alt_outlined),
-                label: const Text('장소 직접 입력'),
-              ),
-            ),
             if (results.isEmpty)
               Card(
                 margin: EdgeInsets.zero,

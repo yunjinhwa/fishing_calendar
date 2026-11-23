@@ -72,13 +72,18 @@ service cloud.firestore {
         );
     }
 
+    function launchRecordAccessEnabled() {
+      let settingsPath =
+        /databases/$(database)/documents/app_settings/record_access;
+      return exists(settingsPath)
+        && get(settingsPath).data.get('allMembersSyncEnabled', false) == true;
+    }
+
     function hasActivePaidEntitlement(uid) {
       let entitlementPath =
         /databases/$(database)/documents/plan_entitlements/$(uid);
       let entitlement = get(entitlementPath).data;
-      return ownsUserData(uid)
-        && !accountDeletionRequested(uid)
-        && exists(entitlementPath)
+      return exists(entitlementPath)
         && entitlement.planType == 'PAID'
         && entitlement.status == 'ACTIVE'
         && (
@@ -89,6 +94,12 @@ service cloud.firestore {
             && entitlement.expiresAt > request.time
           )
         );
+    }
+
+    function hasRecordSyncAccess(uid) {
+      return ownsUserData(uid)
+        && !accountDeletionRequested(uid)
+        && (launchRecordAccessEnabled() || hasActivePaidEntitlement(uid));
     }
 
     function validSyncReceiptV1Shape(data, uid, outboxId) {
@@ -390,6 +401,11 @@ service cloud.firestore {
         );
     }
 
+    // Only administrators can change the shared launch access setting.
+    match /app_settings/record_access {
+      allow get: if signedIn();
+    }
+
     // Plan entitlements are written only by a trusted administrator or billing
     // backend. A member can only remove their own entitlement after entering
     // the irreversible account-deletion flow.
@@ -418,10 +434,10 @@ service cloud.firestore {
     }
 
     match /users/{uid}/records/{recordId} {
-      allow get, list: if hasActivePaidEntitlement(uid)
+      allow get, list: if hasRecordSyncAccess(uid)
         || accountDeletionRequested(uid);
 
-      allow create: if hasActivePaidEntitlement(uid)
+      allow create: if hasRecordSyncAccess(uid)
         && validActiveRecord(request.resource.data, uid, recordId)
         && request.resource.data.versionNo == 1
         && request.resource.data.createdAt == request.time
@@ -433,7 +449,7 @@ service cloud.firestore {
           0
         );
 
-      allow update: if hasActivePaidEntitlement(uid)
+      allow update: if hasRecordSyncAccess(uid)
         && resource.data.ownerUid == uid
         && resource.data.recordId == recordId
         && validRecord(request.resource.data, uid, recordId)
@@ -464,10 +480,10 @@ service cloud.firestore {
     }
 
     match /users/{uid}/sync_receipts/{outboxId} {
-      allow get: if hasActivePaidEntitlement(uid)
+      allow get: if hasRecordSyncAccess(uid)
         || accountDeletionRequested(uid);
       allow list: if accountDeletionRequested(uid);
-      allow create: if hasActivePaidEntitlement(uid)
+      allow create: if hasRecordSyncAccess(uid)
         && validSyncReceipt(request.resource.data, uid, outboxId);
       allow delete: if accountDeletionRequested(uid);
       allow update: if false;

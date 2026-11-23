@@ -467,7 +467,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<IconButton>(_searchButton).onPressed, isNull);
     expect(tester.widget<OutlinedButton>(_currentLocation).onPressed, isNull);
-    expect(find.textContaining('장소를 직접 입력'), findsOneWidget);
+    expect(find.text('지도를 표시할 수 없습니다.'), findsOneWidget);
     expect(_confirmButton(tester).onPressed, isNull);
     await tester.scrollUntilVisible(
       _cancel,

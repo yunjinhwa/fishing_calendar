@@ -300,8 +300,11 @@ void main() {
   );
 
   testWidgets(
-    'manual place replaces both the selected name and old coordinates',
+    'map tap resolves its address and forwards the location to a record',
     (tester) async {
+      const address = '전남 여수시 국동항1길';
+      const latitude = 34.7301;
+      const longitude = 127.7131;
       final controller = MapSelectionController(
         locationGateway: _LocationGateway(),
         initialSelection: MapLocation(
@@ -309,23 +312,35 @@ void main() {
           latitude: 35,
           longitude: 129,
         ),
+      )..setGateway(_SearchGateway([], resolvedAddress: address));
+      const mapKey = ValueKey('fake-map');
+      await _openMap(
+        tester,
+        controller: controller,
+        mapBuilder: (_, _, selectPoint) => GestureDetector(
+          key: mapKey,
+          behavior: HitTestBehavior.opaque,
+          onTap: () => selectPoint(latitude, longitude),
+          child: const SizedBox.expand(),
+        ),
       );
-      await _openMap(tester, controller: controller);
-      await _tap(tester, '장소 직접 입력');
-      final field = find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField && widget.decoration?.labelText == '위치명',
+
+      expect(find.text('장소 직접 입력'), findsNothing);
+      expect(find.byTooltip('위치 대체 입력'), findsNothing);
+      await tester.tap(find.byKey(mapKey));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('map-selected-location')))
+            .data,
+        address,
       );
-      await tester.enterText(field, '  직접 적은 방파제  ');
-      await _tap(tester, '위치 확정');
-      expect(controller.selection.name, '직접 적은 방파제');
-      expect(controller.selection.hasCoordinates, isFalse);
       await _tap(tester, '기록 작성');
 
       final form = tester.widget<RecordFormPage>(find.byType(RecordFormPage));
-      expect(form.initialLocation, '직접 적은 방파제');
-      expect(form.initialLatitude, isNull);
-      expect(form.initialLongitude, isNull);
+      expect(form.initialLocation, address);
+      expect(form.initialLatitude, latitude);
+      expect(form.initialLongitude, longitude);
       expect(tester.takeException(), isNull);
     },
   );
@@ -937,8 +952,9 @@ class _ExternalService implements ExternalDataService {
 }
 
 class _SearchGateway implements MapSearchGateway {
-  _SearchGateway(this.results);
+  _SearchGateway(this.results, {this.resolvedAddress});
   final List<MapLocation> results;
+  final String? resolvedAddress;
   final queries = <String>[];
 
   @override
@@ -951,7 +967,7 @@ class _SearchGateway implements MapSearchGateway {
   Future<String?> addressForCoordinates(
     double latitude,
     double longitude,
-  ) async => null;
+  ) async => resolvedAddress;
 }
 
 class _LocationGateway implements CurrentLocationGateway {

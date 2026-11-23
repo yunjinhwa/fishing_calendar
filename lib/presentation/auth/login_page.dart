@@ -249,18 +249,6 @@ class _LoginPageState extends State<LoginPage> {
                   child: Text(isSubmitting ? '로그인 중...' : '로그인'),
                 ),
               ),
-              const SizedBox(height: 16),
-
-              const OutlinedButton(
-                onPressed: null,
-                child: Text('Google로 계속하기 (준비 중)'),
-              ),
-              const SizedBox(height: 8),
-
-              const OutlinedButton(
-                onPressed: null,
-                child: Text('Apple로 계속하기 (준비 중)'),
-              ),
               const SizedBox(height: 24),
 
               Wrap(

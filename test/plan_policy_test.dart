@@ -669,18 +669,21 @@ void main() {
     expect(outboxRepository.getAllItems(), isEmpty);
   });
 
-  testWidgets('free member sees a paid plan prompt for sync', (tester) async {
+  testWidgets('MyPage shows when sync is unavailable without a plan menu', (
+    tester,
+  ) async {
     await authSession.setSessionForTesting(
       plan: UserPlan.free,
       email: 'free@example.com',
     );
 
     await tester.pumpWidget(const MaterialApp(home: MyPage()));
-    await tester.tap(find.text('동기화/충돌 관리'));
-    await tester.pumpAndSettle();
 
-    expect(find.text('유료 플랜이 필요합니다'), findsOneWidget);
-    expect(find.text('플랜 보기'), findsOneWidget);
+    final syncTile = find.widgetWithText(ListTile, '동기화/충돌 관리');
+    expect(tester.widget<ListTile>(syncTile).onTap, isNull);
+    expect(find.text('현재 계정에서 동기화를 사용할 수 없습니다.'), findsOneWidget);
+    expect(find.text('플랜 정보'), findsNothing);
+    expect(find.textContaining('오프라인 이용'), findsNothing);
     expect(conflictRepository.getAllItems(), isEmpty);
   });
 
@@ -778,7 +781,7 @@ void main() {
     expect(conflictRepository.getAllItems(), isEmpty);
 
     await tester.pumpWidget(const MaterialApp(home: OutboxPage()));
-    expect(find.text('업로드 대기열이 비어 있습니다.'), findsOneWidget);
+    expect(find.text('실패한 업로드가 없습니다.'), findsOneWidget);
     expect(outboxRepository.getAllItems(), isEmpty);
   });
 
@@ -798,6 +801,14 @@ void main() {
     RecordSyncService.instance.configureGateway(FakeRecordSyncGateway());
 
     await tester.pumpWidget(const MaterialApp(home: OutboxPage()));
+    expect(find.text('실패한 업로드가 없습니다.'), findsOneWidget);
+    expect(
+      tester
+          .widgetList<IconButton>(find.byType(IconButton))
+          .singleWhere((button) => button.tooltip == '전체 전송 처리')
+          .onPressed,
+      isNotNull,
+    );
     await tester.tap(find.byTooltip('전체 전송 처리'));
     await tester.pumpAndSettle();
 

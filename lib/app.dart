@@ -105,7 +105,6 @@ class _FishingBuildAppState extends State<FishingBuildApp>
                       : authSession.isGuest
                       ? 1
                       : 0,
-                  networkStatusService: _networkStatusService,
                 )
               : const LoginChoicePage(),
         );

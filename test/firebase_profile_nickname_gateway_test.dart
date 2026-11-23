@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase;
 import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:fishing_build/data/auth/auth_gateway.dart';
 import 'package:fishing_build/data/auth/firebase_auth_gateway.dart';
+import 'package:fishing_build/data/models/user_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -188,6 +189,89 @@ void main() {
       );
     },
   );
+
+  group('launch record access', () {
+    const accessPath = 'app_settings/record_access';
+    const entitlementPath = 'plan_entitlements/uid-a';
+
+    test(
+      'enabled mode grants paid access without a per-user document',
+      () async {
+        store.documents[accessPath] = {'allMembersSyncEnabled': true};
+
+        final result = await gateway.getPlanEntitlement('uid-a');
+
+        expect(result.entitlement?.plan, UserPlan.paid);
+        expect(result.entitlement?.source, 'LAUNCH_ACCESS');
+        expect(result.isFromCache, isFalse);
+        expect(store.getRequests, [(accessPath, firestore.Source.server)]);
+      },
+    );
+
+    test('disabled mode returns the existing account entitlement', () async {
+      store.documents[accessPath] = {'allMembersSyncEnabled': false};
+      store.documents[entitlementPath] = {
+        'planType': 'PAID',
+        'status': 'ACTIVE',
+        'source': 'BILLING',
+      };
+
+      final result = await gateway.getPlanEntitlement('uid-a');
+
+      expect(result.entitlement?.source, 'BILLING');
+      expect(store.getRequests, [
+        (accessPath, firestore.Source.server),
+        (entitlementPath, firestore.Source.serverAndCache),
+      ]);
+    });
+
+    test(
+      'missing or malformed settings do not grant elevated access',
+      () async {
+        expect((await gateway.getPlanEntitlement('uid-a')).entitlement, isNull);
+        store.documents[accessPath] = {'allMembersSyncEnabled': 'true'};
+        expect((await gateway.getPlanEntitlement('uid-a')).entitlement, isNull);
+      },
+    );
+
+    test('a stale settings read cannot grant access for another UID', () async {
+      store.documents[accessPath] = {'allMembersSyncEnabled': true};
+      store.onRead = (_) => auth.user = _User('uid-b');
+
+      await expectLater(
+        gateway.getPlanEntitlement('uid-a'),
+        throwsA(_failure(AuthFailureCode.sessionExpired)),
+      );
+    });
+
+    test(
+      'legacy server rules still allow reading the individual plan',
+      () async {
+        store.getErrors[accessPath] = 'permission-denied';
+        store.documents[entitlementPath] = {
+          'planType': 'FREE',
+          'status': 'ACTIVE',
+        };
+
+        final result = await gateway.getPlanEntitlement('uid-a');
+
+        expect(result.entitlement?.plan, UserPlan.free);
+      },
+    );
+
+    test(
+      'unavailable settings leave fallback to the verified UID cache',
+      () async {
+        store.getErrors[accessPath] = 'unavailable';
+
+        await expectLater(
+          gateway.getPlanEntitlement('uid-a'),
+          throwsA(_failure(AuthFailureCode.networkUnavailable)),
+        );
+        expect(store.getRequests, [(accessPath, firestore.Source.server)]);
+      },
+    );
+  });
 }
 
 Matcher _failure(AuthFailureCode code) =>
@@ -213,6 +297,8 @@ class _User extends Fake implements firebase.User {
 
 class _Store extends Fake implements firestore.FirebaseFirestore {
   final documents = <String, Map<String, dynamic>>{};
+  final getErrors = <String, String>{};
+  final getRequests = <(String, firestore.Source?)>[];
   Object? commitError;
   void Function()? retryOnce;
   void Function(String)? onRead;
@@ -232,6 +318,10 @@ class _Store extends Fake implements firestore.FirebaseFirestore {
   firestore.CollectionReference<Map<String, dynamic>> collection(
     String collectionPath,
   ) => _Collection(this, collectionPath);
+
+  @override
+  firestore.DocumentReference<Map<String, dynamic>> doc(String documentPath) =>
+      _Reference(this, documentPath);
 
   @override
   Future<T> runTransaction<T>(
@@ -286,6 +376,19 @@ class _Reference extends Fake
   final _Store store;
   @override
   final String path;
+  @override
+  Future<firestore.DocumentSnapshot<Map<String, dynamic>>> get([
+    firestore.GetOptions? options,
+  ]) async {
+    store.getRequests.add((path, options?.source));
+    store.onRead?.call(path);
+    final error = store.getErrors[path];
+    if (error != null) {
+      throw FirebaseException(plugin: 'cloud_firestore', code: error);
+    }
+    return _Snapshot(store.documents[path]);
+  }
+
   @override
   Stream<firestore.DocumentSnapshot<Map<String, dynamic>>> snapshots({
     bool includeMetadataChanges = false,

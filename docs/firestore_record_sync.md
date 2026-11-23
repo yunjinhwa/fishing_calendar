@@ -2,7 +2,7 @@
 
 ## 적용 범위
 
-유료 회원의 SQLite Outbox를 Firestore의 다음 경로에 반영한다.
+동기화 권한이 있는 회원의 SQLite Outbox를 Firestore의 다음 경로에 반영한다.
 
 ```text
 users/{firebaseUid}/records/{recordId}
@@ -14,7 +14,7 @@ users/{firebaseUid}/sync_receipts/{outboxId}
 - 기록과 영수증은 한 Firestore 트랜잭션에서 함께 기록된다. 보안 규칙도 두 문서의 사용자, 기록 ID, Outbox ID, 버전, 작업 종류와 서버 시각이 서로 일치해야만 쓰기를 허용한다.
 - 사진 원본과 기기 로컬 경로는 Firestore에 저장하지 않는다. 사진은 앱 전용 로컬 저장소에만 보관하며, 같은 기록을 서버에서 다시 내려받아도 현재 기기의 사진을 보존한다.
 - 다른 기기에서는 기록 본문만 내려받고 사진은 표시하지 않는다. Firebase Storage는 사용하지 않는다.
-- 유료 플랜은 `plan_entitlements/{firebaseUid}`의 활성·미만료 서버 권한으로 판정한다. 결제 시스템은 이후 같은 문서를 신뢰할 수 있는 백엔드에서 갱신한다.
+- 출시 초기 개방 설정이 켜져 있으면 로그인 회원에게 동기화 권한을 부여한다. 설정을 끈 뒤에는 `plan_entitlements/{firebaseUid}`의 활성·미만료 서버 권한으로 판정한다. [출시 설정](server_plan_entitlement.md)
 
 각 Outbox 요청은 변경을 시작한 서버 버전인 `baseVersionNo`를 고정해서 보관한다. 서버의 현재 버전과 기준 버전이 다르면 요청을 쓰지 않고 충돌로 전환한다. 새 기록은 기준 버전 0에서 시작하며, 같은 기기에서 오프라인으로 생성·수정·삭제하면 기준 버전이 0, 1, 2로 이어진다.
 
@@ -51,7 +51,7 @@ firebase deploy --only firestore:rules,firestore:indexes --project fishingbuild
 flutter run --dart-define=FIREBASE_AUTH_ENABLED=true
 ```
 
-디버그 빌드는 기본적으로 로컬 인증 모드이므로 `FIREBASE_AUTH_ENABLED=true`가 필요하다. 회원가입 또는 로그인 후 서버에서 활성 유료 entitlement를 확인하면 기존 로컬 기록이 Outbox에 추가되고 실제 동기화가 시작된다. 테스트 계정 지정 방법은 [서버 플랜 entitlement 설정](server_plan_entitlement.md)을 참고한다.
+디버그 빌드는 기본적으로 로컬 인증 모드이므로 `FIREBASE_AUTH_ENABLED=true`가 필요하다. 회원가입 또는 로그인 후 서버 권한이 확인되면 기존 로컬 기록이 Outbox에 추가되고 동기화가 시작된다. 출시 설정과 테스트 계정 지정은 [서버 플랜 entitlement 설정](server_plan_entitlement.md)을 참고한다.
 
 ## 에뮬레이터로 실행
 
@@ -78,7 +78,7 @@ flutter run `
   --dart-define=FIRESTORE_EMULATOR_PORT=8080
 ```
 
-실제 기기는 `10.0.2.2` 대신 같은 네트워크에 연결된 PC의 IPv4 주소를 사용한다.
+Android 디버그 빌드는 에뮬레이터의 호스트 주소와 로컬 루프백에서 Firebase 에뮬레이터의 HTTP 연결을 허용한다. USB로 연결한 실제 Android 기기에서 테스트하려면 `adb reverse tcp:9099 tcp:9099`와 `adb reverse tcp:8080 tcp:8080`를 실행하고, 위 명령의 두 호스트에 `127.0.0.1`을 지정한다.
 
 ## 수동 확인 항목
 

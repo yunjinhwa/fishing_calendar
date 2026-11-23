@@ -202,16 +202,10 @@ class _KakaoMapCanvasState extends State<KakaoMapCanvas> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: !_canCreateMap
-            ? isPreview
-                  ? const _MapNotice(message: '지도를 표시할 수 없습니다.')
-                  : const _MapNotice(
-                      message: '현재 지도를 표시할 수 없습니다. 장소를 직접 입력해 주세요.',
-                    )
+            ? const _MapNotice(message: '지도를 표시할 수 없습니다.')
             : _failed
             ? _MapNotice(
-                message: isPreview
-                    ? '지도를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'
-                    : '지도를 불러오지 못했습니다. 인터넷 연결을 확인하거나 장소를 직접 입력해 주세요.',
+                message: '지도를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.',
                 onRetry: _retry,
               )
             : Stack(

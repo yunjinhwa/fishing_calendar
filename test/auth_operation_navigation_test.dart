@@ -23,6 +23,16 @@ void main() {
 
   tearDown(auth.resetAuthGatewayForTesting);
 
+  testWidgets('login shows supported account actions only', (tester) async {
+    await _openPage(tester, const LoginPage());
+
+    expect(find.widgetWithText(FilledButton, '로그인'), findsOneWidget);
+    expect(find.text('비밀번호를 잊으셨나요?'), findsOneWidget);
+    expect(find.text('회원가입'), findsOneWidget);
+    expect(find.textContaining('Google로 계속하기'), findsNothing);
+    expect(find.textContaining('Apple로 계속하기'), findsNothing);
+  });
+
   testWidgets('pending login blocks back and signup until login finishes', (
     tester,
   ) async {

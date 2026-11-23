@@ -35,7 +35,7 @@ async function createUser(label) {
 
 function authHeaders(token) {
   return {
-    authorization: `Bearer ${token}`,
+    ...(token ? {authorization: `Bearer ${token}`} : {}),
     'content-type': 'application/json',
   };
 }
@@ -1438,4 +1438,162 @@ for (const [label, mutate] of [
   await commit(`validated shape ${label} denied`, schemaMember.token, body, 403);
 }
 
-console.log('Firestore rules smoke test passed, including validated catch schema.');
+const launchMember = await createUser('launch-member');
+const launchSettingPath = '/app_settings/record_access';
+const launchRecordId = 'launch-record';
+const launchRecordPath = `/users/${launchMember.uid}/records/${launchRecordId}`;
+const launchReceiptPath =
+  `/users/${launchMember.uid}/sync_receipts/${launchRecordId}`;
+const launchMutation = mutationCommit({
+  uid: launchMember.uid,
+  recordId: launchRecordId,
+  outboxId: launchRecordId,
+  operationType: 'create',
+  baseVersionNo: 0,
+  resultingVersionNo: 1,
+});
+const launchEnabledFields = {allMembersSyncEnabled: {booleanValue: true}};
+const launchDisabledFields = {allMembersSyncEnabled: {booleanValue: false}};
+
+async function setLaunchAccess(fields) {
+  await expectStatus(
+    'administrator can set launch access',
+    await adminRequest(launchSettingPath, {method: 'PATCH', body: {fields}}),
+    200,
+  );
+}
+
+await expectStatus(
+  'member cannot create launch access setting',
+  await request(launchSettingPath, {
+    token: launchMember.token,
+    method: 'PATCH',
+    body: {fields: launchEnabledFields},
+  }),
+  403,
+);
+for (const [label, fields] of [
+  ['disabled', launchDisabledFields],
+  ['missing field', {}],
+  ['string shaped as a boolean', {allMembersSyncEnabled: stringValue('true')}],
+]) {
+  await setLaunchAccess(fields);
+  await commit(
+    `${label} launch setting still requires entitlement`,
+    launchMember.token,
+    launchMutation,
+    403,
+  );
+  await expectStatus(
+    `${label} launch setting still respects an active entitlement`,
+    await request(`/users/${owner.uid}/records/${recordId}`, {token: owner.token}),
+    200,
+  );
+}
+
+await setLaunchAccess(launchEnabledFields);
+await expectStatus(
+  'member can get launch access setting',
+  await request(launchSettingPath, {token: launchMember.token}),
+  200,
+);
+await expectStatus(
+  'guest cannot read launch access setting',
+  await request(launchSettingPath),
+  403,
+);
+await expectStatus(
+  'member cannot list app settings',
+  await request('/app_settings', {token: launchMember.token}),
+  403,
+);
+await expectStatus(
+  'member cannot update launch access setting',
+  await request(launchSettingPath, {
+    token: launchMember.token,
+    method: 'PATCH',
+    body: {fields: launchDisabledFields},
+  }),
+  403,
+);
+await expectStatus(
+  'member cannot delete launch access setting',
+  await request(launchSettingPath, {token: launchMember.token, method: 'DELETE'}),
+  403,
+);
+await commit('launch member can sync without individual entitlement',
+  launchMember.token, launchMutation, 200);
+for (const path of [
+  launchRecordPath,
+  `/users/${launchMember.uid}/records`,
+  launchReceiptPath,
+]) {
+  await expectStatus(
+    `launch member can read own data at ${path}`,
+    await request(path, {token: launchMember.token}),
+    200,
+  );
+  await expectStatus(
+    `another member cannot read launch member data at ${path}`,
+    await request(path, {token: owner.token}),
+    403,
+  );
+  await expectStatus(
+    `guest cannot read launch member data at ${path}`,
+    await request(path),
+    403,
+  );
+}
+const nextLaunchMutation = mutationCommit({
+  uid: launchMember.uid,
+  recordId: 'next-launch-record',
+  outboxId: 'next-launch-record',
+  operationType: 'create',
+  baseVersionNo: 0,
+  resultingVersionNo: 1,
+});
+await commit('another member cannot write launch member record',
+  owner.token, nextLaunchMutation, 403);
+await commit('guest cannot write launch member record',
+  undefined, nextLaunchMutation, 403);
+await expectStatus(
+  'launch mode cannot bypass hard deletion restriction',
+  await request(launchRecordPath, {token: launchMember.token, method: 'DELETE'}),
+  403,
+);
+
+await setLaunchAccess(launchDisabledFields);
+await expectStatus(
+  'disabling launch access removes the temporary sync grant',
+  await request(launchRecordPath, {token: launchMember.token}),
+  403,
+);
+await commit('launch member cannot sync once launch access is disabled',
+  launchMember.token, nextLaunchMutation, 403);
+
+await setLaunchAccess(launchEnabledFields);
+await commit(
+  'launch member can request account deletion',
+  launchMember.token,
+  accountDeletionRequestCommit({documentUid: launchMember.uid}),
+  200,
+);
+await commit('launch access cannot reopen sync during account deletion',
+  launchMember.token, nextLaunchMutation, 403);
+await expectStatus(
+  'launch member can delete own record during account deletion',
+  await request(launchRecordPath, {token: launchMember.token, method: 'DELETE'}),
+  200,
+);
+await expectStatus(
+  'launch member can delete own receipt during account deletion',
+  await request(launchReceiptPath, {token: launchMember.token, method: 'DELETE'}),
+  200,
+);
+await expectStatus(
+  'remove launch access setting after testing',
+  await adminRequest(launchSettingPath, {method: 'DELETE'}),
+  200,
+);
+
+console.log('Firestore rules smoke test passed, including launch access and validated catch schema.');

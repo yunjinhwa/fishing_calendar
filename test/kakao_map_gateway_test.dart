@@ -256,11 +256,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(KakaoMap), findsNothing);
-    expect(find.textContaining('장소를 직접 입력'), findsOneWidget);
+    expect(find.text('지도를 표시할 수 없습니다.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('unsupported desktop environments keep manual input available', (
+  testWidgets('unsupported desktop environments show the map notice', (
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
@@ -283,6 +283,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(KakaoMap), findsNothing);
+    expect(find.text('지도를 표시할 수 없습니다.'), findsOneWidget);
     expect(tester.takeException(), isNull);
     debugDefaultTargetPlatformOverride = null;
   });

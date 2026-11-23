@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../data/repositories/auth_session_repository.dart';
-import '../../data/services/network_status_service.dart';
 import '../../data/services/record_sync_service.dart';
 import '../auth/auth_access_guard.dart';
 import '../calendar/calendar_page.dart';
@@ -16,9 +15,8 @@ import '../record/record_page.dart';
 
 class AppShell extends StatefulWidget {
   final int initialIndex;
-  final NetworkStatusService? networkStatusService;
 
-  const AppShell({super.key, this.initialIndex = 0, this.networkStatusService});
+  const AppShell({super.key, this.initialIndex = 0});
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -80,7 +78,7 @@ class _AppShellState extends State<AppShell> {
       MapPage(isActive: selectedIndex == 1),
       RecordPage(isActive: selectedIndex == 2),
       FishDictionaryPage(isActive: selectedIndex == 3),
-      MyPage(networkStatusService: widget.networkStatusService),
+      const MyPage(),
     ];
   }
 
