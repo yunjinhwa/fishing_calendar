@@ -1,0 +1,97 @@
+.account-deletion {
+  background: #f1f5fd;
+}
+
+.account-deletion .card {
+  max-width: 520px;
+  border-color: #dce4f4;
+}
+
+.account-deletion .brand {
+  margin-bottom: 10px;
+  color: #224da7;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.account-deletion h1 {
+  margin-top: 0;
+}
+
+.account-deletion .intro {
+  color: #4e6077;
+}
+
+.deletion-scope {
+  margin-bottom: 22px;
+  padding: 15px 16px;
+  border: 1px solid #dce4f4;
+  border-radius: 12px;
+  background: #f5f8ff;
+}
+
+.deletion-scope h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.deletion-scope p {
+  margin: 0;
+  color: #465972;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.deletion-scope p + p {
+  margin-top: 7px;
+}
+
+.account-deletion .primary {
+  margin-top: 16px;
+  border-color: #2955b6;
+  background: #2955b6;
+}
+
+.account-deletion .primary:hover:not(:disabled) {
+  background: #204798;
+}
+
+.account-deletion .secondary {
+  color: #224da7;
+  border-color: #aabae0;
+}
+
+.account-deletion button:disabled,
+.account-deletion fieldset:disabled button {
+  color: #52657e;
+  border-color: #dce4f4;
+  background: #eef2f9;
+  cursor: default;
+}
+
+.account-deletion .reset-button {
+  margin-top: 10px;
+}
+
+.account-deletion :is(input, button):focus-visible {
+  outline: 3px solid #8badee;
+  border-color: #2955b6;
+  outline-offset: 2px;
+}
+
+.request-confirmation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 14px 0 0;
+  line-height: 1.5;
+}
+
+.request-confirmation input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: #2955b6;
+}

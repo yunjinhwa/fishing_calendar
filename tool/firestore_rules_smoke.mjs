@@ -14,13 +14,15 @@ const firestoreBase =
 const runId = Date.now();
 const fingerprint = 'a'.repeat(64);
 
-async function createUser(label) {
+async function createUser(label, {anonymous = false} = {}) {
   const response = await fetch(`${authBase}/accounts:signUp?key=fake-api-key`, {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify({
-      email: `${label}-${runId}@example.com`,
-      password: 'Password1',
+      ...(anonymous ? {} : {
+        email: `${label}-${runId}@example.com`,
+        password: 'Password1',
+      }),
       returnSecureToken: true,
     }),
   });
@@ -313,6 +315,28 @@ function accountDeletionRequestCommit({
         updateTransforms: [
           {fieldPath: 'requestedAt', setToServerValue: 'REQUEST_TIME'},
         ],
+      },
+    ],
+  };
+}
+
+function webAccountDeletionRequestCommit(uid) {
+  const name =
+    `projects/${projectId}/databases/(default)/documents/web_account_deletion_requests/${uid}`;
+  return {
+    writes: [
+      {
+        update: {
+          name,
+          fields: {
+            schemaVersion: integerValue(1),
+            status: stringValue('REQUESTED'),
+          },
+        },
+        updateTransforms: [
+          {fieldPath: 'requestedAt', setToServerValue: 'REQUEST_TIME'},
+        ],
+        currentDocument: {exists: false},
       },
     ],
   };
@@ -759,6 +783,83 @@ await commit(
 const deletionMember = await createUser('deletion-member');
 await seedEntitlement(deletionMember.uid);
 
+const webRequestPath = `/web_account_deletion_requests/${deletionMember.uid}`;
+const webRequest = webAccountDeletionRequestCommit(deletionMember.uid);
+const anonymousMember = await createUser('anonymous', {anonymous: true});
+await commit('guest cannot submit a web deletion request', undefined, webRequest, 403);
+await commit('member cannot submit a web deletion request for another uid',
+  intruder.token, webRequest, 403);
+await commit('an anonymous session cannot submit a web deletion request',
+  anonymousMember.token, webAccountDeletionRequestCommit(anonymousMember.uid), 403);
+
+for (const [label, mutate] of [
+  ['extra email field', (write) => {
+    write.update.fields.email = stringValue('not allowed');
+  }],
+  ['uid in payload', (write) => {
+    write.update.fields.uid = stringValue(deletionMember.uid);
+  }],
+  ['missing status', (write) => {
+    delete write.update.fields.status;
+  }],
+  ['invalid status', (write) => {
+    write.update.fields.status = stringValue('COMPLETED');
+  }],
+  ['non-integer schema version', (write) => {
+    write.update.fields.schemaVersion = {doubleValue: 1};
+  }],
+  ['client timestamp', (write) => {
+    delete write.updateTransforms;
+    write.update.fields.requestedAt = timestampValue('2025-01-01T00:00:00Z');
+  }],
+]) {
+  const invalidRequest = webAccountDeletionRequestCommit(deletionMember.uid);
+  mutate(invalidRequest.writes[0]);
+  await commit(`web deletion request with ${label} is denied`,
+    deletionMember.token, invalidRequest, 403);
+}
+
+await commit('recently authenticated password user can submit their web deletion request',
+  deletionMember.token, webRequest, 200);
+await expectStatus('owner can find their own received request',
+  await request(webRequestPath, {token: deletionMember.token}), 200);
+const duplicateWebResponse = await request(':commit', {
+  token: deletionMember.token, method: 'POST', body: webRequest,
+});
+if (duplicateWebResponse.status !== 403 && duplicateWebResponse.status !== 409) {
+  await expectStatus('web deletion request cannot be duplicated', duplicateWebResponse, 409);
+}
+await expectStatus('guest cannot read a web deletion request',
+  await request(webRequestPath), 403);
+await expectStatus('another member cannot read a web deletion request',
+  await request(webRequestPath, {token: intruder.token}), 403);
+await expectStatus('client cannot list web deletion requests',
+  await request('/web_account_deletion_requests', {token: deletionMember.token}), 403);
+await expectStatus('owner cannot change a received web deletion request',
+  await request(webRequestPath, {
+    token: deletionMember.token,
+    method: 'PATCH',
+    body: {fields: {status: stringValue('COMPLETED')}},
+  }), 403);
+await expectStatus('owner cannot delete a received web deletion request',
+  await request(webRequestPath, {token: deletionMember.token, method: 'DELETE'}), 403);
+const operatorInbox = await adminRequest('/web_account_deletion_requests');
+await expectStatus('administrator can list received web deletion requests', operatorInbox, 200);
+const receivedWebRequest = (await operatorInbox.json()).documents?.find(
+  (document) => document.name.endsWith(webRequestPath),
+);
+const receivedFields = receivedWebRequest?.fields;
+if (!receivedFields || Object.keys(receivedFields).length !== 3 ||
+    receivedFields.schemaVersion?.integerValue !== '1' ||
+    receivedFields.status?.stringValue !== 'REQUESTED' ||
+    !receivedFields.requestedAt?.timestampValue) {
+  throw new Error('Operator inbox did not return the minimal server-timestamped request.');
+}
+await expectStatus('web intake does not create an in-app deletion marker',
+  await request(`/account_deletion_requests/${deletionMember.uid}`, {
+    token: deletionMember.token,
+  }), 404);
+
 await commit(
   'deletion marker with an invalid status is denied',
   deletionMember.token,
@@ -797,7 +898,7 @@ await commit(
 );
 
 await commit(
-  'deletion member can create a record before requesting deletion',
+  'deletion member can sync a record after web intake and before in-app deletion',
   deletionMember.token,
   mutationCommit({
     uid: deletionMember.uid,
@@ -1578,6 +1679,12 @@ await commit(
   accountDeletionRequestCommit({documentUid: launchMember.uid}),
   200,
 );
+await commit(
+  'a member who started in-app deletion can still submit a web request',
+  launchMember.token,
+  webAccountDeletionRequestCommit(launchMember.uid),
+  200,
+);
 await commit('launch access cannot reopen sync during account deletion',
   launchMember.token, nextLaunchMutation, 403);
 await expectStatus(
@@ -1596,4 +1703,4 @@ await expectStatus(
   200,
 );
 
-console.log('Firestore rules smoke test passed, including launch access and validated catch schema.');
+console.log('Firestore rules smoke test passed, including web deletion intake, launch access and validated catch schema.');

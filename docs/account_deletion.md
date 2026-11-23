@@ -4,6 +4,8 @@
 
 ## 화면 경로
 
+앱을 설치하지 않은 사용자는 웹 양식에서 계정 삭제를 요청할 수 있다. 접수 문서와 실제 탈퇴 처리는 [웹 계정 삭제 요청](web_account_deletion_request.md)을 참고한다.
+
 일반 회원은 `내 정보 → 프로필 설정 → 하단 회원 탈퇴`에서 시작한다. 내 정보 하단의 직접 탈퇴 버튼은 프로필 설정으로 옮겼으며 로그아웃은 기존 내 정보 화면에서 제공한다.
 
 현재 비밀번호와 `탈퇴` 확인 문구를 입력하는 확인창, 구버전 계정의 사전 비밀번호 설정은 [공통 계정 다이얼로그](../lib/presentation/auth/account_management_dialogs.dart)를 사용한다. 확인을 취소하면 프로필 설정으로 돌아오며, 탈퇴 완료 후에는 로그인 선택 화면으로 이동한다. 이동 버튼과 확인창을 재배치한 것으로 기존 [AccountDeletionService](../lib/data/services/account_deletion_service.dart)·서버 삭제·로컬 정리 동작은 바꾸지 않는다.

@@ -27,4 +27,4 @@ await mkdir(destination, { recursive: true });
 await cp(join(root, 'auth_web'), destination, { recursive: true });
 await writeFile(join(destination, 'firebase-config.json'),
   `${JSON.stringify({ apiKey: config.apiKey, projectId }, null, 2)}\n`);
-console.log('Prepared password reset page with public Firebase configuration.');
+console.log('Prepared password reset and account deletion pages with public Firebase configuration.');
