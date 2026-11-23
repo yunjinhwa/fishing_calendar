@@ -115,18 +115,82 @@ class _PolicyDocumentPageState extends State<PolicyDocumentPage> {
               );
             }
 
-            return Scrollbar(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: SelectableText(
-                  snapshot.requireData,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(height: 1.6),
+            return _PolicyArticle(text: snapshot.requireData);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _PolicyArticle extends StatelessWidget {
+  const _PolicyArticle({required this.text});
+
+  final String text;
+
+  static final _sectionHeading = RegExp(r'^(?:제\d+조\(|\d+\.\s)');
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final titleStyle = theme.textTheme.headlineSmall?.copyWith(
+      color: colors.onSurface,
+      fontWeight: FontWeight.w700,
+    );
+    final sectionStyle = theme.textTheme.titleMedium?.copyWith(
+      color: colors.primary,
+      fontWeight: FontWeight.w700,
+      height: 1.65,
+    );
+    final metadataStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: colors.onSurfaceVariant,
+      fontWeight: FontWeight.w600,
+      height: 1.55,
+    );
+
+    final lines = text.split('\n');
+    final spans = <TextSpan>[];
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
+      TextStyle? style;
+      if (index == 0) {
+        style = titleStyle;
+      } else if (_sectionHeading.hasMatch(line)) {
+        style = sectionStyle;
+      } else if (line.startsWith('공개 전 검토본') || line.startsWith('시행일 ')) {
+        style = metadataStyle;
+      }
+      spans.add(TextSpan(text: line, style: style));
+      if (index < lines.length - 1) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+    }
+
+    return ColoredBox(
+      color: colors.surfaceContainerLow,
+      child: Scrollbar(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+          child: Center(
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxWidth: 720),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                border: Border.all(color: colors.outlineVariant),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SelectableText.rich(
+                TextSpan(children: spans),
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: colors.onSurface,
+                  height: 1.7,
                 ),
               ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );

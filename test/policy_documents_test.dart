@@ -21,7 +21,7 @@ void main() {
   tearDown(authSession.resetAuthGatewayForTesting);
 
   for (final document in PolicyDocument.values) {
-    testWidgets('${document.name} displays its real bundled draft offline', (
+    testWidgets('${document.name} shows its bundled policy offline', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -31,8 +31,17 @@ void main() {
 
       expect(find.widgetWithText(AppBar, document.title), findsOneWidget);
       final body = tester.widget<SelectableText>(find.byType(SelectableText));
-      expect(body.data, contains(document.title));
-      expect(body.data, matches(RegExp(r'DRAFT|초안')));
+      final source = await rootBundle.loadString(document.assetPath);
+      expect(body.textSpan!.toPlainText(), source);
+      final firstHeading = source
+          .split('\n')
+          .firstWhere(
+            (line) => line.startsWith('제1조(') || line.startsWith('1. '),
+          );
+      final heading = body.textSpan!.children!
+          .whereType<TextSpan>()
+          .singleWhere((span) => span.text == firstHeading);
+      expect(heading.style?.fontWeight, FontWeight.w700);
       expect(find.text('다시 시도'), findsNothing);
       expect(find.byType(Checkbox), findsNothing);
       expect(tester.takeException(), isNull);
@@ -256,7 +265,10 @@ void main() {
     );
     expect(scrollable.position.maxScrollExtent, greaterThan(0));
     expect(
-      tester.widget<SelectableText>(find.byType(SelectableText)).data,
+      tester
+          .widget<SelectableText>(find.byType(SelectableText))
+          .textSpan!
+          .toPlainText(),
       longText,
     );
 

@@ -28,7 +28,7 @@
 | 어류도감 | 기본 800종 목록, 어종 검색·상세 조회, 공개 자료 기반 사진·설명 보완 |
 | 내 기록어·공유 | 어종별 최고 크기와 무게의 독립 집계, 이름·크기·무게 정렬, 어종명 검색, 공유 카드 PNG 저장·기기 공유 |
 | 계정·동기화 | 이메일 인증, 비밀번호 재설정, 프로필·닉네임 변경과 중복 방지, 서버 요금제 확인, Outbox 전송·재시도, 다중 기기 충돌 해결 |
-| 앱 정보 | 이용약관·개인정보 처리방침 열람, 버전·데이터 제공기관·라이선스 안내 |
+| 앱 정보 | 오프라인 약관·개인정보 처리방침 열람 및 본문 복사, 버전·데이터 제공기관·라이선스 안내 |
 | 상태 알림 | 상단 카드로 안내·성공·주의·오류 표시, 자동·직접 닫기, 화면·탭·계정 전환 시 정리 |
 
 지도에서 조회한 정보는 장소와 출조 시점이 맞을 때 기록에 자동 입력합니다. **물때·수온은 선택 입력**이며, 바다 전용 정보를 민물에 적용하지 않습니다. 도감의 800종 모두에 사진·상세 설명이 확보된 것은 아니며, 확인하지 못한 정보를 임의로 채우지 않습니다.
@@ -369,7 +369,7 @@ firebase emulators:exec --only auth,firestore --project demo-fishing-readme "nod
 | 저장·복구 | [저장 실패·작성 취소](docs/record_save_recovery.md), [계정 탈퇴](docs/account_deletion.md), [좌표 저장](docs/location_coordinates.md) |
 | 데이터 정책 | [선택 입력](docs/optional_record_conditions.md), [캐시](docs/paid_cache_policy.md), [요금제 이전](docs/plan_migration_integrity.md) |
 | 어류 데이터 | [연동 방식](docs/fish_encyclopedia_api.md), [정보 제공 범위](docs/fish_data_coverage.md) |
-| 약관·출처 | [약관 초안](docs/terms_and_privacy.md), [앱 정보·라이선스](docs/app_info_and_licenses.md) |
+| 약관·출처 | [이용약관](assets/legal/terms.txt), [개인정보 처리방침](assets/legal/privacy.txt), [공개 전 확인 사항과 웹 미리보기](docs/terms_and_privacy.md), [앱 정보·라이선스](docs/app_info_and_licenses.md) |
 | 감사·후속 계획 | [감사 결과](docs/pre-release-audit.md), [검토 범위](docs/pre-release-audit-coverage.md), [추가 요구사항](docs/pre-release-additional-requirements.md) |
 
 </details>
