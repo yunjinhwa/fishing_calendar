@@ -25,6 +25,8 @@ class SignupPage extends StatefulWidget {
   State<SignupPage> createState() => _SignupPageState();
 }
 
+enum _SignupAge { underFourteen, fourteenOrOlder }
+
 class _SignupPageState extends State<SignupPage> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
@@ -34,6 +36,7 @@ class _SignupPageState extends State<SignupPage> {
   bool agreeTerms = false;
   bool agreePrivacy = false;
   bool isSubmitting = false;
+  _SignupAge? _age;
 
   @override
   void dispose() {
@@ -56,8 +59,42 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
-  Future<void> signup() async {
+  void _resetAge() {
+    FocusScope.of(context).unfocus();
+    emailController.clear();
+    passwordController.clear();
+    passwordConfirmController.clear();
+    nicknameController.clear();
+    setState(() {
+      _age = null;
+      agreeTerms = false;
+      agreePrivacy = false;
+    });
+  }
+
+  Future<void> _openLogin() async {
     if (isSubmitting) return;
+    if (!widget.returnToPrevious) {
+      unawaited(
+        Navigator.of(
+          context,
+        ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage())),
+      );
+      return;
+    }
+
+    final loggedIn = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => const LoginPage(returnToPrevious: true),
+      ),
+    );
+    if (loggedIn == true && mounted) {
+      Navigator.of(context).pop(true);
+    }
+  }
+
+  Future<void> signup() async {
+    if (isSubmitting || _age != _SignupAge.fourteenOrOlder) return;
 
     final email = emailController.text.trim();
     final password = passwordController.text;
@@ -185,169 +222,194 @@ class _SignupPageState extends State<SignupPage> {
 
   @override
   Widget build(BuildContext context) {
+    final showSignupForm = _age == _SignupAge.fourteenOrOlder;
     return PopScope(
       canPop: !isSubmitting,
       child: Scaffold(
-        appBar: AppBar(backgroundColor: Colors.white),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          actions: [
+            if (showSignupForm)
+              TextButton(
+                onPressed: isSubmitting ? null : _resetAge,
+                child: const Text('연령 다시 선택'),
+              ),
+          ],
+        ),
         body: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.all(24),
-            children: [
-              const SizedBox(height: 12),
-
-              Text(
-                '회원가입',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              TextField(
-                controller: emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: '이메일',
-                  hintText: '이메일을 입력하세요',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              HoldToRevealPasswordField(
-                controller: passwordController,
-                autofillHints: const [AutofillHints.newPassword],
-                decoration: const InputDecoration(
-                  labelText: '비밀번호',
-                  hintText: '비밀번호를 입력하세요',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              HoldToRevealPasswordField(
-                controller: passwordConfirmController,
-                autofillHints: const [AutofillHints.newPassword],
-                decoration: const InputDecoration(
-                  labelText: '비밀번호 확인',
-                  hintText: '비밀번호를 다시 입력하세요',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: nicknameController,
-                decoration: const InputDecoration(
-                  labelText: '닉네임',
-                  hintText: '닉네임을 입력하세요',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: agreeTerms,
-                      onChanged: (value) {
-                        setState(() {
-                          agreeTerms = value ?? false;
-                        });
-                      },
-                      title: const Text('이용약관 동의 (필수)'),
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ),
-                  ),
-                  TextButton(
-                    key: const ValueKey('signup-view-terms'),
-                    onPressed: isSubmitting
-                        ? null
-                        : () => _openPolicy(PolicyDocument.terms),
-                    child: const Text('내용 보기'),
-                  ),
-                ],
-              ),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: agreePrivacy,
-                      onChanged: (value) {
-                        setState(() {
-                          agreePrivacy = value ?? false;
-                        });
-                      },
-                      title: const Text('개인정보 처리방침 동의 (필수)'),
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ),
-                  ),
-                  TextButton(
-                    key: const ValueKey('signup-view-privacy'),
-                    onPressed: isSubmitting
-                        ? null
-                        : () => _openPolicy(PolicyDocument.privacy),
-                    child: const Text('내용 보기'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: isSubmitting ? null : signup,
-                  child: Text(isSubmitting ? '가입 중...' : '가입하기'),
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              Wrap(
-                alignment: WrapAlignment.center,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  const Text('이미 계정이 있으신가요?'),
-                  TextButton(
-                    onPressed: isSubmitting
-                        ? null
-                        : () async {
-                            if (isSubmitting) return;
-
-                            if (!widget.returnToPrevious) {
-                              unawaited(
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(
-                                    builder: (_) => const LoginPage(),
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-
-                            final loggedIn = await Navigator.of(context)
-                                .push<bool>(
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        const LoginPage(returnToPrevious: true),
-                                  ),
-                                );
-
-                            if (loggedIn == true && context.mounted) {
-                              Navigator.of(context).pop(true);
-                            }
-                          },
-                    child: const Text('로그인'),
-                  ),
-                ],
-              ),
-            ],
-          ),
+          child: showSignupForm ? _signupForm(context) : _ageStep(context),
         ),
       ),
     );
   }
+
+  Widget _ageStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final isUnderFourteen = _age == _SignupAge.underFourteen;
+    return ListView(
+      key: ValueKey(_age),
+      padding: const EdgeInsets.all(24),
+      children: [
+        const SizedBox(height: 12),
+        Text(
+          isUnderFourteen ? '회원가입은 만 14세 이상부터 가능해요' : '회원가입',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        if (isUnderFourteen) ...[
+          const SizedBox(height: 24),
+          OutlinedButton(onPressed: _resetAge, child: const Text('돌아가기')),
+        ] else ...[
+          const SizedBox(height: 12),
+          Text('현재 연령을 선택해 주세요.', style: theme.textTheme.bodyLarge),
+          const SizedBox(height: 24),
+          OutlinedButton(
+            onPressed: () => setState(() => _age = _SignupAge.underFourteen),
+            child: const Text('만 14세 미만'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () => setState(() => _age = _SignupAge.fourteenOrOlder),
+            child: const Text('만 14세 이상'),
+          ),
+        ],
+        const SizedBox(height: 24),
+        _loginLink(),
+      ],
+    );
+  }
+
+  Widget _loginLink() => Wrap(
+    alignment: WrapAlignment.center,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    children: [
+      const Text('이미 계정이 있으신가요?'),
+      TextButton(
+        onPressed: isSubmitting ? null : _openLogin,
+        child: const Text('로그인'),
+      ),
+    ],
+  );
+
+  Widget _signupForm(BuildContext context) => ListView(
+    key: const ValueKey(_SignupAge.fourteenOrOlder),
+    padding: const EdgeInsets.all(24),
+    children: [
+      const SizedBox(height: 12),
+
+      Text(
+        '회원가입',
+        style: Theme.of(
+          context,
+        ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+      ),
+      const SizedBox(height: 20),
+
+      TextField(
+        controller: emailController,
+        keyboardType: TextInputType.emailAddress,
+        decoration: const InputDecoration(
+          labelText: '이메일',
+          hintText: '이메일을 입력하세요',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 12),
+
+      HoldToRevealPasswordField(
+        controller: passwordController,
+        autofillHints: const [AutofillHints.newPassword],
+        decoration: const InputDecoration(
+          labelText: '비밀번호',
+          hintText: '비밀번호를 입력하세요',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 12),
+
+      HoldToRevealPasswordField(
+        controller: passwordConfirmController,
+        autofillHints: const [AutofillHints.newPassword],
+        decoration: const InputDecoration(
+          labelText: '비밀번호 확인',
+          hintText: '비밀번호를 다시 입력하세요',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 12),
+
+      TextField(
+        controller: nicknameController,
+        decoration: const InputDecoration(
+          labelText: '닉네임',
+          hintText: '닉네임을 입력하세요',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 16),
+
+      Row(
+        children: [
+          Expanded(
+            child: CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: agreeTerms,
+              onChanged: (value) {
+                setState(() {
+                  agreeTerms = value ?? false;
+                });
+              },
+              title: const Text('이용약관 동의 (필수)'),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('signup-view-terms'),
+            onPressed: isSubmitting
+                ? null
+                : () => _openPolicy(PolicyDocument.terms),
+            child: const Text('내용 보기'),
+          ),
+        ],
+      ),
+
+      Row(
+        children: [
+          Expanded(
+            child: CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: agreePrivacy,
+              onChanged: (value) {
+                setState(() {
+                  agreePrivacy = value ?? false;
+                });
+              },
+              title: const Text('개인정보 처리방침 동의 (필수)'),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('signup-view-privacy'),
+            onPressed: isSubmitting
+                ? null
+                : () => _openPolicy(PolicyDocument.privacy),
+            child: const Text('내용 보기'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 24),
+
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton(
+          onPressed: isSubmitting ? null : signup,
+          child: Text(isSubmitting ? '가입 중...' : '가입하기'),
+        ),
+      ),
+      const SizedBox(height: 24),
+
+      _loginLink(),
+    ],
+  );
 }

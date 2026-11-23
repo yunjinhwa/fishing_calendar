@@ -157,6 +157,8 @@ void main() {
       expect(find.byType(HoldToRevealPasswordField), findsOneWidget);
 
       await tester.pumpWidget(const MaterialApp(home: SignupPage()));
+      await tester.tap(find.widgetWithText(OutlinedButton, '만 14세 이상'));
+      await tester.pumpAndSettle();
       expect(find.byType(HoldToRevealPasswordField), findsNWidgets(2));
     },
   );
