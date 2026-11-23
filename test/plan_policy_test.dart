@@ -367,6 +367,8 @@ void main() {
     await authSession.logout();
 
     await tester.pumpWidget(const MaterialApp(home: SignupPage()));
+    await tester.tap(find.widgetWithText(OutlinedButton, '만 14세 이상'));
+    await tester.pumpAndSettle();
     final fields = find.byType(TextField);
     await tester.enterText(fields.at(0), 'duplicate@example.com');
     await tester.enterText(fields.at(1), 'Password1');

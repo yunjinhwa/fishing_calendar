@@ -104,6 +104,8 @@ void main() {
       ..registrationStarted = Completer<void>();
     auth.configureAuthGateway(gateway);
     await _openPage(tester, const SignupPage(returnToPrevious: true));
+    await tester.tap(find.widgetWithText(OutlinedButton, '만 14세 이상'));
+    await tester.pumpAndSettle();
     await _enterFields(tester, const {
       '이메일': 'existing@example.com',
       '비밀번호': 'Password1',

@@ -146,6 +146,8 @@ void main() {
     };
     final controllers = <String, TextEditingController>{};
     await tester.pumpWidget(const MaterialApp(home: SignupPage()));
+    await tester.tap(find.widgetWithText(OutlinedButton, '만 14세 이상'));
+    await tester.pumpAndSettle();
 
     for (final entry in inputValues.entries) {
       final field = find.widgetWithText(TextField, entry.key);
@@ -215,6 +217,10 @@ void main() {
   testWidgets('signup policy links work with large text', (tester) async {
     _useSmallScreen(tester);
     await tester.pumpWidget(_largeTextApp(home: const SignupPage()));
+    final ageButton = find.widgetWithText(OutlinedButton, '만 14세 이상');
+    await tester.ensureVisible(ageButton);
+    await tester.tap(ageButton);
+    await tester.pumpAndSettle();
     for (final document in PolicyDocument.values) {
       final button = find.byKey(ValueKey('signup-view-${document.name}'));
       await tester.scrollUntilVisible(
