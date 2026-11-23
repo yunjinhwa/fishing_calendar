@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:fishing_build/core/validation/fishing_record_validator.dart';
 import 'package:fishing_build/data/local/app_database.dart';
 import 'package:fishing_build/data/local/local_data_store.dart';
 import 'package:fishing_build/data/models/fishing_record.dart';
@@ -22,6 +23,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'support/test_database.dart';
 
 const _pickerChannel = MethodChannel('plugins.flutter.io/image_picker');
+const _externalGalleryChannel = MethodChannel('fishing_build/external_gallery');
+const _android = TargetPlatformVariant({TargetPlatform.android});
 const _discardTitle = '저장하지 않고 나가시겠습니까?';
 const _saveFailure = '기록을 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.';
 
@@ -36,6 +39,8 @@ void main() {
   Future<String?> Function()? pickerResult;
   List<String>? multiPickerResults;
   MethodCall? lastPickerCall;
+  List<String>? externalGalleryResults;
+  final externalGalleryCalls = <MethodCall>[];
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -54,12 +59,10 @@ void main() {
       'photo-cleanup-widget-',
     );
     galleryOriginal = File('${temporaryDirectory.path}/gallery-original.png');
-    await galleryOriginal.writeAsBytes(
-      base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGMQrs38D8IMMAYAQZIH4XTlNsEAAAAASUVORK5CYII=',
-      ),
-      flush: true,
+    final galleryBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGMQrs38D8IMMAYAQZIH4XTlNsEAAAAASUVORK5CYII=',
     );
+    await galleryOriginal.writeAsBytes(galleryBytes, flush: true);
     backend = _TrackingPhotoFileStore(
       RecordPhotoFileStore(
         supportPathProvider: () async => temporaryDirectory.path,
@@ -71,6 +74,22 @@ void main() {
     pickerResult = null;
     multiPickerResults = null;
     lastPickerCall = null;
+    externalGalleryResults = null;
+    externalGalleryCalls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_externalGalleryChannel, (call) async {
+          externalGalleryCalls.add(call);
+          if (call.method == 'pick') return externalGalleryResults;
+          if (call.method == 'read') {
+            final uri = call.arguments is Map<Object?, Object?>
+                ? (call.arguments as Map<Object?, Object?>)['uri']
+                : null;
+            if (externalGalleryResults?.contains(uri) ?? false) {
+              return galleryBytes;
+            }
+          }
+          throw PlatformException(code: 'unexpected-external-gallery-call');
+        });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_pickerChannel, (call) async {
           if (call.method != 'pickImage' && call.method != 'pickMultiImage') {
@@ -92,6 +111,8 @@ void main() {
   tearDown(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_pickerChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_externalGalleryChannel, null);
     await cleanup.resetForTesting();
     await RecordSyncService.instance.resetForTesting();
     await AppDatabase.instance.close();
@@ -117,18 +138,34 @@ void main() {
   });
 
   testWidgets(
-    'a gallery batch is saved in selection order with unique copies',
+    'an external gallery batch preserves existing photos and saves in order',
     (tester) async {
       final original = await _seedPhotoRecord(tester, photoStore, 'batch-save');
-      multiPickerResults = List.filled(3, galleryOriginal.path);
+      final uris = [
+        'content://gallery/image/3',
+        'content://gallery/image/1',
+        'content://gallery/image/2',
+      ];
+      externalGalleryResults = uris;
       await _openForm(tester, RecordFormPage(editingRecord: original));
       await _startPickingPhoto(tester);
       await _waitForSelection(tester);
 
-      expect(lastPickerCall!.method, 'pickMultiImage');
-      final pickerArguments =
-          lastPickerCall!.arguments as Map<Object?, Object?>;
-      expect(pickerArguments['limit'], 9);
+      expect(lastPickerCall, isNull);
+      expect(externalGalleryCalls.map((call) => call.method), [
+        'pick',
+        'read',
+        'read',
+        'read',
+      ]);
+      expect(externalGalleryCalls.first.arguments, {
+        'limit': 9,
+        'maxBytes': FishingRecordValidator.maxPhotoBytes,
+      });
+      expect(externalGalleryCalls.skip(1).map((call) => call.arguments), [
+        for (final uri in uris)
+          {'uri': uri, 'maxBytes': FishingRecordValidator.maxPhotoBytes},
+      ]);
       expect(find.text('사진 추가 (4/10)'), findsOneWidget);
       final added = backend.stored.skip(1).toList();
       expect(added, hasLength(3));
@@ -149,6 +186,7 @@ void main() {
       expect(galleryOriginal.existsSync(), isTrue);
       expect(tester.takeException(), isNull);
     },
+    variant: _android,
   );
 
   testWidgets(
@@ -191,7 +229,7 @@ void main() {
       await _waitForSelection(tester);
 
       expect(find.text('사진 추가 (10/10)'), findsOneWidget);
-      expect(find.textContaining('10장 제한으로 제외 2장'), findsOneWidget);
+      expect(find.textContaining('10장 제한으로 일부 제외'), findsOneWidget);
       expect(backend.stored, hasLength(10));
       await _discardAndLeave(tester);
       await _flush(tester, cleanup);
@@ -204,51 +242,81 @@ void main() {
     },
   );
 
-  testWidgets('one remaining slot uses the single-photo picker', (
-    tester,
-  ) async {
-    final original = await _seedPhotoRecord(tester, photoStore, 'one-slot');
-    final record = FishingRecord.fromJson({
-      ...original.toJson(),
-      'photos': [
-        for (var i = 0; i < 9; i++)
-          {...original.photos.single.toJson(), 'id': 'existing-$i'},
-      ],
-    });
-    await records.updateRecord(record);
-    await _openForm(tester, RecordFormPage(editingRecord: record));
-    await _startPickingPhoto(tester);
-    await _waitForSelection(tester);
+  testWidgets(
+    'an unavailable gallery falls back to the single-photo picker',
+    (tester) async {
+      final original = await _seedPhotoRecord(tester, photoStore, 'one-slot');
+      final record = FishingRecord.fromJson({
+        ...original.toJson(),
+        'photos': [
+          for (var i = 0; i < 9; i++)
+            {...original.photos.single.toJson(), 'id': 'existing-$i'},
+        ],
+      });
+      await records.updateRecord(record);
+      await _openForm(tester, RecordFormPage(editingRecord: record));
+      await _startPickingPhoto(tester);
+      await _waitForSelection(tester);
 
-    expect(lastPickerCall!.method, 'pickImage');
-    expect(find.text('사진 추가 (10/10)'), findsOneWidget);
-    await _disposeForm(tester, cleanup);
-    expect(tester.takeException(), isNull);
-  });
+      expect(externalGalleryCalls.single.method, 'pick');
+      expect(externalGalleryCalls.single.arguments, {
+        'limit': 1,
+        'maxBytes': FishingRecordValidator.maxPhotoBytes,
+      });
+      expect(lastPickerCall!.method, 'pickImage');
+      expect(find.text('사진 추가 (10/10)'), findsOneWidget);
+      await _disposeForm(tester, cleanup);
+      expect(tester.takeException(), isNull);
+    },
+    variant: _android,
+  );
 
-  testWidgets('cancelling a gallery batch permits a later camera selection', (
-    tester,
-  ) async {
-    multiPickerResults = [];
-    await _openForm(tester, const RecordFormPage());
-    await _startPickingPhoto(tester);
-    await _waitForSelection(tester);
-    expect(find.text('사진 추가 (0/10)'), findsOneWidget);
-    expect(backend.stored, isEmpty);
+  testWidgets(
+    'the system picker action opens the existing multi-photo picker',
+    (tester) async {
+      multiPickerResults = [galleryOriginal.path, galleryOriginal.path];
+      await _openForm(tester, const RecordFormPage());
+      await _startPickingPhoto(tester, source: '시스템 사진 선택기');
+      await _waitForSelection(tester);
 
-    await tester.tap(find.text('사진 추가 (0/10)'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('카메라로 촬영'));
-    await tester.pump();
-    await _waitForSelection(tester);
-    expect(lastPickerCall!.method, 'pickImage');
-    final pickerArguments = lastPickerCall!.arguments as Map<Object?, Object?>;
-    expect(pickerArguments['source'], 0);
-    expect(find.text('사진 추가 (1/10)'), findsOneWidget);
-    await _discardAndLeave(tester);
-    await _flush(tester, cleanup);
-    expect(tester.takeException(), isNull);
-  });
+      expect(externalGalleryCalls, isEmpty);
+      expect(lastPickerCall!.method, 'pickMultiImage');
+      expect(find.text('사진 추가 (2/10)'), findsOneWidget);
+      await _disposeForm(tester, cleanup);
+      expect(tester.takeException(), isNull);
+    },
+    variant: _android,
+  );
+
+  testWidgets(
+    'cancelling the external gallery permits a later camera selection',
+    (tester) async {
+      final original = await _seedPhotoRecord(tester, photoStore, 'cancel');
+      externalGalleryResults = [];
+      await _openForm(tester, RecordFormPage(editingRecord: original));
+      await _startPickingPhoto(tester);
+      await _waitForSelection(tester);
+
+      expect(externalGalleryCalls.single.method, 'pick');
+      expect(lastPickerCall, isNull);
+      expect(find.text('사진 추가 (1/10)'), findsOneWidget);
+      expect(backend.stored, hasLength(1));
+
+      await _startPickingPhoto(tester, source: '카메라로 촬영');
+      await _waitForSelection(tester);
+      expect(externalGalleryCalls.single.method, 'pick');
+      expect(lastPickerCall!.method, 'pickImage');
+      final pickerArguments =
+          lastPickerCall!.arguments as Map<Object?, Object?>;
+      expect(pickerArguments['source'], 0);
+      expect(find.text('사진 추가 (2/10)'), findsOneWidget);
+      await _discardAndLeave(tester);
+      await _flush(tester, cleanup);
+      expect(File(original.photos.single.localPath!).existsSync(), isTrue);
+      expect(tester.takeException(), isNull);
+    },
+    variant: _android,
+  );
 
   testWidgets('removing an unsaved selection reclaims it while editing', (
     tester,
@@ -545,7 +613,10 @@ Future<void> _openForm(WidgetTester tester, RecordFormPage form) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> _startPickingPhoto(WidgetTester tester) async {
+Future<void> _startPickingPhoto(
+  WidgetTester tester, {
+  String source = '앨범에서 선택',
+}) async {
   final addButton = find.widgetWithIcon(
     OutlinedButton,
     Icons.add_photo_alternate_outlined,
@@ -553,7 +624,7 @@ Future<void> _startPickingPhoto(WidgetTester tester) async {
   await tester.ensureVisible(addButton);
   await tester.tap(addButton);
   await tester.pumpAndSettle();
-  await tester.tap(find.text('앨범에서 선택'));
+  await tester.tap(find.text(source));
   await tester.pump();
 }
 
