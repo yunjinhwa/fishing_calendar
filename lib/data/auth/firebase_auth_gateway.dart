@@ -8,6 +8,7 @@ import 'auth_gateway.dart';
 import 'nickname_policy.dart';
 
 class FirebaseAuthGateway implements AuthGateway, NicknameProfileGateway {
+  static const String _recordAccessSettingsPath = 'app_settings/record_access';
   static const String _nicknameClaimsCollection = 'nickname_claims';
   static const String _accountDeletionRequestsCollection =
       'account_deletion_requests';
@@ -341,6 +342,23 @@ class FirebaseAuthGateway implements AuthGateway, NicknameProfileGateway {
     }
 
     try {
+      if (await _isLaunchSyncEnabled()) {
+        if (_auth.currentUser?.uid != uid) {
+          throw const AuthFailure(
+            code: AuthFailureCode.sessionExpired,
+            message: '플랜 정보를 조회할 로그인 계정을 확인할 수 없습니다.',
+          );
+        }
+        return const PlanEntitlementSnapshot(
+          entitlement: PlanEntitlement(
+            plan: UserPlan.paid,
+            status: PlanEntitlementStatus.active,
+            source: 'LAUNCH_ACCESS',
+          ),
+          isFromCache: false,
+        );
+      }
+
       final snapshot = await _firestore
           .collection(_planEntitlementsCollection)
           .doc(uid)
@@ -398,6 +416,21 @@ class FirebaseAuthGateway implements AuthGateway, NicknameProfileGateway {
       throw _mapFirestoreError(error, stackTrace);
     } on Object catch (error, stackTrace) {
       throw _unknownFailure(error, stackTrace);
+    }
+  }
+
+  Future<bool> _isLaunchSyncEnabled() async {
+    try {
+      final snapshot = await _firestore
+          .doc(_recordAccessSettingsPath)
+          .get(const firestore.GetOptions(source: firestore.Source.server));
+      return !snapshot.metadata.hasPendingWrites &&
+          !snapshot.metadata.isFromCache &&
+          snapshot.data()?['allMembersSyncEnabled'] == true;
+    } on FirebaseException catch (error) {
+      // A new app can still read entitlements under the previous server rules.
+      if (error.code == 'permission-denied') return false;
+      rethrow;
     }
   }
 

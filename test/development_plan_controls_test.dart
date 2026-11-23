@@ -6,6 +6,7 @@ import 'package:fishing_build/data/repositories/outbox_repository.dart';
 import 'package:fishing_build/data/services/record_sync_service.dart';
 import 'package:fishing_build/presentation/my_page/my_page.dart';
 import 'package:fishing_build/presentation/plan/plan_page.dart';
+import 'package:fishing_build/presentation/sync/sync_conflict_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -69,28 +70,25 @@ void main() {
     expect(authSession.isFree, isTrue);
   });
 
-  testWidgets(
-    'MyPage keeps sync access and opens plans without debug controls',
-    (tester) async {
-      await authSession.setSessionForTesting(
-        plan: UserPlan.paid,
-        email: 'mypage@example.com',
-      );
+  testWidgets('MyPage hides plan and offline menus while keeping sync access', (
+    tester,
+  ) async {
+    await authSession.setSessionForTesting(
+      plan: UserPlan.paid,
+      email: 'mypage@example.com',
+    );
 
-      await tester.pumpWidget(const MaterialApp(home: MyPage()));
+    await tester.pumpWidget(const MaterialApp(home: MyPage()));
 
-      expect(find.text('동기화/충돌 관리'), findsOneWidget);
-      await tester.tap(find.text('플랜 정보'));
-      await tester.pumpAndSettle();
+    expect(find.text('mypage@example.com'), findsOneWidget);
+    expect(find.text('플랜 정보'), findsNothing);
+    expect(find.text('유료 회원'), findsNothing);
+    expect(find.textContaining('오프라인 이용'), findsNothing);
+    await tester.tap(find.text('동기화/충돌 관리'));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(PlanPage), findsOneWidget);
-      expect(find.text('유료 회원'), findsOneWidget);
-      await tester.drag(find.byType(ListView), const Offset(0, -1200));
-      await tester.pumpAndSettle();
-      expect(find.text('유료 플랜으로 변경'), findsNothing);
-      expect(find.text('무료 플랜으로 변경'), findsNothing);
-    },
-  );
+    expect(find.byType(SyncConflictPage), findsOneWidget);
+  });
 
   testWidgets('server refresh remains available with development opt-in', (
     tester,

@@ -894,37 +894,90 @@ void main() {
     expect(find.byType(OutboxPage), findsOneWidget);
   });
 
-  testWidgets('completed outbox items cannot be cleared during first sync', (
-    tester,
-  ) async {
-    await _signInAsPaid(authSession, 'clear-race@example.com');
-    await RecordMutationService.instance.addRecord(_record('clear-race'));
+  testWidgets(
+    'outbox lists only failures and keeps stored queue and conflict history',
+    (tester) async {
+      await _signInAsPaid(authSession, 'outbox-failures@example.com');
+      final now = DateTime(2026, 11, 23);
+      for (final status in OutboxStatus.values) {
+        await outboxRepository.addItem(
+          OutboxItem(
+            id: status.name,
+            recordId: status.name,
+            operationType: OutboxOperationType.update,
+            status: status,
+            createdAt: now,
+            errorMessage: status == OutboxStatus.failed ? 'offline' : null,
+          ),
+        );
+      }
+      await conflictRepository.recordDetectedConflict(
+        ConflictItem(
+          id: 'resolved-adoption',
+          ownerKey: authSession.dataOwnerKey,
+          recordId: 'succeeded',
+          outboxId: 'succeeded',
+          localOperationType: OutboxOperationType.update,
+          baseVersionNo: 1,
+          remoteVersionNo: 2,
+          remoteStatus: RemoteRecordStatus.active,
+          localRecord: null,
+          remoteRecord: _record('succeeded'),
+          occurredAt: now,
+          status: ConflictStatus.resolved,
+          resolutionType: ConflictResolutionType.useTheirs,
+          resolvedAt: now,
+        ),
+      );
+
+      await tester.pumpWidget(const MaterialApp(home: OutboxPage()));
+      for (final status in OutboxStatus.values) {
+        expect(
+          find.text('기록 ID: ${status.name}'),
+          status == OutboxStatus.failed ? findsOneWidget : findsNothing,
+        );
+      }
+      expect(find.text('실패 사유: offline'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, '재시도'), findsOneWidget);
+      expect(find.byTooltip('완료 항목 정리'), findsNothing);
+
+      await outboxRepository.reloadOwner(authSession.dataOwnerKey);
+      await conflictRepository.reloadOwner(authSession.dataOwnerKey);
+      expect(
+        outboxRepository.getAllItems(),
+        hasLength(OutboxStatus.values.length),
+      );
+      expect(
+        conflictRepository.findById('resolved-adoption')?.status,
+        ConflictStatus.resolved,
+      );
+    },
+  );
+
+  testWidgets('a successful retry leaves the failure list', (tester) async {
+    await _signInAsPaid(authSession, 'outbox-retry@example.com');
+    await RecordMutationService.instance.addRecord(_record('retry-record'));
     await syncService.syncNow();
     final item = outboxRepository.getAllItems().single;
     await outboxRepository.updateItemStatus(
       itemId: item.id,
-      status: OutboxStatus.succeeded,
+      status: OutboxStatus.failed,
+      errorMessage: 'offline',
     );
-
-    final fetchStarted = Completer<void>();
-    final releaseFetch = Completer<void>();
-    final gateway = FakeRecordSyncGateway()
-      ..fetchStarted = fetchStarted
-      ..fetchGate = releaseFetch.future;
-    syncService.configureGateway(gateway);
-    final runningSync = syncService.syncNow();
-    await fetchStarted.future;
+    syncService.configureGateway(FakeRecordSyncGateway());
 
     await tester.pumpWidget(const MaterialApp(home: OutboxPage()));
-    await tester.pump();
-    final clearButton = tester
-        .widgetList<IconButton>(find.byType(IconButton))
-        .singleWhere((button) => button.tooltip == '완료 항목 정리');
-    expect(clearButton.onPressed, isNull);
+    expect(find.text('기록 ID: retry-record'), findsOneWidget);
+    await tester.tap(find.widgetWithText(OutlinedButton, '재시도'));
+    await tester.pumpAndSettle();
 
-    releaseFetch.complete();
-    await runningSync;
-    await tester.pump();
+    expect(find.text('기록 ID: retry-record'), findsNothing);
+    expect(find.text('실패한 업로드가 없습니다.'), findsOneWidget);
+    await outboxRepository.reloadOwner(authSession.dataOwnerKey);
+    expect(
+      outboxRepository.getAllItems().single.status,
+      OutboxStatus.succeeded,
+    );
   });
 }
 

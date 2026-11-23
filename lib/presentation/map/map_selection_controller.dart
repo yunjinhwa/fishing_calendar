@@ -265,7 +265,7 @@ class MapSelectionController extends ChangeNotifier {
     CurrentLocationFailure.serviceDisabled => '기기의 위치 서비스를 켠 뒤 다시 시도해 주세요.',
     CurrentLocationFailure.timedOut => '현재 위치를 확인하는 데 시간이 걸립니다. 다시 시도해 주세요.',
     CurrentLocationFailure.unavailable =>
-      '현재 위치를 가져오지 못했습니다. 지도에서 위치를 선택하거나 직접 입력해 주세요.',
+      '현재 위치를 가져오지 못했습니다. 지도에서 위치를 선택하거나 검색해 주세요.',
   };
 
   @override

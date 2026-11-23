@@ -6,7 +6,6 @@ import '../../core/theme/app_theme.dart';
 import '../../data/auth/auth_gateway.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
-import '../../data/services/network_status_service.dart';
 import '../app_info/app_info_page.dart';
 import '../auth/account_management_dialogs.dart';
 import '../auth/auth_access_guard.dart';
@@ -14,17 +13,13 @@ import '../auth/auth_error_message.dart';
 import '../auth/login_choice_page.dart';
 import '../common/top_card_notification.dart';
 import '../legal/policy_document_page.dart';
-import '../offline/offline_mode_page.dart';
 import '../personal_best/personal_best_page.dart';
-import '../plan/plan_page.dart';
 import '../profile/profile_settings_page.dart';
 import '../sync/outbox_page.dart';
 import '../sync/sync_conflict_page.dart';
 
 class MyPage extends StatelessWidget {
-  final NetworkStatusService? networkStatusService;
-
-  const MyPage({super.key, this.networkStatusService});
+  const MyPage({super.key});
 
   Future<void> _showPasswordSetupDialog(BuildContext context) =>
       showMemberPasswordSetupDialog(context);
@@ -194,6 +189,9 @@ class MyPage extends StatelessWidget {
         if (authSession.isAccountDeletedRemotely) {
           return _buildRemotelyDeletedPage(context);
         }
+        final canOpenSync =
+            authSession.canUseCloudSync ||
+            (authSession.isPlanMigrationPending && authSession.canUseOutbox);
         return Scaffold(
           appBar: AppBar(title: const Text('내정보')),
           body: SafeArea(
@@ -203,7 +201,6 @@ class MyPage extends StatelessWidget {
                 _ProfileHeader(
                   name: authSession.displayName,
                   email: authSession.email,
-                  planLabel: authSession.planLabel,
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -248,31 +245,6 @@ class MyPage extends StatelessWidget {
                                     ),
                                   );
                                 },
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      Card(
-                        child: ListTile(
-                          leading: const Icon(Icons.workspace_premium_outlined),
-                          title: const Text('플랜 정보'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(authSession.planLabel),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.chevron_right),
-                            ],
-                          ),
-                          onTap: () {
-                            unawaited(
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const PlanPage(),
-                                ),
-                              ),
-                            );
-                          },
                         ),
                       ),
                       if (authSession.requiresPasswordSetup) ...[
@@ -348,58 +320,30 @@ class MyPage extends StatelessWidget {
                                 ? '충돌 알림과 동기화 상태를 확인합니다.'
                                 : authSession.isPlanMigrationPending
                                 ? '기존 기록을 업로드한 뒤 사용할 수 있습니다.'
-                                : '유료 플랜에서 사용할 수 있습니다.',
+                                : '현재 계정에서 동기화를 사용할 수 없습니다.',
                           ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () async {
-                            final allowed = await requirePaidAccess(
-                              context,
-                              message: '동기화와 충돌 관리는 유료 플랜에서 사용할 수 있습니다.',
-                              migrationDestinationBuilder: (_) =>
-                                  const OutboxPage(),
-                            );
+                          trailing: canOpenSync
+                              ? const Icon(Icons.chevron_right)
+                              : null,
+                          onTap: canOpenSync
+                              ? () async {
+                                  final allowed = await requirePaidAccess(
+                                    context,
+                                    migrationDestinationBuilder: (_) =>
+                                        const OutboxPage(),
+                                  );
+                                  if (!allowed || !context.mounted) return;
 
-                            if (!allowed || !context.mounted) {
-                              return;
-                            }
-
-                            unawaited(
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const SyncConflictPage(),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      Card(
-                        child: ListTile(
-                          leading: Icon(
-                            authSession.isPaid
-                                ? Icons.cloud_queue_outlined
-                                : Icons.phone_android_outlined,
-                          ),
-                          title: Text('${authSession.planLabel} 오프라인 이용'),
-                          subtitle: Text(
-                            authSession.isPaid
-                                ? '캐시된 기록과 업로드 대기열을 사용합니다.'
-                                : '기기에 저장된 기록을 작성하고 조회합니다.',
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () {
-                            unawaited(
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => OfflineModePage(
-                                    networkStatusService: networkStatusService,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+                                  unawaited(
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const SyncConflictPage(),
+                                      ),
+                                    ),
+                                  );
+                                }
+                              : null,
                         ),
                       ),
                       const SizedBox(height: 20),
@@ -470,19 +414,15 @@ class MyPage extends StatelessWidget {
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({
-    required this.name,
-    required this.email,
-    required this.planLabel,
-  });
+  const _ProfileHeader({required this.name, required this.email});
 
   final String name;
   final String? email;
-  final String planLabel;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final profileEmail = email;
     return ColoredBox(
       color: Colors.white,
       child: Padding(
@@ -507,11 +447,13 @@ class _ProfileHeader extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    email != null && email != name ? email! : planLabel,
-                    style: text.bodyMedium?.copyWith(color: AppTheme.ink),
-                  ),
+                  if (profileEmail != null && profileEmail != name) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      profileEmail,
+                      style: text.bodyMedium?.copyWith(color: AppTheme.ink),
+                    ),
+                  ],
                 ],
               ),
             ),
