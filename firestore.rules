@@ -415,6 +415,23 @@ service cloud.firestore {
       allow list, create, update: if false;
     }
 
+    // Web requests are an intake queue for administrators. They do not start
+    // the in-app deletion flow or grant access to delete account data.
+    match /web_account_deletion_requests/{uid} {
+      allow get: if ownsUserData(uid);
+      allow create: if ownsUserData(uid)
+        && recentlyAuthenticated()
+        && request.auth.token.firebase.sign_in_provider == 'password'
+        && request.resource.data.keys().hasOnly([
+          'schemaVersion', 'status', 'requestedAt'
+        ])
+        && request.resource.data.schemaVersion is int
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.status == 'REQUESTED'
+        && request.resource.data.requestedAt == request.time;
+      allow list, update, delete: if false;
+    }
+
     // This tombstone contains no profile data. It is intentionally immutable
     // and remains after Firebase Auth deletion so an interrupted cleanup cannot
     // restore cloud access on another signed-in device.

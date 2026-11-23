@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta name="color-scheme" content="light">
+    <title>계정 삭제 요청 · 낚시 캘린더</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/account-deletion/styles.css">
+    <script type="module" src="/account-deletion/page.mjs"></script>
+  </head>
+  <body class="account-deletion">
+    <main class="card" aria-labelledby="page-title">
+      <p class="brand">낚시 캘린더</p>
+      <h1 id="page-title">계정 삭제 요청</h1>
+      <p class="intro">가입한 이메일과 비밀번호로 본인 확인 후 요청을 제출하세요. 운영자가 요청을 확인한 뒤 계정과 서버 데이터를 삭제합니다.</p>
+
+      <section class="deletion-scope" aria-labelledby="scope-title">
+        <h2 id="scope-title">삭제되는 데이터</h2>
+        <p>계정과 프로필, 서버에 저장된 출조 기록, 동기화 이력, 플랜 정보가 삭제됩니다.</p>
+        <p>앱 내부 기기 데이터는 해당 기기가 삭제 상태를 확인하면 정리됩니다. 갤러리 원본과 다른 앱으로 공유한 사본은 각 기기나 앱에서 관리할 수 있습니다.</p>
+        <p>삭제된 계정의 데이터가 다시 생성되는 것을 막기 위해 계정 식별자와 삭제 상태·시각을 담은 최소 표식이 보관됩니다.</p>
+      </section>
+
+      <p id="status" class="status" role="status">접수 서비스에 연결하고 있습니다.</p>
+      <p id="error" class="error-banner" role="alert" hidden></p>
+      <button id="retry-connection" class="secondary" type="button" hidden>다시 연결하기</button>
+
+      <form id="deletion-form" method="post">
+        <fieldset id="request-fields" disabled>
+          <legend class="sr-only">본인 확인과 삭제 요청</legend>
+          <label for="email">가입 이메일</label>
+          <input id="email" type="email" autocomplete="username" maxlength="320" required>
+
+          <label for="password">현재 비밀번호</label>
+          <input id="password" type="password" autocomplete="current-password" required>
+
+          <button id="send-reset-email" class="secondary reset-button" type="button">비밀번호 재설정 메일 보내기</button>
+
+          <label class="request-confirmation" for="confirmation">
+            <input id="confirmation" type="checkbox" required>
+            <span>계정과 관련 데이터의 삭제를 요청합니다.</span>
+          </label>
+          <button id="submit" class="primary" type="submit">본인 확인 및 삭제 요청</button>
+        </fieldset>
+      </form>
+
+      <section id="success" class="success" aria-labelledby="success-title" hidden>
+        <h2 id="success-title" tabindex="-1"></h2>
+        <p>운영자가 접수 내역을 확인한 뒤 삭제를 처리합니다.</p>
+      </section>
+      <noscript><p class="error-banner">요청을 제출하려면 브라우저에서 자바스크립트를 허용해 주세요.</p></noscript>
+    </main>
+  </body>
+</html>

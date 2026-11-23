@@ -219,6 +219,8 @@ flutter run
 
 저장소에는 개발 프로젝트의 Firebase 구성이 포함되어 있습니다. 다른 환경에서는 본인 Firebase 프로젝트로 연결하고 Email/Password 인증·Firestore·보안 규칙·인덱스를 설정합니다.
 
+앱 외부의 회원 탈퇴 요청은 Firebase Hosting의 공개 양식에서 접수합니다. 기존 계정으로 본인 확인을 거친 요청을 운영자가 처리합니다. [웹 접수 및 운영 절차](docs/web_account_deletion_request.md)
+
 ```bash
 flutter run --dart-define=FIREBASE_AUTH_ENABLED=true
 ```
