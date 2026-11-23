@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/validation/fishing_record_validator.dart';
@@ -15,6 +14,7 @@ import '../../data/models/record_cache_policy.dart';
 import '../../data/models/record_edit_snapshot.dart';
 import '../../data/photos/record_photo_file_store.dart';
 import '../../data/photos/record_photo_file_store_utils.dart';
+import '../../data/photos/record_photo_picker.dart';
 import '../../data/repositories/auth_session_repository.dart';
 import '../../data/repositories/fishing_record_repository.dart';
 import '../../data/services/network_status_service.dart';
@@ -110,7 +110,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
   final memoController = TextEditingController();
   final customGenreController = TextEditingController();
 
-  final imagePicker = ImagePicker();
+  final _photoPicker = RecordPhotoPicker();
   final photos = <RecordPhoto>[];
   RecordPhotoDraftLease? _photoDraft;
   VoidCallback? _releaseCacheRecord;
@@ -1306,26 +1306,38 @@ class _RecordFormPageState extends State<RecordFormPage> {
     }
     _isChoosingPhotoSource = true;
     try {
-      final source = await showModalBottomSheet<ImageSource>(
+      final source = await showModalBottomSheet<RecordPhotoSource>(
         context: context,
         builder: (context) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('앨범에서 선택'),
-                onTap: () => Navigator.of(context).pop(ImageSource.gallery),
-              ),
-              if (kIsWeb ||
-                  defaultTargetPlatform == TargetPlatform.android ||
-                  defaultTargetPlatform == TargetPlatform.iOS)
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 ListTile(
-                  leading: const Icon(Icons.photo_camera_outlined),
-                  title: const Text('카메라로 촬영'),
-                  onTap: () => Navigator.of(context).pop(ImageSource.camera),
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: const Text('앨범에서 선택'),
+                  onTap: () =>
+                      Navigator.of(context).pop(RecordPhotoSource.gallery),
                 ),
-            ],
+                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+                  ListTile(
+                    leading: const Icon(Icons.collections_outlined),
+                    title: const Text('시스템 사진 선택기'),
+                    onTap: () => Navigator.of(
+                      context,
+                    ).pop(RecordPhotoSource.systemPicker),
+                  ),
+                if (kIsWeb ||
+                    defaultTargetPlatform == TargetPlatform.android ||
+                    defaultTargetPlatform == TargetPlatform.iOS)
+                  ListTile(
+                    leading: const Icon(Icons.photo_camera_outlined),
+                    title: const Text('카메라로 촬영'),
+                    onTap: () =>
+                        Navigator.of(context).pop(RecordPhotoSource.camera),
+                  ),
+              ],
+            ),
           ),
         ),
       );
@@ -1339,14 +1351,11 @@ class _RecordFormPageState extends State<RecordFormPage> {
       });
       final remaining = FishingRecordValidator.maxPhotoCount - photos.length;
       if (remaining <= 0) return;
-      final List<XFile> picked;
-      // image_picker requires a multi-selection limit of at least two.
-      if (source == ImageSource.gallery && remaining > 1) {
-        picked = await imagePicker.pickMultiImage(limit: remaining);
-      } else {
-        final single = await imagePicker.pickImage(source: source);
-        picked = single == null ? <XFile>[] : [single];
-      }
+      final picked = await _photoPicker.pick(
+        source: source,
+        limit: remaining,
+        maxBytes: FishingRecordValidator.maxPhotoBytes,
+      );
       if (!mounted || picked.isEmpty) return;
       var added = 0;
       var rejected = 0;
@@ -1366,18 +1375,16 @@ class _RecordFormPageState extends State<RecordFormPage> {
           break;
         }
         try {
-          final selected = picked[index];
-          final length = await selected.length();
+          final bytes = await picked[index]();
           if (!mounted) return;
-          if (length < 1 || length > FishingRecordValidator.maxPhotoBytes) {
+          if (bytes.isEmpty ||
+              bytes.length > FishingRecordValidator.maxPhotoBytes) {
             rejected++;
-            firstIssue ??= length < 1
+            firstIssue ??= bytes.isEmpty
                 ? '비어 있는 사진 파일은 첨부할 수 없습니다.'
                 : '사진은 10 MiB 이하 파일만 첨부할 수 있습니다.';
             continue;
           }
-          final bytes = await selected.readAsBytes();
-          if (!mounted) return;
           if (!_isEditingSessionCurrent) {
             showMessage('로그인 계정이 변경되어 사진 첨부를 중단했습니다.');
             return;
@@ -1437,7 +1444,7 @@ class _RecordFormPageState extends State<RecordFormPage> {
           final issues = [
             if (rejected > 0) '형식·크기 제한으로 제외 $rejected장',
             if (failed > 0) '불러오기·저장 실패 $failed장',
-            if (overflow > 0) '10장 제한으로 제외 $overflow장',
+            if (overflow > 0) '10장 제한으로 일부 제외',
           ];
           showMessage('사진 $added장을 추가했습니다. ${issues.join(' · ')}');
         }
